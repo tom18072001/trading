@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -lh /c/Users/admin/Documents/claude/Trading/*.db*)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(curl -s http://localhost:8000/api/backtest/strategies)",
+      "Bash(python -c \":*)",
+      "Bash(npx tsc:*)",
+      "Bash(curl -s http://localhost:8000/api/risk/overview)",
+      "Bash(curl -s \"http://localhost:8000/api/risk/var?symbols=FPT,VNM,HPG&confidence=0.95&horizon_days=3\")",
+      "Bash(python3.11 -m json.tool)",
+      "Bash(curl -s \"http://localhost:8000/api/risk/correlation?symbols=FPT,VNM,HPG,TCB&lookback_days=60\")",
+      "Bash(curl -s \"http://localhost:8000/api/risk/drawdown/FPT?lookback_days=252\")",
+      "Bash(python3.11 -c \":*)",
+      "Bash(python -c ':*)",
+      "Bash(powershell -ExecutionPolicy Bypass -File create_desktop_shortcut.ps1)",
+      "PowerShell(try { $r = Invoke-RestMethod -Uri \"http://localhost:8000/api/insight/daily\" -TimeoutSec 60; $r | ConvertTo-Json -Depth 4 | Select-Object -First 1; \"----DATE----\"; $r.date; \"----PICKS COUNT----\"; \\($r.picks | Measure-Object\\).Count; \"----MARKET CTX----\"; $r.market_context | ConvertTo-Json; \"----FRESHNESS----\"; $r.freshness | ConvertTo-Json; \"----AGENT----\"; if\\($r.agent_report\\){\"agent present is_valid=$\\($r.agent_report.is_valid\\)\"}else{\"no agent_report\"} } catch { \"ERROR: $_\" })",
+      "PowerShell(try { $s = Invoke-RestMethod -Uri \"http://localhost:8000/api/insight/refresh/status\" -TimeoutSec 15; $s | ConvertTo-Json -Depth 5 } catch { \"ERROR: $_\" })"
+    ]
+  }
+}

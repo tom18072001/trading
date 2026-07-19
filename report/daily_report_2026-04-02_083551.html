@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Trading Report — 2026-04-02</title>
+<style>
+@page { size: A4 landscape; margin: 12mm; }
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:#0f172a;color:#e2e8f0;padding:20px}
+.container{max-width:1100px;margin:0 auto}
+h1{font-size:28px;color:#f8fafc;margin-bottom:4px}
+.subtitle{color:#94a3b8;font-size:14px;margin-bottom:24px}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px}
+.card{background:#1e293b;border-radius:12px;padding:16px;text-align:center}
+.card .num{font-size:28px;font-weight:700}
+.card .label{font-size:12px;color:#94a3b8;margin-top:4px}
+.green{color:#22c55e}.red{color:#ef4444}.yellow{color:#eab308}
+.section{background:#1e293b;border-radius:12px;padding:20px;margin-bottom:20px}
+.section h2{font-size:18px;margin-bottom:14px;color:#f8fafc;display:flex;align-items:center;gap:8px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:8px 10px;color:#94a3b8;font-weight:600;border-bottom:1px solid #334155;font-size:11px;text-transform:uppercase}
+td{padding:8px 10px;border-bottom:1px solid #1e293b}
+tr:hover{background:#334155}
+.sym{font-weight:700;color:#f8fafc;font-size:14px}
+.reason{font-size:11px;color:#cbd5e1;max-width:250px}
+.pred{font-weight:600;color:#38bdf8}
+.news-item{margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #334155}
+.news-item:last-child{border-bottom:none}
+.news-title{font-weight:600;color:#f8fafc;font-size:13px}
+.news-desc{font-size:12px;color:#94a3b8;margin-top:2px}
+.news-sym{font-size:11px;color:#38bdf8}
+.suggest{background:#0f172a;border-radius:8px;padding:12px 16px;margin-bottom:8px;font-size:13px;display:flex;align-items:center;gap:10px}
+.suggest .tag{padding:2px 10px;border-radius:6px;font-weight:700;font-size:12px;white-space:nowrap}
+.tag-buy{background:#22c55e;color:#fff}
+.tag-sell{background:#ef4444;color:#fff}
+.tag-watch{background:#eab308;color:#1e293b}
+.footer{text-align:center;color:#64748b;font-size:11px;margin-top:20px;padding:10px}
+.badge{padding:2px 8px;border-radius:10px;font-size:12px;font-weight:600;display:inline-block}
+.b-bullish{background:#22c55e;color:#fff}
+.b-mbullish{background:#86efac;color:#1e293b}
+.b-neutral{background:#94a3b8;color:#1e293b}
+.b-mbearish{background:#fca5a5;color:#1e293b}
+.b-bearish{background:#ef4444;color:#fff}
+.b-vbearish{background:#991b1b;color:#fff}
+/* CSS Bar Chart */
+.bar-chart{display:flex;flex-direction:column;gap:6px}
+.bar-row{display:flex;align-items:center;gap:8px;font-size:12px}
+.bar-label{width:160px;text-align:right;color:#e2e8f0;flex-shrink:0}
+.bar-track{flex:1;height:22px;background:#334155;border-radius:4px;position:relative;overflow:visible;display:flex;align-items:center}
+.bar-fill{height:100%;border-radius:4px;min-width:2px}
+.bar-fill-pos{background:#22c55e}
+.bar-fill-neg{background:#ef4444}
+.bar-val{font-size:11px;color:#94a3b8;width:55px;flex-shrink:0;text-align:left;padding-left:6px}
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Daily Trading Report</h1>
+<div class="subtitle">Thursday, 02 April 2026 &bull; HOSE / HNX / UPCOM &bull; Top 20 symbols</div>
+
+<!-- SUMMARY CARDS -->
+<div class="cards">
+  <div class="card"><div class="num green">6</div><div class="label">BUY Signals</div></div>
+  <div class="card"><div class="num red">5</div><div class="label">SELL / AVOID</div></div>
+  <div class="card"><div class="num yellow">9</div><div class="label">WATCH</div></div>
+</div>
+
+<!-- SECTOR CHART (Pure CSS — renders in PDF + email) -->
+<div class="section">
+  <h2>Sector Performance (1-Day Avg %)</h2>
+  <div class="bar-chart">
+    <div class="bar-row"><span class="bar-label">Steel & Materials</span><div class="bar-track"><div class="bar-fill bar-fill-pos" style="width:55%"></div></div><span class="bar-val">+1.51%</span></div>
+    <div class="bar-row"><span class="bar-label">Oil & Gas</span><div class="bar-track"><div class="bar-fill bar-fill-pos" style="width:24%"></div></div><span class="bar-val">+0.65%</span></div>
+    <div class="bar-row"><span class="bar-label">Food & Beverage</span><div class="bar-track"><div class="bar-fill bar-fill-pos" style="width:11%"></div></div><span class="bar-val">+0.29%</span></div>
+    <div class="bar-row"><span class="bar-label">Power & Energy</span><div class="bar-track"><div class="bar-fill bar-fill-pos" style="width:0%"></div></div><span class="bar-val">+0.00%</span></div>
+    <div class="bar-row"><span class="bar-label">Retail</span><div class="bar-track"><div class="bar-fill bar-fill-neg" style="width:9%"></div></div><span class="bar-val">-0.25%</span></div>
+    <div class="bar-row"><span class="bar-label">Banking</span><div class="bar-track"><div class="bar-fill bar-fill-neg" style="width:25%"></div></div><span class="bar-val">-0.69%</span></div>
+    <div class="bar-row"><span class="bar-label">Real Estate</span><div class="bar-track"><div class="bar-fill bar-fill-neg" style="width:66%"></div></div><span class="bar-val">-1.83%</span></div>
+    <div class="bar-row"><span class="bar-label">Other</span><div class="bar-track"><div class="bar-fill bar-fill-neg" style="width:73%"></div></div><span class="bar-val">-2.02%</span></div>
+    <div class="bar-row"><span class="bar-label">Technology</span><div class="bar-track"><div class="bar-fill bar-fill-neg" style="width:100%"></div></div><span class="bar-val">-2.76%</span></div>
+  </div>
+</div>
+
+<!-- BUY TABLE -->
+<div class="section">
+  <h2><span style="color:#22c55e">&#9650;</span> Buy Recommendations</h2>
+  <table>
+    <tr><th>#</th><th>Symbol</th><th>Sector</th><th>Price</th><th>1D</th><th>5D</th><th>Predicted (3-5d)</th><th>Outlook</th><th>Why</th></tr>
+    <tr><td>1</td><td class="sym">MSN</td><td>Food & Beverage</td><td>75</td><td class="green">+2.05%</td><td class="green">+5.65%</td><td class="pred">100 – 100</td><td><span class="badge b-mbullish">Mildly Bullish</span></td><td class="reason">Up 2.0% today. +5.6% in 5d. VN30 blue-chip</td></tr>
+    <tr><td>2</td><td class="sym">VHM</td><td>Real Estate</td><td>103</td><td class="green">+0.00%</td><td class="green">+5.10%</td><td class="pred">100 – 100</td><td><span class="badge b-mbullish">Mildly Bullish</span></td><td class="reason">+5.1% in 5d. VN30 blue-chip</td></tr>
+    <tr><td>3</td><td class="sym">BSR</td><td>Oil & Gas</td><td>29</td><td class="green">+5.62%</td><td class="green">+11.69%</td><td class="pred">N/A – N/A</td><td><span class="badge b-bullish">Bullish</span></td><td class="reason">Up 5.6% today. +11.7% in 5d. -12.6% in 20d</td></tr>
+    <tr><td>4</td><td class="sym">ACB</td><td>Banking</td><td>24</td><td class="red">-0.21%</td><td class="green">+5.56%</td><td class="pred">N/A – N/A</td><td><span class="badge b-neutral">Neutral</span></td><td class="reason">+5.6% in 5d. VN30 blue-chip</td></tr>
+    <tr><td>5</td><td class="sym">HPG</td><td>Steel & Materials</td><td>27</td><td class="green">+1.51%</td><td class="green">+5.49%</td><td class="pred">N/A – N/A</td><td><span class="badge b-mbullish">Mildly Bullish</span></td><td class="reason">+5.5% in 5d. VN30 blue-chip</td></tr>
+    <tr><td>6</td><td class="sym">PVC</td><td>Oil & Gas</td><td>18</td><td class="green">+0.00%</td><td class="green">+5.75%</td><td class="pred">N/A – N/A</td><td><span class="badge b-mbullish">Mildly Bullish</span></td><td class="reason">+5.7% in 5d</td></tr>
+  </table>
+</div>
+
+<!-- SELL TABLE -->
+<div class="section">
+  <h2><span style="color:#ef4444">&#9660;</span> Sell / Avoid</h2>
+  <table>
+    <tr><th>#</th><th>Symbol</th><th>Sector</th><th>Price</th><th>1D</th><th>5D</th><th>Predicted (3-5d)</th><th>Outlook</th><th>Why</th></tr>
+    <tr><td>1</td><td class="sym">FPT</td><td>Technology</td><td>74</td><td class="red">-2.76%</td><td class="green">+1.23%</td><td class="pred">100 – 100</td><td><span class="badge b-mbearish">Mildly Bearish</span></td><td class="reason">Down 2.8% today. -17.4% in 20d</td></tr>
+    <tr><td>2</td><td class="sym">PLX</td><td>Oil & Gas</td><td>41</td><td class="red">-2.01%</td><td class="green">+0.98%</td><td class="pred">N/A – N/A</td><td><span class="badge b-mbearish">Mildly Bearish</span></td><td class="reason">Down 2.0% today. -33.0% in 20d</td></tr>
+    <tr><td>3</td><td class="sym">VIC</td><td>Real Estate</td><td>130</td><td class="red">-2.34%</td><td class="green">+3.11%</td><td class="pred">100 – 100</td><td><span class="badge b-mbearish">Mildly Bearish</span></td><td class="reason">Down 2.3% today. -22.5% in 20d</td></tr>
+    <tr><td>4</td><td class="sym">GAS</td><td>Oil & Gas</td><td>81</td><td class="red">-1.58%</td><td class="green">+0.37%</td><td class="pred">100 – 100</td><td><span class="badge b-mbearish">Mildly Bearish</span></td><td class="reason">-30.0% in 20d</td></tr>
+    <tr><td>5</td><td class="sym">PVT</td><td>Other</td><td>22</td><td class="red">-2.02%</td><td class="green">+2.82%</td><td class="pred">N/A – N/A</td><td><span class="badge b-mbearish">Mildly Bearish</span></td><td class="reason">Down 2.0% today. -15.0% in 20d</td></tr>
+  </table>
+</div>
+
+<!-- WATCH TABLE -->
+<div class="section">
+  <h2><span style="color:#eab308">&#9679;</span> Watch List</h2>
+  <table>
+    <tr><th>#</th><th>Symbol</th><th>Sector</th><th>Price</th><th>1D</th><th>5D</th><th>Predicted (3-5d)</th><th>Outlook</th></tr>
+    <tr><td>1</td><td class="sym">NVL</td><td>Real Estate</td><td>14</td><td class="red">-3.15%</td><td class="green">+10.36%</td><td class="pred">N/A – N/A</td><td><span class="badge b-neutral">Neutral</span></td></tr>
+    <tr><td>2</td><td class="sym">OIL</td><td>Oil & Gas</td><td>16</td><td class="green">+1.92%</td><td class="green">+7.43%</td><td class="pred">N/A – N/A</td><td><span class="badge b-mbullish">Mildly Bullish</span></td></tr>
+    <tr><td>3</td><td class="sym">VNM</td><td>Food & Beverage</td><td>61</td><td class="red">-1.46%</td><td class="red">-0.33%</td><td class="pred">100 – 100</td><td><span class="badge b-mbearish">Mildly Bearish</span></td></tr>
+    <tr><td>4</td><td class="sym">VCB</td><td>Banking</td><td>58</td><td class="red">-1.36%</td><td class="green">+0.69%</td><td class="pred">100 – 100</td><td><span class="badge b-mbearish">Mildly Bearish</span></td></tr>
+    <tr><td>5</td><td class="sym">PVD</td><td>Oil & Gas</td><td>36</td><td class="green">+1.26%</td><td class="green">+5.54%</td><td class="pred">N/A – N/A</td><td><span class="badge b-mbullish">Mildly Bullish</span></td></tr>
+    <tr><td>6</td><td class="sym">TCB</td><td>Banking</td><td>30</td><td class="red">-0.49%</td><td class="green">+5.54%</td><td class="pred">N/A – N/A</td><td><span class="badge b-neutral">Neutral</span></td></tr>
+    <tr><td>7</td><td class="sym">MWG</td><td>Retail</td><td>81</td><td class="red">-0.25%</td><td class="green">+8.89%</td><td class="pred">100 – 100</td><td><span class="badge b-mbullish">Mildly Bullish</span></td></tr>
+    <tr><td>8</td><td class="sym">PVB</td><td>Oil & Gas</td><td>30</td><td class="green">+0.00%</td><td class="green">+2.07%</td><td class="pred">N/A – N/A</td><td><span class="badge b-neutral">Neutral</span></td></tr>
+    <tr><td>9</td><td class="sym">PVS</td><td>Oil & Gas</td><td>43</td><td class="green">+0.00%</td><td class="green">+5.68%</td><td class="pred">N/A – N/A</td><td><span class="badge b-neutral">Neutral</span></td></tr>
+  </table>
+</div>
+
+<!-- SUGGESTIONS -->
+<div class="section">
+  <h2>My Suggestions for Tomorrow</h2>
+  <div class="suggest"><span class="tag tag-buy">BUY</span><strong>MSN</strong> around 100 — target 100. Up 2.0% today. +5.6% in 5d. VN30 blue-chip</div>
+  <div class="suggest"><span class="tag tag-buy">BUY</span><strong>VHM</strong> around 100 — target 100. +5.1% in 5d. VN30 blue-chip</div>
+  <div class="suggest"><span class="tag tag-buy">BUY</span><strong>BSR</strong> around N/A — target N/A. Up 5.6% today. +11.7% in 5d. -12.6% in 20d</div>
+  <div class="suggest"><span class="tag tag-buy">BUY</span><strong>ACB</strong> around N/A — target N/A. +5.6% in 5d. VN30 blue-chip</div>
+  <div class="suggest"><span class="tag tag-sell">SELL</span><strong>FPT</strong> — likely heading to 100. Down 2.8% today. -17.4% in 20d</div>
+  <div class="suggest"><span class="tag tag-sell">SELL</span><strong>PLX</strong> — likely heading to N/A. Down 2.0% today. -33.0% in 20d</div>
+  <div class="suggest"><span class="tag tag-sell">SELL</span><strong>VIC</strong> — likely heading to 100. Down 2.3% today. -22.5% in 20d</div>
+  <div class="suggest"><span class="tag tag-watch">SECTOR</span>Overweight <strong>Steel & Materials</strong> this week — strongest sector</div>
+  <div class="suggest"><span class="tag tag-sell">SECTOR</span>Underweight <strong>Technology</strong> — weakest sector, avoid</div>
+</div>
+
+<!-- NEWS -->
+<div class="section">
+  <h2>Related News</h2>
+  <div class="news-item"><div class="news-sym">MSN</div><div class="news-title">Cổ phiếu HPG, VPB, MSN, PDR có triển vọng tích cực trong tháng 4 - 24HMoney</div><div class="news-desc"><a href="https://news.google.com/rss/articles/CBMipAFBVV95cUxPUGdhY0taNFAtQW1LWjZJMnZOS2s1R2RucmlRVTh1OXNVR2ZLQ2lqQUQwNGxpZFZfUzVQZTBTRVN6TjlpSmY0Q3JWN0lnVkRvYn</div></div>
+  <div class="news-item"><div class="news-sym">MSN</div><div class="news-title">MBS: Cổ phiếu HPG, VPB, MSN, PDR có triển vọng tích cực trong tháng 4 - nguoiquansat.vn</div><div class="news-desc"><a href="https://news.google.com/rss/articles/CBMiowFBVV95cUxOX2ViZVFoX1lETEE3MDBDYmJTSHBqdVZkQmNFdVNsVjFId2N4VmdZTDVBaVVWaWhDdHVZRVg5bXJUajAtYVhKMkhIMEREdFFSc0</div></div>
+  <div class="news-item"><div class="news-sym">VHM</div><div class="news-title">Vinhomes trả cổ tức kỷ lục gần 25.000 tỷ giữa lúc triển khai hàng loạt dự án tỷ đô, điều gì sẽ xảy r</div><div class="news-desc"><a href="https://news.google.com/rss/articles/CBMi1gFBVV95cUxQQmNxRVRsTkg1OE13MXVFaURxckJPbmRWN1hlMExJQmlfTGo1bnd0SlowTF9RRXE2RDgxOEt3NHY3c1F5SHZiZ2VHMnpNZldsbF</div></div>
+  <div class="news-item"><div class="news-sym">VHM</div><div class="news-title">Vinhomes muốn trả cổ tức tiền mặt kỷ lục gần 1 tỷ USD - VnExpress</div><div class="news-desc"><a href="https://news.google.com/rss/articles/CBMikgFBVV95cUxQMllvS19iMk5XQkZJczdlVkVUMTNKZWt4RklIR1ZYMG5fNXlGQzFPMF9idGpUc0RYRjdyVmcxOGNpNDRLbHlVdWlsWmF1a3d0a1</div></div>
+  <div class="news-item"><div class="news-sym">BSR</div><div class="news-title">Công ty cổ phần Lọc hóa dầu Bình Sơn - bsr.com.vn</div><div class="news-desc"><a href="https://news.google.com/rss/articles/CBMidkFVX3lxTFBKbFdtY1FFMkVWNHAxUHJuUGxfSUhnWXB0a0FReFcyMHVlN0lFd3JzVFFaeDhKVjI1MjhONnJIczh3TGJDT2h5YjNUNHRRQnhZWV</div></div>
+  <div class="news-item"><div class="news-sym">BSR</div><div class="news-title">Cổ phiếu BSR hồi phục, DGC 'thủng mốc' 50.000 đồng/cp - Mekong ASEAN</div><div class="news-desc"><a href="https://news.google.com/rss/articles/CBMijgFBVV95cUxNSGlFQUsxRW44aUxJdXUxOGZ2VndldkhxLS1XczhnUnBYUklwazlXYnloN2tUNnNKaVQyMk8xMWV0TXBhRWpBUGVWbi1Rbk5aRF</div></div>
+  <div class="news-item"><div class="news-sym">ACB</div><div class="news-title">ACB dự kiến trả cổ tức 20% - VnExpress</div><div class="news-desc"><a href="https://news.google.com/rss/articles/CBMibEFVX3lxTE5LVGs1N1FOOWc3a0F6S0ZRaGlEcFplQXhwd2Zua25QNW16S08xeWFTWUZJaGdzd2djOGx2NFVYTW82ZFJmQjE4SjEzT1BDN0JHLT</div></div>
+  <div class="news-item"><div class="news-sym">ACB</div><div class="news-title">Cổ phiếu ACB được khuyến nghị mua bởi BVSC với tiềm năng tăng trưởng ấn tượng - Báo Sức khỏe & Đời s</div><div class="news-desc"><a href="https://news.google.com/rss/articles/CBMioAFBVV95cUxPREJCWE9lQU5pV3drd2lzVVJya01waDVDclJ5RUMwOTROaUY2RGJPd1ZjemhYbm1PQnM4bVZxR09jZVc4Q09FU2ZMUmxiWEJsd1</div></div>
+  <div class="news-item"><div class="news-sym">HPG</div><div class="news-title">HPG dự kiến chia cổ tức bằng tiền và cổ phiếu - VnEconomy</div><div class="news-desc"><a href="https://news.google.com/rss/articles/CBMiekFVX3lxTFA5Tjd4WE9JbzF1UzFnMFJmbVU2SlBqNjBSc1ExdnF6UEYzbFZyS3prUTFhVG8tR0NmYncwRVZNNTJBRWdoOW9FN1hDRU11a0lEZl</div></div>
+  <div class="news-item"><div class="news-sym">HPG</div><div class="news-title">CỔ PHIẾU HPG SAU NHỊP HỒI: TÍCH LŨY LẠI HAY CHỈ LÀ HỒI KỸ THUẬT - CÓ NÊN ĐẦU TƯ 2026? | KIỀU CANH - </div><div class="news-desc"><a href="https://news.google.com/rss/articles/CBMizwFBVV95cUxQRWlMNlJXV2lySWE0emMyUHVCUkluMFFMWkdSSDM5WnkwNXlua1BObnhLc0Z5Zkh4ZXFsVnd2aHI0N1lQNHJNMGltQ09WR3hqc2</div></div>
+  <div class="news-item"><div class="news-sym">PVC</div><div class="news-title">PVChem (PVC) muốn tăng vốn, cổ phiếu bốc đầu - Chứng khoán DNSE</div><div class="news-desc"><a href="https://news.google.com/rss/articles/CBMikwFBVV95cUxOYk9Dd3NldzRiTDZ0VWJGUFprMFdxVTVWVVNvQi1fVmNvUTdGN3B5cWN3TFZfdGtsd1hLYlZwZUxBbWlyN2cxZnFCMVZ0MXhJNk</div></div>
+  <div class="news-item"><div class="news-sym">PVC</div><div class="news-title">Hoá chất và Dịch vụ Dầu khí (PVC) đặt mục tiêu lãi ròng gấp đôi trong năm 2025 - Tin nhanh chứng kho</div><div class="news-desc"><a href="https://news.google.com/rss/articles/CBMixAFBVV95cUxQck5QaUUwTm5Odnc5M28xUlRIcXlJZ2tVaHNVWEFWLWFJZzFiNnpSa0JjODBmcG9lRk5tMUhTYUthY1dvSzhkUGJyWU1kUjRHa0</div></div>
+  <div class="news-item"><div class="news-sym">FPT</div><div class="news-title">SCIC không mua hết cổ phiếu FPT theo kế hoạch - VnEconomy</div><div class="news-desc"><a href="https://news.google.com/rss/articles/CBMiekFVX3lxTE5pRW42dDNLd1otOUpjLTlwd3BYM05zRENDRWFQbFdmYS1aTVJpQzl5T2FuV043WVhxQUpYYXFFN1BzcFY5VkViVGxzaGp4WG04dz</div></div>
+  <div class="news-item"><div class="news-sym">FPT</div><div class="news-title">Tháng 3 “buồn” của cổ phiếu FPT - thuonghieuvaphapluat.vn</div><div class="news-desc"><a href="https://news.google.com/rss/articles/CBMifkFVX3lxTE0wNmVIV1JzdHA2d3k3SHZqNDRIYURwTkJpaTlURFpJVnM3cnJyNE9qWEFYdTVxYkJqVWR4UUppYnlibUZnaFZrWlo2V0xkRjFJNH</div></div>
+  <div class="news-item"><div class="news-sym">PLX</div><div class="news-title">PLX: Tập đoàn Xăng dầu Việt Nam (HOSE) - cafef.vn</div><div class="news-desc"><a href="https://news.google.com/rss/articles/CBMickFVX3lxTE1CNUtsd0lKQTBUY1MyejNNdTNWMDlxUnBFbmJESEJZMVE2TjJaQktNdkdmNEtwaDdjMklDZ1BzVVRpZEFCQ05tam5vLUdHYmZQT1</div></div>
+  <div class="news-item"><div class="news-sym">PLX</div><div class="news-title">Thực hư chuyện sáp nhập OIL và Petrolimex (PLX) - Tin nhanh chứng khoán</div><div class="news-desc"><a href="https://news.google.com/rss/articles/CBMimwFBVV95cUxPRG56RUctZVE5a0ZIdFJ6SlUxdnVTNkQxeVVka1ByRm9RT0tVUHU1ajctcHd4dC0wUkVqV0xuS0RybmdJRGZSQW13SW5vcmQ5Nz</div></div>
+  <div class="news-item"><div class="news-sym">VIC</div><div class="news-title">VIC xuất hiện giao dịch thỏa thuận hơn 35 triệu cổ phiếu - nguoiquansat.vn</div><div class="news-desc"><a href="https://news.google.com/rss/articles/CBMilwFBVV95cUxQNUc4UVhpQm1GYWxIaW9BMjBYT0VMSU1Qcnl2TW12TlByV3FPbVNySU9WUDJXLVRIVzl3NWo5Uk9fTFBMVFdOVmZsdnRhb3RPTF</div></div>
+  <div class="news-item"><div class="news-sym">VIC</div><div class="news-title">Cổ phiếu VIC nâng đỡ, VN-Index tăng gần 12 điểm trong phiên cuối tháng 3 - Tin nhanh chứng khoán</div><div class="news-desc"><a href="https://news.google.com/rss/articles/CBMivgFBVV95cUxOWkZVNTdNT3lsRGdQWnVJZW5yUW04QWFnbTVQbTQxWmR2aWVLYmlDeFQ1VFZObHdScUcxUmZpSlFHNkRlZDdyV3IzbWtERnNuc2</div></div>
+  <div class="news-item"><div class="news-sym">GAS</div><div class="news-title">PV Gas (GAS) báo tin khẩn giữa lúc cổ phiếu tăng trần: Chưa đáp ứng điều kiện công ty đại chúng, 17.</div><div class="news-desc"><a href="https://news.google.com/rss/articles/CBMi_wFBVV95cUxQMUR3NXl5aTJnR0FvOGtrZ1lranV1Y1Z3Tzg0WlFiM0JUbFpndmZCVGdnRE02amg3Qy1oTmhOeHRla3NtbUF0Z2pMblFJcVhJNG</div></div>
+  <div class="news-item"><div class="news-sym">GAS</div><div class="news-title">PV GAS (GAS) đặt mục tiêu lãi sau thuế năm 2026 hơn 8.800 tỷ đồng và cổ tức tỷ lệ 20% - Tin nhanh ch</div><div class="news-desc"><a href="https://news.google.com/rss/articles/CBMiywFBVV95cUxObWZxcGM1dEtJbFJuUUIwLUZfZFQ1VFFwajAwZ3lpQ1I4d3Q2R1Rvc0xHYWxvRXYwODRuNm5nZ1d5TDJmbXA1SFI5VlFjblJxQ1</div></div>
+</div>
+
+<div class="footer">
+  Generated automatically on 2026-04-02 &bull; Not financial advice — always do your own research<br>
+  VN Stock Trading System &bull; 20 of 21 symbols shown
+</div>
+</div>
+</body></html>

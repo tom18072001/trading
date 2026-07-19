@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<title>SecV3 — Sector Money Flow &amp; Rotation — {{REPORT_DATE}}</title>
+<style>
+@page { size: A4; margin: 10mm; }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Segoe UI',Arial,sans-serif; background:#0f172a; color:#e2e8f0; padding:14px; font-size:11px; line-height:1.45; }
+h1 { font-size:22px; color:#f8fafc; margin-bottom:2px; }
+h2 { font-size:14px; margin:12px 0 6px; color:#f8fafc; border-left:3px solid #38bdf8; padding-left:7px; }
+h3 { font-size:12px; color:#94a3b8; margin:8px 0 4px; }
+.sub { color:#94a3b8; font-size:10px; margin-bottom:10px; }
+.section { background:#1e293b; border-radius:8px; padding:11px 14px; margin-bottom:10px; }
+.lead { font-size:11px; color:#cbd5e1; line-height:1.55; margin-bottom:6px; }
+table { width:100%; border-collapse:collapse; font-size:10px; }
+th { text-align:left; padding:5px 6px; color:#94a3b8; font-weight:600; border-bottom:1px solid #334155; font-size:9px; text-transform:uppercase; }
+td { padding:5px 6px; border-bottom:1px solid #0f172a; vertical-align:top; }
+.sym { font-weight:700; color:#f8fafc; }
+.pos { color:#22c55e; font-weight:600; }
+.neg { color:#ef4444; font-weight:600; }
+.mut { color:#94a3b8; }
+.tag { padding:2px 7px; border-radius:4px; font-weight:700; font-size:9px; color:#fff; display:inline-block; min-width:52px; text-align:center; }
+.tag-buy   { background:#16a34a; }
+.tag-accum { background:#047857; }
+.tag-sell  { background:#dc2626; }
+.tag-trim  { background:#b45309; }
+.tag-watch { background:#ca8a04; color:#1e293b; }
+.tag-hold  { background:#475569; }
+.pill { display:inline-block; padding:1px 6px; border-radius:10px; background:#0f172a; font-size:9px; margin-right:3px; color:#cbd5e1; }
+.grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.grid3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+.grid4 { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:8px; }
+.chart-img { width:100%; border-radius:6px; margin:6px 0; }
+.chart-img-sm { width:100%; border-radius:4px; }
+.mini-chart-card { background:#0f172a; border-radius:6px; padding:8px; text-align:center; }
+.mini-chart-card .sym { font-size:11px; }
+.mini-chart-card .meta { font-size:9px; color:#94a3b8; }
+.cards { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:10px; }
+.card { background:#1e293b; border-radius:8px; padding:12px; text-align:center; }
+.card .num { font-size:22px; font-weight:700; }
+.card .label { font-size:10px; color:#94a3b8; margin-top:2px; }
+.green { color:#22c55e; } .red { color:#ef4444; } .yellow { color:#eab308; } .blue { color:#38bdf8; }
+.footer { text-align:center; color:#64748b; font-size:9px; margin-top:8px; }
+.banner { display:flex; gap:12px; padding:12px 14px; border-radius:10px; margin-bottom:10px; align-items:center; }
+.banner.risk_on   { background:linear-gradient(90deg,#065f46,#064e3b); }
+.banner.risk_off  { background:linear-gradient(90deg,#7f1d1d,#991b1b); }
+.banner.rotation  { background:linear-gradient(90deg,#1e3a8a,#312e81); }
+.banner.chop      { background:linear-gradient(90deg,#334155,#1e293b); }
+.banner .badge { background:rgba(15,23,42,0.5); padding:5px 12px; border-radius:6px; font-weight:700; text-transform:uppercase; font-size:12px; letter-spacing:1px; }
+.banner .body { flex:1; font-size:11px; line-height:1.5; }
+.macro-row { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; }
+.macro-cell { background:#0f172a; padding:6px 8px; border-radius:6px; text-align:center; }
+.macro-cell .k { font-size:9px; color:#94a3b8; text-transform:uppercase; }
+.macro-cell .v { font-size:13px; font-weight:700; color:#f8fafc; margin-top:2px; }
+.news-item { background:#0f172a; border-left:3px solid #38bdf8; padding:6px 10px; margin:4px 0; border-radius:4px; font-size:10px; }
+.news-item .src { color:#94a3b8; font-size:9px; }
+.plan-list { padding-left:18px; line-height:1.6; }
+.plan-list li { margin:3px 0; }
+.stealth-badge { background:#064e3b; color:#86efac; padding:1px 6px; border-radius:4px; font-size:9px; font-weight:700; }
+.halo { box-shadow: 0 0 0 2px rgba(34,197,94,0.35); }
+</style>
+</head>
+<body>
+<h1>VN Market — Sector Money-Flow &amp; Rotation Briefing (SecV3)</h1>
+<div class="sub">Daily expert-trader report • {{REPORT_DATE}} • Window {{RECENT_DAYS}}d vs {{PRIOR_DAYS}}d • Regime-aware, news-enriched, stealth-scanned</div>
+
+<!-- MARKET REGIME BANNER -->
+<div class="banner {{REGIME_CLASS}}">
+  <div class="badge">{{REGIME_LABEL}}</div>
+  <div class="body">{{REGIME_NARRATIVE}}</div>
+</div>
+
+<!-- MACRO SNAPSHOT -->
+<div class="section">
+  <h2>Macro Snapshot</h2>
+  <div class="macro-row">
+    <div class="macro-cell"><div class="k">VN-Index</div><div class="v">{{MACRO_VNINDEX}}</div></div>
+    <div class="macro-cell"><div class="k">USD/VND</div><div class="v">{{MACRO_USDVND}}</div></div>
+    <div class="macro-cell"><div class="k">Brent</div><div class="v">{{MACRO_BRENT}}</div></div>
+    <div class="macro-cell"><div class="k">US10Y</div><div class="v">{{MACRO_US10Y}}</div></div>
+    <div class="macro-cell"><div class="k">Gold</div><div class="v">{{MACRO_GOLD}}</div></div>
+  </div>
+</div>
+
+<!-- SUMMARY CARDS -->
+<div class="cards">
+  <div class="card"><div class="num green">{{NUM_BUYS}}</div><div class="label">BUY Signals</div></div>
+  <div class="card"><div class="num red">{{NUM_SELLS}}</div><div class="label">SELL / AVOID</div></div>
+  <div class="card"><div class="num yellow">{{NUM_WATCHES}}</div><div class="label">WATCH</div></div>
+  <div class="card"><div class="num blue">{{NUM_STEALTH}}</div><div class="label">Stealth Accum.</div></div>
+</div>
+
+<!-- MONEY FLOW NARRATIVE (NEW) -->
+<div class="section">
+  <h2>Money-Flow Narrative — What the Tape Is Saying</h2>
+  <div class="lead">{{FLOW_NARRATIVE}}</div>
+</div>
+
+<!-- SECTOR ROTATION CHART -->
+<div class="section">
+  <h2>Sector Rotation — Flow Delta Ranking</h2>
+  <img class="chart-img" src="data:image/png;base64,{{CHART_SECTOR_FLOW_DELTA}}" alt="Sector Flow Delta">
+</div>
+
+<!-- SECTOR AGGREGATE PERFORMANCE CHART -->
+<div class="section">
+  <h2>Sector Aggregate Performance — 5-Day Returns</h2>
+  <p class="lead">Average 5-day return across all symbols in each sector, worst to best.</p>
+  <img class="chart-img" src="data:image/png;base64,{{CHART_SECTOR_PERFORMANCE}}" alt="Sector Aggregate Performance">
+</div>
+
+<!-- CORRELATION -->
+<div class="section">
+  <h2>Sector Money-Flow Correlation Matrix</h2>
+  <p class="lead">High positive correlation = sectors moving together; negative = rotation/divergence opportunities.</p>
+  <img class="chart-img" src="data:image/png;base64,{{CHART_CORRELATION_HEATMAP}}" alt="Money Flow Correlation">
+</div>
+
+<!-- SECTOR DIRECTION PREDICTIONS (NEW) -->
+<div class="section">
+  <h2>Sector Direction Predictions — Up / Down + Why</h2>
+  <p class="lead">Next-session directional bias per sector, with the primary reason drawn from flow, breadth, foreign-net, stealth score, HMM regime fit, and any known macro/news catalyst.</p>
+  <table>
+    <thead><tr>
+      <th>Sector</th><th>Bias</th><th>Confidence</th><th>Flow z20</th><th>Foreign Hit</th><th>Stealth</th><th>Rank Action</th><th>Reason &amp; Catalyst</th>
+    </tr></thead>
+    <tbody>{{SECTOR_PREDICTION_ROWS}}</tbody>
+  </table>
+</div>
+
+<!-- STEALTH ACCUMULATION WATCHLIST (NEW) -->
+<div class="section">
+  <h2>Stealth Accumulation Watchlist — Buy at the Root (gốc)</h2>
+  <p class="lead">Sectors meeting Tom's early-entry doctrine (§16.1): flow z20 &gt; +1.0, foreign hit ≥ 60%, breadth rising, quiet ATR, price in bottom 40% of 60d range. These are the pre-breakout candidates.</p>
+  <table>
+    <thead><tr>
+      <th>Sector</th><th>Flow z20</th><th>Foreign Hit 20d</th><th>Breadth SMA20</th><th>Stealth Score</th><th>Accum. Age</th><th>Doctrine Status</th>
+    </tr></thead>
+    <tbody>{{STEALTH_ROWS}}</tbody>
+  </table>
+</div>
+
+<!-- INFLOW / OUTFLOW THESIS -->
+<div class="grid2">
+  <div class="section">
+    <h2>Inflow Sector Thesis</h2>
+    {{INFLOW_THESIS}}
+  </div>
+  <div class="section">
+    <h2>Outflow Sector Thesis</h2>
+    {{OUTFLOW_THESIS}}
+  </div>
+</div>
+
+<!-- RECOMMENDED BUY LIST WITH NEWS (EXTENDED) -->
+<div class="section">
+  <h2>BUY Recommendations — Sector + Technical + Catalyst</h2>
+  <table>
+    <thead><tr><th></th><th>Sym</th><th>Sector</th><th>Close</th><th>5d</th><th>Score</th><th>Technicals</th><th>S / R (BB)</th><th>Stop</th><th>Target</th><th>Thesis &amp; Catalyst</th></tr></thead>
+    <tbody>{{BUY_ROWS}}</tbody>
+  </table>
+</div>
+
+<!-- NEWS & CATALYSTS (NEW) -->
+<div class="section">
+  <h2>News &amp; Catalysts for Recommended Stocks</h2>
+  <p class="lead">Headlines impacting today's BUY list (auto-aggregated by OpenClaw bot from vnstock company-news feed, macro anchors, and sector-mapped releases). Items marked <i>pending</i> indicate no live headline within the 48h window.</p>
+  {{NEWS_BLOCKS}}
+</div>
+
+<!-- SELL TABLE -->
+<div class="section">
+  <h2>SELL / AVOID — Outflow Sector Laggards</h2>
+  <table>
+    <thead><tr><th></th><th>Sym</th><th>Sector</th><th>Close</th><th>5d</th><th>Score</th><th>Technicals</th><th>S / R (BB)</th><th>Thesis</th></tr></thead>
+    <tbody>{{SELL_ROWS}}</tbody>
+  </table>
+</div>
+
+<!-- WATCH TABLE -->
+<div class="section">
+  <h2>WATCH — Momentum Outliers</h2>
+  <table>
+    <thead><tr><th></th><th>Sym</th><th>Sector</th><th>Close</th><th>5d</th><th>Score</th><th>Technicals</th><th>S / R (BB)</th><th>Thesis</th></tr></thead>
+    <tbody>{{WATCH_ROWS}}</tbody>
+  </table>
+</div>
+
+<!-- VOLATILE STOCKS -->
+<div class="section">
+  <h2>Volatile Stocks — Price / Volume Mini-Charts</h2>
+  <p class="lead">Stocks with the highest 5-day volatility (ATR%). For visual context on today's tape.</p>
+  <div class="grid3">
+    {{VOLATILE_STOCK_CHARTS}}
+  </div>
+</div>
+
+<!-- FULL SECTOR TABLE -->
+<div class="section">
+  <h2>Full Sector Flow &amp; Breadth Table</h2>
+  <table>
+    <thead><tr><th>Sector</th><th>#</th><th>Flow/d</th><th>Prior/d</th><th>Δ Flow</th><th>DV Δ</th><th>5d Ret</th><th>RSI&gt;50</th><th>MACD+</th><th>&gt;SMA20</th></tr></thead>
+    <tbody>{{SECTOR_TABLE_ROWS}}</tbody>
+  </table>
+</div>
+
+<!-- RISK & EXECUTION NOTES (NEW) -->
+<div class="section">
+  <h2>Risk &amp; Execution Notes</h2>
+  <div class="lead">{{RISK_NOTES}}</div>
+</div>
+
+<!-- NEXT SESSION GAME PLAN (NEW) -->
+<div class="section">
+  <h2>Next-Session Game Plan</h2>
+  <ol class="plan-list">{{GAME_PLAN}}</ol>
+</div>
+
+<div class="footer">
+  Generated {{REPORT_DATE}} • Signed dollar flow + regime + stealth scan • Not investment advice.<br>
+  VN Stock Trading System — SecV3 Sector Flow Report (OpenClaw-enriched)
+</div>
+</body></html>

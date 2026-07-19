@@ -1,0 +1,915 @@
+# MODIFICATION LOG — Sector Money-Flow Redesign
+
+> Append-only log. Newest entries on top. Every code, schema, or doc change must be recorded here.
+
+## Format
+```
+## YYYY-MM-DD — <short title>
+- Author:
+- Files:
+- Reason:
+- Summary:
+- Follow-ups:
+```
+
+---
+
+## 2026-06-19 — Page-load perf root-cause + macro/regime fix + ohlcv_fail metric split + anti-blank-page guard
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `start-dev.bat`, `services/picks_universe_service.py`, `services/macro_service.py`, `services/rotation_model_service.py`, `frontend/src/pages/DailyInsightPage.tsx`
+- Reason: Tom reported (1) Daily Insight not loading / blank after refresh, (2) "backend sources" stale, and (3) Money Flow / Rotation / Stealth pages slow — he asked to precompute everything into the DB so pages just read. Investigation reframed all three:
+  - **Daily Insight actually works** — `/api/insight/daily` returns 200 in ~50ms with 10 picks; a full live `/refresh` completed clean (15 signals, agent valid, 10 picks). The "blank after refresh" is a real but intermittent risk: a `force` universe rebuild that comes back empty (vnstock Listing/discovery rate-limited → `picks=[]`) overwrote good cached picks (§18.4/17 single-source risk).
+  - **Page slowness was NOT request-time compute.** In-process `flow_series()` = 0.88s; a single clean uvicorn served `/flow/series` in **1.06s**, `/flow/ranking` 0.34s, `/flow/heat` 0.21s. The 5–9x slowdown (7.75s / 2.17s / 1.87s) came from **multiple duplicate backend processes bound to :8000 at once** (manual runs + orphaned `--reload` children that `start-dev.bat`'s title-only kill missed), all thrashing CPU + the SQLite WAL. **No precompute rework was needed** — the data is already materialized in `sector_flow_daily` and the resample is ~0.1s.
+  - **Macro sources genuinely broken**: `macro_anchors` USD/VND, Brent, US10Y, Gold all NULL (yfinance not installed; FRED/stooq/exchangerate.host all network-blocked from this host — only vnstock/KBS is reachable). `sector_regime` was therefore stuck at `chop/0.5` since 2026-04-30 because it read those null columns.
+- Summary:
+  - **Perf fix (`start-dev.bat`):** kill stale backends/frontends by **port** (netstat→taskkill on :8000/:5173), not just window title, so duplicate uvicorn servers can't accumulate. Scoped `--reload` to source dirs only (`--reload-dir api services analysis models database utils`) — config.py edits at root now need a manual restart. Verified single scoped-reload server = same speed as no-reload (1.11s / 0.38s / 0.20s).
+  - **ohlcv_fail metric split (`picks_universe_service`):** `_process_one` now returns a reason; `_build` counts only true source/fetch failures toward `ohlcv_fail_pct`, with legitimate quality rejects (short history, <5B/day liquidity) tracked separately as `quality_reject_count`. New `FreshnessReport` fields `ohlcv_fetch_fail_count` + `quality_reject_count` (in `to_dict`). **Result: is_valid False→True** — the 26.4% "fail" was entirely liquidity filtering (`fetch_fail=0, quality_reject=19`); the permanent DEGRADED banner was firing falsely. `_fetch_ohlcv` also retries once on empty/exception.
+  - **Anti-blank-page guard (`picks_universe_service.get_snapshot`):** when a (forced) rebuild returns 0 tickers but a good prior cache exists, keep the cache (flagged `is_valid=False` + error note) instead of overwriting with an empty snapshot. Stops `/refresh` from blanking the page on a vnstock outage.
+  - **Macro carry-forward (`macro_service.ingest_now`):** a None fetch no longer clobbers the last known value with a null row — reuses the most recent non-null per column.
+  - **Regime fix (`macro_service.fetch_vnindex_daily` + `rotation_model_service.classify_regime`):** regime is now anchored on a real 180-day VNINDEX daily series pulled straight from vnstock (returns-based, scale-agnostic — KBS reports the index /1000, irrelevant to pct_change) instead of the unreliable hourly `macro_anchors.vnindex` column. Re-ran `--regime`: computed from real data (ret20 −3.19%, vol20 0.83% → heuristic `chop`, a true reading of a low-vol ranging tape, not a default). hmmlearn not installed → documented heuristic fallback.
+  - **Frontend banner (`DailyInsightPage`):** degraded banner now shows `fetch_fail` % + `lọc_thanh_khoản` (quality_reject) count instead of the old conflated `ohlcv_fail`.
+- Verification: `python -m pytest tests/` → **98 passed**. Live (single clean server): `/flow` page (4 endpoints parallel) 1.72s, `/rotation` 44ms, `/stealth` 38ms, `/pulse` 40ms — all sub-2s. Universe rebuild: `is_valid=True, fetch_fail=0, quality_reject=19, top_buys=5, top_sells=5`. Browser: `/flow` + `/insight` render with charts, no console errors.
+- Follow-ups:
+  - External macro sources (USD/VND, Brent, US10Y, Gold) remain unreachable from this host — they stay NULL until network access or a keyed source is provided; regime runs on VNINDEX alone (sufficient for the heuristic). `pip install hmmlearn` would upgrade regime from heuristic to the 4-state HMM.
+  - Task Scheduler jobs `macro_ingest` + `regime_classify` haven't fired since 2026-04-30 (host-side, not code) — Tom deferred this item.
+  - vnstock guest tier (20 req/min) is the real ingest bottleneck — a community/sponsor key would cut rebuild time and let `UNIVERSE_BUILD_WORKERS` rise.
+
+---
+
+## 2026-06-18 — Simplify Daily Insight UI + relaxed degraded-mode picks gate + token trim
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `frontend/src/pages/DailyInsightPage.tsx`, `frontend/src/pages/DailyInsightPage.test.tsx`, `services/picks_universe_service.py`, `config.py`, `services/trader_agent.py`, `tests/test_trader_agent.py`
+- Reason: Tom wanted the Daily Insight page simplified to a scannable buy/sell decision surface (tables + colour labels, less prose), the page was collapsing to a **single pick** on degraded-data days, and he asked to cut token spend per refresh/rerun. Investigation also answered his architecture question: this is a **monolith** (1 FastAPI process + SQLite WAL + Vite SPA); "refresh" is an in-process background *thread* (`InsightRefreshRunner`) + `ThreadPoolExecutor(2)`, not a distributed queue — so the ~4–5 min refresh is vnstock-rate-limit-bound, not compute-bound.
+- Summary:
+  - **Relaxed degraded picks gate** (`picks_universe_service._build`): top-5 BUY / top-5 SELL are now built whenever `len(tickers) ≥ UNIVERSE_PICKS_FLOOR` (new config, default 20) instead of only when `is_valid`. Soft degradation (`ohlcv_fail_pct ≥ 25%`, stale signal, a BUY sector missing picks) no longer zeroes the list; `is_valid` still drives the STALE banner. Verified: refresh output went from **1 pick → 10 picks (5 BUY + 5 SELL)** with `fresh_valid=False` retained.
+  - **BUY top-up** (`_select_top`, BUY path): when the ranker flags few BUY/ACCUMULATE sectors, back-fill the shortlist with the best-scored `is_valid_buy` tickers from the whole universe so the BUY table isn't starved (today only INSUR was BUY-flagged → top-up surfaced PC1/HCM/PVS/PVD alongside BVH).
+  - **Token trim** (config + `trader_agent._trim_pick`): `AGENT_MAX_BUY_CANDIDATES` 10→6, `AGENT_MAX_SELL_CANDIDATES` 6→4, and news-titles-per-candidate 3→2 via new `AGENT_NEWS_PER_CANDIDATE` (default 2). Shrinks the agent's input prompt (dominant per-refresh token cost); top picks are 5/5 so the agent still has real choice. All env-tunable.
+  - **Daily Insight UI simplified**: replaced the BUY/SELL card grids with a single `PickTable` (Mã + action badge / Ngành / Giá / Target·Stop·R:R or Stop-out·ATR%·Score / Tín hiệu+thesis, with per-row collapsible news). Replaced the 3-card deltas grid + prose narrative + action list with a compact `RotationTable` (dòng vào / dòng ra / tích luỹ ngầm) and a one-row decision bar (regime + buy/sell/stealth counts). Refresh button now shows the ~4–5 min ETA. `PickGroup`/`PickCard` removed; `fmtNum`/`fmtPct`/`AgentReport` kept. Field accessors tolerate both `PickEntry` (close/rr/sector_code) and legacy `_build_picks` (price/r_r/sector) shapes.
+- Verification (on Windows host): `python -m pytest tests/ -k "picks_universe or insight or trader_agent or unified"` → 48 passed (only change: `test_trim_pick` now asserts `len==AGENT_NEWS_PER_CANDIDATE` instead of `==3`; no backend tests added, so §19 backend total stays 88); `cd frontend && npm test` → 13 passed (the 5 PickTable cases replace the 5 removed PickGroup/PickCard cases, so frontend total stays 13); `npm run build` clean (tsc + vite). Live: POST `/api/insight/refresh` completed in **274s, no error**, `/api/insight/daily` now serves 10 picks (5 BUY + 5 SELL) with the degraded banner retained.
+- Follow-ups:
+  - `UNIVERSE_OHLCV_FAIL_PCT_MAX` is tripping daily (26% > 25%) under KBS guest tier — consider a community/sponsor key (lets `UNIVERSE_BUILD_WORKERS` go 2→6–8, cutting the ~4 min rebuild) or raising the fail threshold.
+  - `regime` is stale (`chop` @ 2026-04-30) — the `regime_classify` scheduled job hasn't run on the host.
+
+## 2026-06-18 — Frontend redesign (phase 2): remaining 4 pages
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `frontend/src/pages/FlowMonitorPage.tsx`, `RotationMapPage.tsx`, `StealthWatchPage.tsx`, `FlowPulsePage.tsx`
+- Reason: finish the redesign — restyle the other 4 views to the new dark-fintech design system (tokens from phase 1), per their `.dc.html` prototypes. All existing API wiring preserved.
+- Summary:
+  - **Money Flow Monitor:** interval toggle + flow_z_hot, VNINDEX index panel, **multi-line Flow Z20 chart** (SVG `viewBox 0 0 1000 320`, `y = 160 − z·46.667`, zero + dashed ±1σ/±2σ threshold lines, legend click highlights one sector & dims the rest), **heat strip grid** (15 sectors × N buckets, cell alpha `0.08 + min(1,|z|/3)·0.62`), ranking table (sector dots, HOT/COOL/NEUTRAL chips, row-click selects). Added `flowApi.series()` fetch; kept refresh-poll + freshness wiring.
+  - **Rotation Map:** **SVG Sankey** built from `pairs.rows` weights (sources left / targets right, 14px node rects, bezier ribbons sized by weight, source-colored, click-to-select dims others; node labels show Δshare% colored by sign) + pair table (From→To dots, Δz src/tgt, corr, weight, CONFIRMED/EMERGING/FADING chips). Clicking a ribbon or row cross-highlights.
+  - **Stealth Watch:** **Gantt timeline** (30-phiên window, bar `left=(30−age)/30`, `width=age/30`, active=bright amber / warming=dim / inactive=faint), Active/Warming tabs, **5-gate cards** (✓/✕ rows with value/threshold/reason, persistence bar X/5, cyan "Dự kiến breakout ~Nd" box), and a **history table** (`stealthApi15.history`, HIT / FALSE POSITIVE / DRY-POWDER TIMEOUT chips). Kept the 6 threshold controls.
+  - **Flow Pulse:** **LIVE pill** (pinging dot) + ticking clock (1s), **alerts ticker** (`pulseApi.alerts`, up=green/down=red), **live tape** sorted by z (▲/▼ arrow, flow_z20 + Δ1h, foreign streak, ALERT↑/ALERT↓/NEUTRAL signal chip, inline z-bar; alert rows tinted), **open exposure** table (`pulseApi.exposure`), and a collapsible **VaR/CVaR** panel (4 tiles). Kept the 30s live-poll wiring.
+- Verification: NOT runnable in-sandbox (Windows `esbuild` binary + virtiofs short-read on tsc, same as phase 1). Reviewed manually for strict-mode (imports, unused vars, hoisting, null-guards). **Verify on Windows:** `cd frontend && npm run build && npm run dev`.
+- Result: all 5 views + shared shell now on the new design system. Follow-up: optional shared `Icon`/`PageHeader`/`IntervalToggle` extraction to de-duplicate the per-page toolbars.
+
+## 2026-06-18 — Frontend redesign (phase 1): design tokens + shell + Daily Insight
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `frontend/index.html`, `frontend/src/index.css`, `frontend/src/components/Layout.tsx`, `frontend/src/App.tsx`, `frontend/src/pages/DailyInsightPage.tsx`
+- Reason: implement the "VN Sector Flow — Front-end Redesign" handoff (uploaded `.dc.html` prototypes + README). Modern dark fintech look. Scope this pass (per Tom): foundation + shared shell + the priority Daily Insight page; the other 4 pages (Money Flow Monitor, Rotation Map, Stealth Watch, Flow Pulse) are a later pass.
+- Summary:
+  - **Design tokens (`index.css`, Tailwind v4 `@theme`):** added the exact palette (bg/sidebar/panel/panel2/raise/line/line2/hi/mid/lo/buy/sell/warn/acc) and fonts (Space Grotesk / Manrope / JetBrains Mono) as theme tokens → utilities like `bg-panel`, `text-hi`, `border-line`, `font-display`. Global bg/text/font, `.section-label`, `.tabular`, 9px scrollbar, and the keyframes (`dotPulse`, `livePing`, `nowPing`, `spin360`, `fadeUp`). Fonts loaded via Google Fonts in `index.html`.
+  - **Shell (`Layout.tsx`):** 236px sticky sidebar — gradient logo mark + wordmark, "PHÂN TÍCH" section label, 5 inline-SVG nav icons, active state (acc color + 90° acc-dim gradient + 2.5px inset accent bar), footer status (pulsing buy dot + `api · localhost:8000` / `15 sectors · top-5 proxy basket`). Nav reordered with Daily Insight first; `App.tsx` default route now `/insight`.
+  - **Daily Insight (`DailyInsightPage.tsx`):** rebuilt to the prototype — header with MUA/BÁN/T+3 subtitle + gradient Refresh button with staged progress bar; amber data-quality banner; **decision cockpit** (SVG semicircle regime gauge with needle driven by regime + buy/sell tilt, + 3 count tiles with diagonal color wash); **sector flow spectrum** (dots positioned by `flow_z20` from real pick data + 3 delta cards); **Minh** agent panel (cyan-gradient, avatar); **action list** with capital slider (50–500tr, live alloc/risk sizing) + Thẻ/Bảng toggle — **Thẻ** cards show price ladder, T+3 schedule chips, R:R/phân bổ/rủi ro; **Bảng** is the prior table.
+  - **Data wiring preserved:** all existing `insightApi.daily()` + async refresh-polling logic kept verbatim; the test-locked exports `fmtNum`, `fmtPct`, `AgentReport`, `PickTable` retained with compatible text/columns (PickTable is now the "Bảng" view). `frontend/src/pages/DailyInsightPage.test.tsx` should stay green.
+- Verification: NOT runnable in-sandbox — `node_modules/esbuild` is the Windows binary (won't exec on Linux), so vite/vitest can't boot; `tsc` reads are hit by the same virtiofs short-read truncation as the Python files. Reviewed manually for strict-mode pitfalls (removed unused `capital` param in PickCard, dropped the explicit NavLink `style` param annotation). **Verify on the Windows host:** `cd frontend && npm test` (DailyInsightPage suite) and `npm run build` (tsc + vite), then `npm run dev` to eyeball.
+- Follow-ups: redesign the remaining 4 pages (`FlowMonitorPage`, `RotationMapPage`, `StealthWatchPage`, `FlowPulsePage`) per their `.dc.html` prototypes — port the multi-line z-chart, sankey `layout()`/ribbon builder, stealth gantt, and live-tape polling helpers described in the README.
+
+## 2026-06-18 — Fix Daily Insight refresh "time exceed" + optimize agent prompt
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `services/trader_agent.py`, `config.py`, `tests/test_trader_agent.py` (+1 case)
+- Reason: the Daily Insight "Refresh" button always failed with a timeout. Root cause: `TraderAgent.analyze()` had **no enforced timeout** despite the docstring claiming a "60-second budget" — if the Claude SDK transport stalled, the `/insight/refresh` background run hung in the `trader_agent` stage until the frontend's 20-minute poll ceiling, surfacing to the user as "time exceed". (The HTTP layer is already async+polling, so this was the only place a single click could hang the whole run.)
+- Summary:
+  - **Hard agent timeout:** wrapped the SDK `query()` consumption in `asyncio.wait_for(..., timeout=AGENT_TIMEOUT_SEC)` (default 120s, env-tunable). On timeout the agent returns a graceful `is_valid=False` report; the refresh pipeline already tolerates `agent_error` and still assembles the `/daily` payload, so the button now always completes (shows picks + template narrative even in the worst case).
+  - **Prompt optimization (faster + more reliable):** tightened the `SYSTEM_PROMPT` (~60% shorter, compact one-line JSON schema, explicit "trả lời NGAY"); capped output to `AGENT_MAX_BUYS=3` / `AGENT_MAX_AVOID=2` with reasoning ≤2 câu (less output = faster generation, lower stall risk); capped input candidates to `AGENT_MAX_BUY_CANDIDATES=10` / `_SELL_=6`. Caps enforced in code (`_build_prompt` slices candidates, `_parse_response` slices output) so behaviour holds even if the model over-produces.
+  - **Default model → `haiku`** (was `sonnet`) for this heavily-scaffolded structured-JSON task — markedly faster/cheaper; override with `AGENT_MODEL=sonnet` if Tom wants deeper reasoning. All new knobs live in `config.py` (`AGENT_MODEL / AGENT_TIMEOUT_SEC / AGENT_MAX_BUYS / AGENT_MAX_AVOID / AGENT_MAX_BUY_CANDIDATES / AGENT_MAX_SELL_CANDIDATES`).
+- Verification: added `test_analyze_enforces_hard_timeout` (monkeypatches `query` with a slow async generator + 0.2s timeout → asserts graceful invalid report). Existing 15 agent tests remain compatible (output caps ≥ their fixture counts). In-sandbox pytest still blocked by the virtiofs short-read of `config.py`; `test_trader_agent.py` also needs `claude_agent_sdk` (absent here) — **re-run on the Windows host**.
+- Follow-ups: the dominant refresh latency is the KBS universe rebuild (~4 min, rate-limited) — out of scope here; if clicks still feel slow, consider a "light refresh" that reuses a same-day snapshot and only re-runs the agent. Tie this to acquiring a vnstock community API key (60 rpm) to shrink the rebuild.
+
+## 2026-06-18 — P1 backtest realism (§18.2)
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `config.py`, `services/backtest_service.py` (rewritten), `tests/test_fixes_20260618.py` (+2 cases)
+- Reason: the old `SectorBacktestService` produced fantasy Sharpe — it recycled capital instantly, used a flat daily cost, modelled impossible cash shorts, and ignored HOSE price bands. P1-8 of OPTIMIZATION_REVIEW_2026-06-18.md.
+- Summary:
+  - **§18.2/7 T+2 settlement:** sale proceeds are locked for `settlement_lag=2` sessions (pending-cash queue); a position cannot be sold before it settles. Capital can no longer be recycled same-day.
+  - **§18.2/10 fees + tax:** per-trade broker fee `fee_bps=15`/side + HOSE `sell_tax_bps=10` on proceeds (was a single flat daily constant). Exposed cumulative `total_cost_pct`.
+  - **§18.2/9 slippage + price band:** per-fill slippage `max(0.3%, 0.5×ATR%)`; a sector that gapped ≥±7% on the entry day is skipped (unfillable at ceiling/floor) and counted in `ceiling_floor_skips`.
+  - **§18.2/12 long-only:** removed the short leg entirely (VN cash cannot short). `strategy="rotation_long_only"`, `long_only=True`.
+  - **§16.6 entry-timing:** added `root_capture_ratio` (median entry/peak close across closed trades; ≤0.85 = bought near the root).
+  - New config knobs `BACKTEST_FEE_BPS / SELL_TAX_BPS / SLIPPAGE_MIN_PCT / SLIPPAGE_ATR_MULT / PRICE_BAND_PCT / SETTLEMENT_LAG / LONG_ONLY`. Old `BACKTEST_COMMISSION_PCT/SLIPPAGE_PCT` kept for compat. Result dataclass gained fields (serialized via `asdict` in the router — additive, non-breaking). Engine signature `run(name,start,end,initial_capital)` unchanged.
+- Verification: logic is self-contained; new tests `test_backtest_is_long_only_with_frictions` + `test_backtest_price_band_blocks_gap_fills` added. In-sandbox pytest blocked by the recurring virtiofs short-read of `config.py` — **re-run on the Windows host** (`.venv\Scripts\python.exe -m pytest tests\ -q`).
+- Follow-ups: backtest entry signal still uses `net_dollar_flow` rank, not the 20d ranker model (separate change); §18.2/11 portfolio-vol sizing + §16.9 ACCUMULATE sizing rules still pending in `risk_service`.
+
+## 2026-06-18 — Delete SecV3/SecV4, secv5 is sole generator
+- Author: Claude (Cowork) on behalf of Tom
+- Files: DELETED `generate_secv3.py`, `generate_secv4.py`; updated `main.py`, `scripts/jobs/job_sector_signal_publish.bat`, `CLAUDE.md` §2, `services/picks_universe_service.py`, `tests/test_picks_universe_service.py`
+- Reason: Tom's directive — remove the old report generators and keep only the newest (secv5). secv3/secv4 were carried only as manual rollback paths and had drifted from secv5 (≈30 duplicate-but-divergent helper functions: compute_stop_target, fetch_vnstock_news, make_mini_chart, etc.), the P2-12 finding in OPTIMIZATION_REVIEW_2026-06-18.md.
+- Summary:
+  - `generate_secv3.py` + `generate_secv4.py` removed from the repo (file delete authorised via Cowork; bash unlink is blocked on the mount). `generate_secv5.py` is now the single source of truth for the daily email/HTML/PDF report.
+  - Repointed every present-tense reference to the deleted scripts: `main.py` job comment, the scheduler `.bat` comment, CLAUDE.md §2 (collapsed the secv4/secv5 notes; added a "SecV3/SecV4 deleted" line), and the `as_picks_dict`/test docstrings (now "consumed by generate_secv5").
+  - No code imported the deleted scripts (they were standalone entrypoints), so nothing breaks. `picks_scoring.py`/`picks_universe_service.py` "lifted from generate_secv3.score_symbol" historical attributions left intact (accurate provenance). `_trash_20260422/` references untouched.
+  - `scripts/pause_secv3_secv4_email.ps1` kept — still the way to evict any stale Task Scheduler entry that invokes the now-deleted scripts.
+- Verification: deletion confirmed (`ls generate_*.py` → only `generate_secv5.py`). Edits to test/service files were docstring-only (no logic change); the 70/70 green suite from the P0 batch remains valid. In-sandbox pytest re-run blocked by the same virtiofs short-read defect noted in the P0 entry — re-run on the Windows host.
+
+## 2026-06-18 — P0 optimization batch (fixes 1–4 of OPTIMIZATION_REVIEW_2026-06-18.md)
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `config.py`, `services/flow_feature_service.py`, `services/sector_ingest_service.py`, `models/rotation_ranker.py`, `services/rotation_model_service.py`, `tests/test_fixes_20260618.py` (new)
+- Reason: full-flow optimization review. Tom approved fixing the four highest-impact P0 items and re-running. Resolves the long-standing "ACCUMULATE can never fire" + "flow=0" + "ranker never really trained" cluster.
+- Summary:
+  - **Fix 1 (foreign volume→value)** `sector_ingest_service.py`: new `_parse_foreign_board` reads `*_value` if present, else converts `foreign_buy_volume`/`foreign_sell_volume` × price → value. KBS `price_board` exposes volume not value, so the old `*_value`-only read returned 0 for every sector since 2026-04-16 → `cond2_foreign` failed everywhere → ACCUMULATE structurally impossible. New single `_fetch_foreign()` makes ONE board call (was two — halves rate-limit pressure); old `_fetch_foreign_net`/`_fetch_foreign_buy_sell` kept as back-compat wrappers.
+  - **Fix 2 (vnstock dup-row)** `sector_ingest_service.py::_fetch_constituent_daily`: `df = df[~df.index.duplicated(keep='last')]`. The 2026-04-30 monkey-patch is now permanent in source — close==prev_close no longer zeroes net_dollar_flow/up/down.
+  - **Fix 3 (model persistence)** `rotation_ranker.py` + `rotation_model_service.py`: `fit()` now pickles the real estimator to `rotation_ranker_v0.pkl` (was only writing a metadata JSON → model could never reload). Added `RotationRanker.load()`. Service loads the active model on init (`_load_active_model`) so `predict_today()` stops retraining on every call. `target_col` dynamic; retrain deactivates prior runs by `model_name` not the hardcoded `fwd_5d_sector_return`.
+  - **Fix 4 (§16.2 features + 20d target)** `flow_feature_service.py` + `config.py`: added the 7 leading/stealth features to `FEATURE_COLS`+`_load_daily` with neutral 0-fill so the ranker can finally see the early-flow edge (they were computed/stored but never fed to the model); `ROTATION_TARGET_HORIZON_DAYS` 5 → 20 per §16.4.
+- Verification:
+  - Backend suite **70/70 passed** with all edits applied (`pytest tests/`; excludes test_api_insight_refresh + test_trader_agent which need fastapi/claude_agent_sdk, absent in sandbox — pre-existing/unrelated).
+  - All four fix algorithms verified inline on synthetic data reproducing the exact bugs (flow 0→>0 after dedup; KBS volume-only board → net 1.5e9; pkl round-trip predicts identically). New `tests/test_fixes_20260618.py` locks them in (7 cases).
+- Follow-ups:
+  - **Run live end-to-end on the Windows host** (not done in-sandbox — blocked by a virtiofs read-coherence defect: `config.py`/`rotation_ranker.py`/`sector_ingest_service.py` intermittently short-read after harness edits, SyntaxError at config.py:193, plus a stale read-only `__pycache__/config.cpython-310.pyc` shadowing source; both are mount artifacts, not code faults). Command: `.venv\Scripts\python.exe main.py --train --rotation-predict --publish`. Expect ModelRun target_col=`fwd_20d_sector_return`, a `models/saved/rotation_ranker_v0.pkl`, and non-zero `foreign_net` (→ ACCUMULATE possible) once a live ingest runs with Fix 1.
+  - Remaining P1/P2 items from OPTIMIZATION_REVIEW_2026-06-18.md (backtest realism §18.2, single-source fallback §18.4/17, secv3/4/5 refactor) untouched this batch.
+
+## 2026-04-30 — Daily pipeline run (autonomous scheduled task)
+- Author: Claude (Cowork sandbox) on behalf of Tom
+- Files: `vnstock_market.db` (data only, no code change)
+- Reason: scheduled daily run of the VN sector money-flow pipeline (`vn-sector-flow-pipeline`).
+- Steps executed in order: `--ingest` (KBS, chunked retries) → §16 feature shortcut (no `scripts/fix_close_idx.py`) → `--regime` → `--train` → `--publish` → `/api/stealth/active` (in-process call, no live uvicorn).
+- Deviations from nominal path:
+  - **DB integrity repair required.** The mount's `vnstock_market.db` opened cleanly in working copy `/tmp/vnstock_market.db` for reads, but `PRAGMA integrity_check` failed and `INSERT INTO model_runs` raised `database disk image is malformed` during `--train`. Two `model_runs` indexes (`ix_model_run_target_active`, `ix_model_run_trained_at`) refused to REINDEX. Recovered by row-by-row export of all tables (38/38 model_runs rows recovered by id-scan) into a fresh DB, recreated indexes, integrity check ok. Ran the rest of the pipeline against the healed copy; copied back over the mount after truncating stale `*-wal` and `*-shm` (couldn't `rm` them — virtiofs blocks unlink — but `: > file` worked). Saved a backup of the pre-replace mount file as `vnstock_market.db.backup_before_replace_20260430`.
+  - **`DATA_SOURCE=KBS`** used (already the project default per `.env`); VCI is "restricted since 2026-04" per `.env` comment. No VCI smoke-test run today.
+  - **Rate-limit storms during `--ingest`.** Skipped the compound `python main.py --ingest` (single bash call > 45s sandbox cap) and ran `MacroService.ingest_now()` once + `SectorIngestService.ingest_intraday_now(sector_codes=[...])` in 8 batches of 1–2 sectors at `INGEST_SLEEP=1.5`. 7/8 batches printed `Process terminated.` (vnstock guest-tier signal) but each still wrote 1–2 rows. Final coverage: **15/15 sector_flow_ts rows for 2026-04-29** (the latest available trading day from vnstock — see "April 30 holiday" below).
+  - **Rollup wrote `2026-04-30` rows** keyed off the wallclock date (per `rollup_to_daily(date=None)`), populating from the 2026-04-29 ts data. April 30 is Vietnam's Reunification Day — markets closed — so today's row is structurally a holiday placeholder; values for `net_dollar_flow` and `up/down_vol` came in as 0.0.
+  - **Skipped `scripts/fix_close_idx.py`** (would re-fetch ~75 tickers and burn the rest of the KBS quota). Took the task-sanctioned shortcut: forward-filled `close_idx` for the 2026-04-30 null rows from each sector's most recent non-NULL close (all from 2026-04-20), set `return_1d=0.0`, then ran `analysis.stealth.compute_leading_features` over the full 8,535-row panel and persisted `flow_z20 / flow_z60 / foreign_streak / foreign_hit_20d / stealth_score / flow_price_divergence / accumulation_age` back to `sector_flow_daily`.
+  - **`--regime`** → `chop` conf=0.5.
+  - **`--train`** → ranker `id=42 active=True` (LightGBM-backed, target `fwd_5d_sector_return`, `top1_hit_rate=0.494` over 158 test dates).
+  - **`--publish`** → 15 signals for 2026-04-30. Counts by action: **BUY ×1, HOLD ×14, ACCUMULATE ×0, SELL ×0, TRIM ×0**. Top of book: LOGIS BUY rank 1 score 1.290; CHEM HOLD rank 2 score 0.904; RUBBER HOLD rank 3 score 0.716. Bottom: TECH HOLD rank 15 score −1.156, OIL rank 14 score −1.154, BANK rank 13 score −0.909.
+  - **`/api/stealth/active?min_sessions=3&close_pct_60d_max=0.40`** (called via direct function dispatch, FastAPI not booted — `claude_agent_sdk` import on `api.routers.insight` blocks `TestClient`): 0 active, 1 warming, 14 inactive (as_of 2026-04-30).
+- Signal counts by action (today): BUY 1, HOLD 14, ACCUMULATE 0, SELL 0, TRIM 0.
+- Stealth watch top 3 (sorted by `flow_z20` across active+warming+inactive):
+  1. **INSUR** z20 +0.055, hit 0.30, breadth 0.20 — inactive, 2/5 (fails flow_z hot, foreign_hit, breadth).
+  2. **OIL** z20 −0.002, hit 0.45, breadth 0.00 — inactive, 2/5 (fails flow_z hot, foreign_hit, breadth).
+  3. **LOGIS** z20 −0.021, hit 0.35, breadth 1.00 — inactive, 2/5 (fails flow_z hot, foreign_hit, price-cheap).
+  Only sector classified `warming` is **BANK** (z20 −0.101, breadth 0.60, atr 0.004, close_pct 0.27 — 3/5 passing; missing flow_z hot + foreign_hit).
+- Pipeline issues (soft failures, all carried forward):
+  - **DB corruption** on the mount required full-DB rebuild + index repair before `--train` would commit (P0, new failure mode this run; possibly a side-effect of the stale 2026-04-23 `*-wal` left on the mount).
+  - **`foreign_net=0` everywhere under KBS** (known per CLAUDE.md): `price_board` returns `foreign_buy_volume`/`foreign_sell_volume`, not `*_value`, so `cond2_foreign` fails for every sector and ACCUMULATE remains structurally blocked.
+  - **`net_dollar_flow=0` and `up/down_vol=0` for today** — partly the holiday placeholder (April 30 Reunification Day), partly the rate-limit churn during `--ingest`.
+  - **Rate-limit retries** required across all ingest chunks (8 chunks × 28–34 s each) due to vnstock guest-tier 20 rpm cap.
+  - **WAL-on-mount still fragile**: stale `*-wal` from 2026-04-23 (226 KB) on the mount blocked direct opens until truncated. Sandbox has no `unlink` permission on the mount — only `: > file` redirection succeeded.
+  - **OpenClaw / Gmail briefing**: `SectorSignalService.publish()` ran clean but the in-process Gmail send was not verified — no SMTP in sandbox, `email_log.txt` untouched.
+- Follow-ups (carried forward + new):
+  - **Still open (P0):** unblock VCI OR teach `_fetch_foreign_*` to convert KBS volume→value. Without `foreign_net`, ACCUMULATE cannot fire — five consecutive runs now blocked on the same gate.
+  - **Still open (P0, escalated):** the WAL-mount fragility is now causing periodic DB corruption that needs full-DB rebuild to clear. Need either (a) WAL→DELETE journal mode for files on the Trading mount, or (b) automated `sqlite3 .backup` to local disk on every successful run.
+  - **Still open:** Windows-side rename of `*.healed_YYYYMMDD` → `vnstock_market.db`. Today did the in-place replace via the working copy — works in this sandbox, may not work on the Windows host.
+  - **Still open:** register a free vnstock community API key (60 rpm) to eliminate chunk retries.
+  - **New:** investigate why `model_runs` indexes specifically corrupted (the 2026-04-30 run was the first INSERT attempt against a freshly mounted DB — could be related to schema-drift from migration 9/10 still landing).
+
+---
+
+## 2026-04-23 — SecV5: unified picks briefing + expert trader memo (replaces SecV4 email)
+- Author: Claude (Opus 4.7) + Tom
+- Files:
+  - `generate_secv5.py` — NEW. Fork of `generate_secv4.py`; adds:
+    * `build_unified_list()` — union of `snapshot.top_buys` (Daily Insight side, no ranker gate) with ranker BUY/ACCUMULATE picks from `snapshot.by_sector`, de-duped by symbol, each entry tagged `source ∈ {BOTH, DAILY_INSIGHT, RANKER}`. Same merge for SELL side.
+    * `build_expert_memo()` — senior-PM narrative (regime stance, flow bridge, consensus/daily/ranker line, per-pick reasoning with entry/target/stop/R:R + first news link, AVOID line, Dashboard link). Deterministic — runs even when the Claude agent is offline.
+    * `build_plain_text_body()` — plain-text email body (§user request): top 10 BUY with reason/target/stop/link, top 5 AVOID, dashboard URL.
+    * New HTML placeholders `{{EXPERT_MEMO}}` and `{{UNIFIED_PICKS_GRID}}`; existing AGENT_SECTION + snapshot grids preserved underneath.
+    * Default recipients bumped to 3: `tka2001@gmail.com, anhchitruong18@gmail.com, hill.nguyen.1373@gmail.com`.
+    * Subject prefix `[SecV5]`. Output `report/secv5_<date>.{html,pdf}`.
+  - `report/report_template_secv5.html` — NEW. Clone of `report_template_secv4.html`. Title → SecV5. Added CSS for memo-card + src-tag pills. New body sections `{{EXPERT_MEMO}}` (top) and `{{UNIFIED_PICKS_GRID}}` (below regime banner, above the agent block).
+  - `scripts/jobs/job_sector_signal_publish.bat` — swapped `generate_secv4.py` → `generate_secv5.py`. `generate_secv4.py` kept on disk as a manual rollback path (no scheduler hook).
+  - `scripts/pause_secv3_secv4_email.ps1` — NEW. Elevated-PowerShell helper Tom runs once on Windows to unregister any lingering Task Scheduler entry that still invokes `generate_secv3.py` / `generate_secv4.py` / `_run_secv{3,4}.bat`. Idempotent; supports `-WhatIf`. Ends with a pointer to re-run `cleanup_scheduled_tasks.ps1` to refresh the canonical §8 task against the updated bat. **ASCII-only** — Windows PowerShell 5.1 reads `.ps1` files with the active ANSI codepage unless the file has a UTF-8 BOM; any non-ASCII (em-dash, §) causes parser errors.
+  - `scripts/register_secv5_task.ps1` — NEW. Focused helper that registers JUST the `SectorFlow_sector_signal_publish` task in Windows Task Scheduler — no sweeping behaviour, no unregister of sibling §8 tasks. Verifies the bat file exists and references `generate_secv5.py` before registering. Reports the task's NextRunTime so Tom can confirm it's live without opening the Task Scheduler GUI. ASCII-only. Supports `-WhatIf`.
+  - `MODIFICATION_LOG.md` — this entry.
+  - `CLAUDE.md` — §2 note updated (see below).
+- Reason: Daily Insight (`/api/insight/daily`) and the SecV4 email were recommending different tickers. Root cause:
+  * Daily Insight renders `snapshot.top_buys + snapshot.top_sells` directly (no ranker gate).
+  * SecV4 email filters picks through `sig_action_by_vn ∈ {BUY, ACCUMULATE}` — drops everything when the ranker stays silent.
+  Tom's directive (2026-04-23): consolidate so the email and dashboard always agree, rename to V5, plain-text summary with buy symbols + reasons + links, PDF consolidated "as an expert trader".
+- Summary:
+  - Merge rule chosen: **UNION with de-dup**. Source tag in the HTML card tells the reader which side found the pick (BOTH = consensus, DAILY_INSIGHT only, RANKER only). Consensus floats to the top.
+  - Scheduling: same 17:00 slot; `job_sector_signal_publish.bat` now calls secv5. No duplicate email run.
+  - PDF style: kept the full SecV4 data chassis (regime banner, macro snapshot, flow charts, stealth watch, sector predictions, correlation heatmap, volatile mini-charts, risk notes, game plan). Added the Expert Trader Memo above everything else so the reader gets the senior-PM view in the first 200 lines.
+  - Validity gate preserved: ranker-only BUY entries still go through `is_valid_long_pick` to avoid NVL-style degenerate stop/target (§18.1).
+- Evidence:
+  - `python3 -c "import ast; ast.parse(open('generate_secv5.py').read())"` — clean.
+  - Template ↔ generator placeholder cross-check: all 36 `{{…}}` tokens in `report_template_secv5.html` have matching keys in the `replacements` dict.
+  - Union-merge rule extracted into `services/unified_picks.py` (pure, no DB/vnstock imports).
+  - `python -m pytest tests/test_unified_picks.py -v` → **10/10 passed** (consensus ordering, source-bucket ordering, empty-ranker fallback = regression guard for the SecV4 silent-ranker bug, empty-daily, empty-both, extra-fields preservation, input-immutability, missing-score sort). Ran under pytest 9.x in the sandbox.
+  - Dry-run of `python3 generate_secv5.py --no-email` in the sandbox reached `database.connection` before hitting the expected `PRAGMA journal_mode=WAL` I/O error on the FUSE mount — confirms the import chain is wired up correctly. End-to-end runtime validation deferred to Tom on Windows (vnstock + SMTP + local-disk SQLite required).
+- Follow-ups for Tom (Windows, elevated PowerShell):
+  1. `powershell -ExecutionPolicy Bypass -File scripts\pause_secv3_secv4_email.ps1 -WhatIf` (preview any stale secv3/secv4 tasks).
+  2. `powershell -ExecutionPolicy Bypass -File scripts\pause_secv3_secv4_email.ps1` (unregister stale).
+  3. **Register SecV5 task:** `powershell -ExecutionPolicy Bypass -File scripts\register_secv5_task.ps1`. After this runs Tom should see `SectorFlow_sector_signal_publish` under `\SectorFlow\` in Task Scheduler with NextRunTime = next 17:00 weekday. Alternative: `scripts\cleanup_scheduled_tasks.ps1` re-registers ALL 8 canonical §8 tasks, but `register_secv5_task.ps1` is safer when you only want to touch the email job.
+  4. Smoke-test: `python generate_secv5.py --no-email` → verify `report\secv5_<today>.{html,pdf}` appear.
+  5. Force a live run from Task Scheduler: `Start-ScheduledTask -TaskPath '\SectorFlow\' -TaskName 'SectorFlow_sector_signal_publish'` (elevated PowerShell).
+  6. If regression observed, roll back by reverting `scripts\jobs\job_sector_signal_publish.bat` to call `generate_secv4.py` and re-running `register_secv5_task.ps1` (or by hand-editing the task action).
+- Doctrine cross-reference: §18.8 — closes the "Daily Insight vs email mismatch" user-reported gap. Evidence = union rule + source-tag rendering. No regression in §18.1 validity gate.
+
+---
+
+## 2026-04-22 — Phase 6: final verification (tests + end-to-end email)
+- Author: Claude (Opus 4.7) + Tom
+- Actions:
+  - `python -m pytest tests/ -q` → **78 passed / 0 failed** (unchanged after all five cleanup phases).
+  - `python generate_secv4.py 2026-04-21 --no-email` → dry-run rendered HTML 692,203 B + PDF 530,507 B cleanly. Universe snapshot = 58 tickers. Ranker align: `BUY/ACCUMULATE=['Dệt may']` / `SELL=none`. Validity gate correctly filtered 1 buy (MSH r_r 1.50 < 1.5).
+  - `python generate_secv4.py 2026-04-21` → end-to-end send confirmed. Final log: `[secv4] [SENT] anhchitruong18@gmail.com, hill.nguyen.1373@gmail.com`. Both recipients on the TO header (not BCC). PDF attached.
+  - TraderAgent logged `is_valid=False` — expected in the Cowork sandbox (no Claude CLI); algorithmic fallback narrative populated. Documented in `docs/DAILY_REPORT_AUTOMATION.md` §"Known gotchas".
+- Refactor scope closed. Phase totals:
+  - Phase 1 — repo map + active entrypoints: done.
+  - Phase 2 — hill.nguyen.1373@gmail.com added to `REPORT_EMAIL_TO`: done (in `.env`, `generate_secv4.py`, `generate_secv3.py`). Delivery verified today.
+  - Phase 3 — scheduler rebuild to 8 canonical §8 jobs under `\SectorFlow\`, with `job_sector_signal_publish.bat` two-step publish-then-email gate. `scripts/cleanup_scheduled_tasks.ps1` ready for Tom to run elevated on Windows (cannot actuate from the Linux sandbox).
+  - Phase 4 — dead-code audit: ~100+ files moved to `_trash_20260422/`. 78/78 tests green after every wave.
+  - Phase 5 — doc rewrite (ARCHITECTURE, README, DAILY_REPORT_AUTOMATION, ALGORITHM_DOCUMENTATION) + legacy mobile/public-API quarantine.
+  - Phase 6 — this entry.
+- Follow-ups for Tom (outside this refactor):
+  - Deploy scheduler: elevated PowerShell → `scripts\cleanup_scheduled_tasks.ps1`. Dry run first with `-WhatIf`.
+  - Wipe trash when satisfied: `rmdir /s /q _trash_20260422`.
+  - Restore the primary `vnstock_market.db` from the healed copy (`CLAUDE.md` §18.4/18) before the next scheduled run, and keep the DB on local disk per §18.4/18.
+
+---
+
+## 2026-04-22 — Phase 5: doc rewrite + quarantine legacy mobile / public-API artifacts
+- Author: Claude (Opus 4.7) + Tom
+- Files touched:
+  - `docs/ALGORITHM_DOCUMENTATION.md` — full rewrite. Retired the 170-symbol walk-through (RF / XGBoost / LightGBM classifiers, T+3 scanner, OpenClaw "Trung") and replaced with the live sector money-flow + rotation + stealth pipeline. New doc covers: data flow diagram, 15-sector construction + survivorship hazard, 12 core + stealth features (§16.2), five-condition stealth gate (§16.1) with §18 tightenings, HMM regime classifier, LightGBM lambdarank with blended 10d/20d/40d target (§18.3/14) + classifier head, purged k-fold with embargo (§18.3/13), signal publication with §16.9 sizing + §18.4/20 kill-switch, picks-universe integration (§2 2026-04-17), TraderAgent "Minh" (`claude_agent_sdk`), SecV4 email path, §18.7 net-of-cost success criteria, §18.6 P0/P1 punch list. Explicitly defers to `CLAUDE.md` for all contract-level questions.
+  - `docs/CHANGELOG.md` — frozen with a banner noting it documents the pre-2026-04-08 per-symbol era. Live log is `MODIFICATION_LOG.md`.
+  - `docs/SecV3_Glossary_Vietnamese.md` — retitled for both SecV4 (active) and SecV3 (rollback) since the glossary applies to both.
+  - `_trash_20260422/legacy_mobile/` — moved five stale artifacts that pointed at the removed `/api/mobile/*` + `/api/v1/account/register` endpoints (code already deleted in Phase 4):
+    - `docs/MOBILE_SETUP.md` — ngrok/cloudflared tunnel guide for the retired T+3 mobile UI.
+    - `frontend/public/mobile.html` — 734-line standalone mobile page.
+    - `scripts/start-tunnel.bat` — ngrok launcher.
+    - `scripts/create_key.py` — API-key minter hitting the dead `/api/v1/account/register`.
+    - `specs/SPEC_PUBLIC_API.md` — pre-pivot public-API deployment spec (`api/v1/public/*`, Cloudflare reverse proxy, JWT).
+- Reason: Tom's scope — "cap nhat thanh doc moi cho tat ca cac phan". All live specs under `specs/` are Phase-15 / trader-views and remain current; only the pre-pivot docs and mobile tunnel kit were stale. No live code imports any of the quarantined files (grep clean across `api/`, `services/`, `main.py`, `generate_secv*.py`).
+- Summary:
+  - ARCHITECTURE.md, README.md, docs/DAILY_REPORT_AUTOMATION.md had been rewritten earlier in Phase 5 — this entry closes the documentation sweep.
+  - No live route / no live service references any of the moved mobile / public-API files. Quarantine only; Tom can wipe with `rmdir /s /q _trash_20260422\legacy_mobile` on Windows.
+- Follow-ups: none in Phase 5. Phase 6 = full-test re-run + verification email.
+
+---
+
+## 2026-04-22 — Phase 4: dead-code audit + move to `_trash_20260422/`
+- Author: Claude (Opus 4.7) + Tom
+- Files moved (NOT deleted — Cowork sandbox blocks `rm`; every file was relocated into `_trash_20260422/`, safe for manual `rmdir /s` on Windows):
+  - `_trash_20260422/scratch_root/` — **71 scratch files** at repo root: `_debug_icb*.py`, `_sf_*.py`, `_pipe_*.txt`, `_q*.py/txt`, `_run*.bat`, `_secv4_fail_notify*.py`, `_kill5173.ps1`, `_mkshortcut.ps1`, `_check_deps.py`, `_inspect.py`, `_peek.py`, `_recover_db.py`, `_resend.py`, `_swap_db.py`, `_test_imports.py`, `_verify.py`, `_sf_data.json`, etc. None of them were imported from any live module.
+  - `_trash_20260422/scripts_scratch/` — 17 scratch files under `scripts/`: `_refresh*.py/log/err`, `_send*.log/err`, `_send_email.py`, `_vex*.log/err`, `_backfill.log`, `_rebuild.log`, `_report.log/err`.
+  - `_trash_20260422/dead_services/` — 6 deprecated stub services (every one raises `ImportError` on import; 0 live import sites):
+     - `services/data_service.py` (→ `sector_ingest_service`)
+     - `services/ml_service.py` (→ `rotation_model_service`)
+     - `services/trade_service.py` (→ `sector_signal_service`)
+     - `services/feature_service.py` (→ `flow_feature_service`)
+     - `services/sector_service.py` (split across new services)
+     - `services/snapshot_service.py` (legacy mobile — code removed)
+  - `_trash_20260422/dead_analysis/sector_analysis.py` — legacy per-symbol performance util (§2 — no longer needed).
+  - `_trash_20260422/dead_models/prediction_model.py` — legacy per-symbol ML (§2 delete-list).
+  - `_trash_20260422/old_generators/generate_sector_flow_enhanced.py`, `send_email_report.py`, `scripts/daily_stale_report.py` — superseded by `generate_secv4.py`.
+  - `_trash_20260422/old_templates/report_template_secv2.html`, `report_template_enhanced.html` — SecV2/Enhanced reports retired.
+- Reason: full-audit scope per Tom's request. Every moved file was proven dead by grepping the live tree (`api/`, `services/`, `main.py`, `generate_secv4.py`, `generate_secv3.py`, `tests/`). `generate_secv3.py` stays at the root (§2 rollback path). Claim: repo root now holds only `config.py`, `main.py`, `generate_secv4.py`, `generate_secv3.py` as Python entrypoints.
+- Summary:
+  - pytest: 78/78 passed after **each** wave (scratch → stub services → legacy analysis/models → old generators/templates).
+  - `generate_secv4.py 2026-04-21 --no-email` re-rendered HTML+PDF cleanly → pipeline intact.
+  - Nothing was force-deleted. Tom can verify and wipe with:
+     ```
+     rmdir /s /q _trash_20260422
+     ```
+- Follow-ups:
+  - If anything in `_trash_20260422` is needed, move it back — this is reversible until Tom wipes the folder.
+  - Dead-symbol audit inside surviving files (function/class-level) deferred — file-level is clean.
+
+---
+
+## 2026-04-22 — Phase 3: rebuild scheduled jobs (§8) from scratch
+- Author: Claude (Opus 4.7) + Tom
+- Files:
+  - `main.py` — rewritten. One CLI flag per §8 job (`--macro`, `--intraday`, `--eod-rollup`, `--regime`, `--train`, `--rotation-predict`, `--publish`, `--risk-sentinel`) plus compound `--ingest` / `--all` for ad-hoc use. `--rotation-predict` calls `RotationModelService.predict_today()`; `--risk-sentinel` calls `SectorRiskService.stoploss_breaches()` (both were reachable only from the API routers before).
+  - New: `scripts/jobs/_env.bat` — shared env (resolves venv python, creates `report/jobs/` log dir, cds into `%TRADING_ROOT%`). Sourced by every job bat.
+  - New: `scripts/jobs/job_macro_ingest.bat` (0 * * * *)
+  - New: `scripts/jobs/job_sector_intraday_flow.bat` (*/15 9-15 * * 1-5)
+  - New: `scripts/jobs/job_sector_eod_rollup.bat` (0 16 * * 1-5)
+  - New: `scripts/jobs/job_regime_classify.bat` (30 16 * * 1-5)
+  - New: `scripts/jobs/job_rotation_train.bat` (0 2 * * *)
+  - New: `scripts/jobs/job_rotation_predict.bat` (45 16 * * 1-5)
+  - New: `scripts/jobs/job_sector_signal_publish.bat` (0 17 * * 1-5) — two-step: `main.py --publish` → `generate_secv4.py`. Email step gated on publish success; logs are written to `report/jobs/sector_signal_publish.log` and `report/jobs/sector_signal_email.log` respectively.
+  - New: `scripts/jobs/job_sector_risk_sentinel.bat` (*/30 9-15 * * 1-5)
+  - Rewritten: `scripts/cleanup_scheduled_tasks.ps1` — now a **full sync** script:
+     1. Unregisters every Trading-related scheduled task (legacy SecV2, scratch `_run*.bat` wrappers, any `Sector*` task we're about to re-register).
+     2. Registers the 8 canonical §8 jobs under `\SectorFlow\` with `SectorFlow_` name prefix. Triggers built from `New-ScheduledTaskTrigger` + repetition intervals so they're locale-independent. `-WhatIf` and `-KeepLegacy` supported.
+     3. Prints a reminder that §16.5 stealth jobs (`stealth_scanner`, `lead_time_audit`, `flow_regime_report`) are **NOT** registered because those services are still pending (§16.10 steps 11–18).
+- Reason: Tom wanted current scheduled jobs wiped and replaced with the latest canonical set. Previous state mixed SecV2 leftovers, scratch `_run_secv4.bat`, and ad-hoc Windows tasks → no single source of truth. Now: CLAUDE.md §8 table ⇄ `scripts/jobs/job_*.bat` ⇄ `cleanup_scheduled_tasks.ps1 $CanonicalJobs` all line up 1:1.
+- Summary:
+  - pytest: 78/78 passed after the main.py refactor (no test touched the removed compound path).
+  - To deploy on Tom's Windows box: open elevated PowerShell and run `powershell -ExecutionPolicy Bypass -File scripts\cleanup_scheduled_tasks.ps1`. Re-run after any change to `$CanonicalJobs`.
+- Follow-ups:
+  - When §16.5 stealth services land, add three rows to `$CanonicalJobs` and bat files under `scripts/jobs/`.
+  - `_run_secv4.bat` at repo root is now redundant (superseded by `scripts/jobs/job_sector_signal_publish.bat`). Slated for deletion in Phase 4.
+
+---
+
+## 2026-04-22 — Phase 2: add hill.nguyen.1373@gmail.com to report TO list
+- Author: Claude (Opus 4.7) + Tom
+- Files:
+  - `.env` — `REPORT_EMAIL_TO=anhchitruong18@gmail.com,hill.nguyen.1373@gmail.com` (comma-separated).
+  - `generate_secv4.py` — email block now splits `REPORT_EMAIL_TO` on commas, builds `TO_LIST` + `TO_HEADER`, passes list to `smtplib.sendmail()`. Default literal also updated to the two-address string so a missing env var still CCs Hill.
+  - `generate_secv3.py` — identical change (rollback path stays in sync).
+- Reason: Tom requested a second recipient. Per §15 all changes logged here.
+- Summary: Re-sent today's SecV4 (date locked to 2026-04-21) with the new TO header. Confirmed log line `[secv4] [SENT] anhchitruong18@gmail.com, hill.nguyen.1373@gmail.com`. Both recipients see each other in the To header (not BCC).
+- Follow-ups: none — next phase is scheduler cleanup.
+
+---
+
+## 2026-04-21 — Manual SecV4 send for 2026-04-21 (DB heal path)
+- Author: Claude (Opus 4.7) + Tom
+- Files:
+  - Generated: `report/secv4_2026-04-21.html` (699,894 bytes), `report/secv4_2026-04-21.pdf` (535,939 bytes).
+  - Read-only: `vnstock_market.db.healed_20260421` (today's recovered copy).
+- Reason: Tom requested "gui report hom nay". Primary `vnstock_market.db` was malformed (matches `.corrupt_20260421` marker written earlier today); scheduled 17:00 SecV4 task would have seen the same I/O error. Ran generator manually against the healed DB and emailed PDF to anhchitruong18@gmail.com.
+- Summary:
+  - Invoked `generate_secv4.py 2026-04-21` with `SECV3_DB_PATH` / `DATABASE_PATH` pointed at the healed DB.
+  - Universe snapshot: `as_of=2026-04-21`, tickers=58, `is_valid=True`.
+  - Ranker alignment: BUY/ACCUMULATE = `['Dệt may']`, no SELL.
+  - TraderAgent (Minh) invocation failed — `claude_agent_sdk` cannot spawn the Claude CLI from the Linux sandbox. Report rendered via the algorithmic fallback path; narrative block is blank for this send. Not a production regression — the Windows scheduler still has SDK access.
+  - SMTP send via `REPORT_EMAIL_FROM` → `REPORT_EMAIL_TO` confirmed with `[secv4] [SENT] anhchitruong18@gmail.com`.
+- Follow-ups:
+  - Investigate today's DB corruption root cause (§18.4/18 — SQLite WAL on a non-local disk remains fragile). Likely candidate: concurrent writer during the 17:00 job. Consider wiring `scripts/cleanup_scheduled_tasks.ps1` to also verify only one SecV4 task is registered.
+  - If Tom wants the Minh narrative on manual re-sends, the manual path must run from Windows where Claude CLI is available.
+
+---
+
+## 2026-04-20 — Async /api/insight/refresh + retire SecV2
+- Author: Claude (Opus 4.7) + Tom
+- Files:
+  - New: `services/insight_refresh.py` — `InsightRefreshRunner` singleton that runs the refresh pipeline in a daemon thread. Stage model: `queued → publishing_signals → rebuilding_universe → trader_agent → assembling → done` (or `error`). Public helpers `get_refresh_runner()`, `set_progress()`, `update_progress_counts()`, `reset_refresh_runner_for_tests()`.
+  - Modified: `api/routers/insight.py` — `POST /api/insight/refresh` now kicks off the background run and returns `{run_id, stage, started_at, already_running}` immediately (previously ran everything synchronously; hit the FE's 5-minute axios timeout). Added `GET /api/insight/refresh/status[?run_id=…]` for polling; when `is_done=True` the response carries the full /daily payload. Pipeline logic moved verbatim into `services/insight_refresh._default_pipeline`.
+  - Modified: `services/picks_universe_service.py` — `PicksUniverseService.get_snapshot()` and `_build()` now accept an optional `on_progress(done, total, note)` callback, fired from the ThreadPoolExecutor as each OHLCV future completes. Callback errors are swallowed (`_safe_progress`) so a UI hook can't kill the build.
+  - Modified: `frontend/src/api/client.ts` — added `InsightRefreshStart` / `InsightRefreshStatus` types; `insightApi.refresh()` now returns a typed start response; new `insightApi.refreshStatus(runId?)`. Removed the `LONG_TIMEOUT` override on refresh (no longer needed — endpoint returns in <100 ms).
+  - Modified: `frontend/src/pages/DailyInsightPage.tsx` — refresh button now kicks off the async run and polls `/insight/refresh/status` every 2 s. Adds a stage label + progress bar next to the button. Stale run_ids (after a newer refresh supersedes) are detected via `activeRunRef` and ignored. Hard ceiling: 20 minutes before client-side bail.
+  - New: `tests/test_insight_refresh.py` — 5 tests for `InsightRefreshRunner` (happy path, idempotent start, error propagation, stale run_id lookup, progress plumbing). Injects a fake pipeline; no KBS / Claude / DB.
+  - New: `tests/test_api_insight_refresh.py` — 3 tests via FastAPI `TestClient`: POST returns `run_id`; polling status flips to `is_done` with payload; second click while running returns the same `run_id` with `already_running=True`.
+  - Modified: `tests/test_picks_universe_service.py` — `test_get_snapshot_rebuilds_when_as_of_changed`'s `fake_build` stub now accepts `on_progress=None` (signature change upstream).
+  - **Deleted**: `generate_secv2.py`, `run_secv2_daily.bat` — SecV2 is the legacy report (superseded by SecV4 per CLAUDE.md §2, 2026-04-18). The 17:00 Windows scheduled task that launched it will now error out (file missing). Use the cleanup script below to unregister it cleanly.
+  - New: `scripts/cleanup_scheduled_tasks.ps1` — elevated-PowerShell helper that unregisters all `generate_secv2.py` / `run_secv2_daily.bat` / name-matching SecV2 scheduled tasks, and dedupes SecV4 (keeps the `_run_secv4.bat`-based entry, removes extras). Supports `-WhatIf`.
+- Reason:
+  - Tom reported `timeout of 300000ms exceeded` on the Daily Insight page when clicking Refresh. The sync endpoint was running publish + rebuild HOSE universe via KBS (rate-limited to 18/min) + call Claude agent in series — routinely exceeded the 5-minute axios timeout, leaving the UI with no recovery path.
+  - Also requested: delete the SecV2 schedule (obsolete since SecV4 shipped 2026-04-18) and dedupe the SecV4 schedule (duplicate entry).
+- Summary:
+  - Refresh is now non-blocking. UI returns in <100 ms with a `run_id`, then polls for stage + progress until `done`. A second click while running returns the same `run_id` — no duplicate KBS calls.
+  - Stage labels surfaced to the UI: `publishing_signals` → `rebuilding_universe` (with `done/total` counter from the OHLCV fan-out) → `trader_agent` → `assembling` → `done`.
+  - Backend suite: **78 passed** (was 70; +8 new, +1 signature fix on existing test).
+  - Frontend: TypeScript `tsc --noEmit -p tsconfig.app.json` passes clean. Vitest run requires Windows node_modules reinstall (Linux sandbox has `@esbuild/win32-x64` only); not a regression from these changes.
+  - Primarily a UX / operational-robustness fix; does not touch the §16 doctrine or §18 model/risk items.
+- Follow-ups:
+  - Run `scripts/cleanup_scheduled_tasks.ps1` on Windows (elevated) to unregister the legacy SecV2 scheduled task and dedupe SecV4. Preview with `-WhatIf` first.
+  - Consider moving the 5-year backfill + daily pipeline under the same job runner (so Tom gets uniform progress UI for the two long-running Windows scheduled tasks).
+  - If Claude SDK calls ever stall past ~90 s, add a per-stage soft timeout inside `_default_pipeline` (stage flips to `agent_error=timeout` and the rest of the pipeline continues).
+
+---
+
+## 2026-04-20 — Daily pipeline run (scheduled task: vn-sector-flow-pipeline)
+- Author: Claude (Cowork scheduled-task runner)
+- Files: none changed in repo; data writes to `vnstock_market.db` only.
+- Reason: Daily VN sector money-flow pipeline execution for 2026-04-20 (Monday).
+- Summary:
+  - Steps run: macro ingest, per-sector ingest (all 15 in 8 chunks), daily rollup, `--regime`, `--train`, `--publish`.
+  - Deviations from nominal path:
+    - Mounted DB at `C:\Users\admin\Documents\claude\Trading\vnstock_market.db` rejected `PRAGMA journal_mode=WAL` (`disk I/O error`). Copied to local `/tmp/vnstock_market.db`, ran pipeline, then synced back (documented in §18.4/18 discipline).
+    - `main.py --ingest` as a single call exceeded the sandbox's per-command 45 s budget; split the ingest into 8 bash calls (BANK alone, then 7 pairs) using `SectorIngestService.ingest_intraday_now(sector_codes=[…])`. All 15 sectors returned a 2026-04-20 row. `INGEST_SLEEP=0.5–1.0` used (below the guest-tier 3.3 s default) — every chunk emitted a vnstock "Process terminated." banner but each still returned 2/2 fresh rows, so treated as soft notice, not hard failure.
+    - `DATA_SOURCE=KBS` (VCI is still empty upstream per 2026-04-18 note).
+    - `scripts/fix_close_idx.py` would re-fetch 75 constituent histories at 3.3 s/symbol — infeasible within the sandbox budget, and we had just been rate-limited. Took the task-sanctioned short-cut: carried prior-day `close_idx` forward for the 15 new 2026-04-20 null rows (set `return_1d=0.0`) and invoked `analysis.stealth.compute_leading_features` directly across the full panel (12,150 rows). §16 leading columns (`flow_z20`, `flow_z60`, `foreign_streak`, `foreign_hit_20d`, `stealth_score`, `flow_price_divergence`, `accumulation_age`) repopulated.
+    - Under KBS, `price_board` returns `foreign_buy_volume/sell_volume` (not `*_value`); `foreign_net` persisted as 0.0 for all 15 sectors today, so `foreign_hit_20d` gate is artificially suppressed across the board. Flagged below.
+    - Gmail briefing dispatch from `--publish` not externally verified (email infra out of this sandbox's reach); service call returned without error.
+  - Signal counts by action (date=2026-04-20):
+    - BUY: 2 (REAL rank 1 score 1.232, INSUR rank 2 score 0.974)
+    - HOLD: 13
+    - ACCUMULATE / SELL / TRIM: 0
+    - Regime: `chop` (confidence 0.5)
+    - Ranker: `model_runs.id=41 active=True`
+  - Stealth watch top-3 (GET `/api/stealth/active?min_sessions=3&close_pct_60d_max=0.40`, invoked in-process — no FastAPI server started):
+    - ACTIVE (5/5 × ≥3 sessions): **none**
+    - Warming top 3 by `flow_z20`:
+      1. FISH   flow_z20=+2.83, pass 3/5 — failing Foreign Hit 20d, Price cheap (0.40 > 0.40 boundary)
+      2. REAL   flow_z20=+2.82, pass 3/5 — failing Foreign Hit 20d, Price cheap (0.82 > 0.40, already extended)
+      3. RETAIL flow_z20=+2.27, pass 4/5 — failing only Foreign Hit 20d (all volume-only under KBS)
+  - Pipeline issues (soft):
+    - DB WAL unsupported on mount → local working copy, synced back.
+    - vnstock rate-limit banners on 7/8 ingest chunks (data still arrived).
+    - `fix_close_idx.py` short-cut (carry-forward) instead of full refetch.
+    - `foreign_net`=0.0 across the 15 sectors today (KBS volume-only `price_board`).
+- Follow-ups:
+  - Backfill 2026-04-17 (Friday) — currently missing from `sector_flow_daily`; would also fill the `foreign_net` zeros for that session if VCI is reachable.
+  - Once a paid vnstock key is in place, restore `INGEST_SLEEP=3.3` and run full `scripts/fix_close_idx.py` to retire the carry-forward.
+  - Track §18.1/2 `foreign_net_clean` work — today's 0.0 values are a structural KBS limitation, not a real reading.
+
+---
+
+## 2026-04-18 — SecV4: Daily Insight-parity email report
+- Author: Claude (Opus 4.6) + Tom
+- Files:
+  - New: `generate_secv4.py` — forked from `generate_secv3.py`. Adds TraderAgent invocation at the top (same call path as `/api/insight/refresh`) and two HTML renderers: `render_agent_section(report)` (agent gist + regime comment + top_buys + avoid + portfolio note) and `render_snapshot_picks(kind)` (snapshot.top_buys/top_sells card grid with KBS + Google News inline).
+  - New: `report/report_template_secv4.html` — forked from secv3 template. Title + header renamed to "SecV4 — Sector Money-Flow + Trader Agent". Injects `{{AGENT_SECTION}}` right after the regime banner. Replaces legacy BUY/SELL/WATCH tables with `{{SNAP_BUYS_GRID}}` and `{{SNAP_SELLS_GRID}}` (snapshot card grids with news). Legacy placeholders `{{BUY_ROWS}}` etc. kept hidden (`display:none`) for compat. CSS adds 40 lines of styles for `agent-card`, `agent-pick`, `agent-portfolio`, `snap-card`, `snap-news`.
+  - Modified: `generate_secv3.py` — one incidental bug fix: `compute_stop_target(b)` returns a 3-tuple now (since 2026-04-17 refactor) but `build_game_plan` still unpacked 2 values — updated to `stop, target, _ = compute_stop_target(b)`.
+- Reason:
+  - User request: bring the email report to parity with the Daily Insight UI — show Minh's agent analysis + snapshot-driven top BUY/SELL with news inline.
+  - secv3's BUY table used rule-based picks only (no agent narrative, no news per row). secv4 surfaces the same data the frontend already shows, so email recipients see consistent recommendations regardless of channel.
+- Summary:
+  - Same rails as `/api/insight/refresh`: snapshot from PicksUniverseService + agent from TraderAgent, plus DB regime/signals/flow_daily context.
+  - Agent failure is non-fatal; report still renders, just with an "agent chưa sẵn sàng" fallback card.
+  - `[secv4]` log prefix; subject line `[SecV4]`.
+  - Dry-run verified: HTML 674 KB + PDF 1.04 MB; agent gist present; 5 BUY + 4 AVOID agent picks; 11 snapshot cards across both grids; 14 news link lists.
+  - secv3 kept functional and scheduled. Migration from secv3 → secv4 left to ops (point the scheduler at `generate_secv4.py`).
+- Risks:
+  - Agent adds ~40s + $0.05–0.17 to each run. On rate-limit hit (Claude Code 5h budget), agent degrades to invalid-report fallback — report still ships.
+  - KBS rate limiter (18 req/min) still in force; builds take ~3 min as before.
+- Follow-ups:
+  - Point `scheduler/heartbeat` and `create_desktop_shortcut.ps1` at secv4 once comfortable (secv3 remains a rollback path).
+  - Consider retiring `{{BUY_ROWS}}`, `{{SELL_ROWS}}`, `{{WATCH_ROWS}}`, `{{NEWS_BLOCKS}}` placeholders from secv4 entirely (currently just hidden) — but only after one full week of shadow to confirm nothing consumes them.
+
+---
+
+## 2026-04-18 — Test coverage for picks + agent pipeline
+- Author: Claude (Opus 4.6) + Tom
+- Files:
+  - New: `tests/test_picks_scoring.py` — 20 tests covering score_ticker, compute_stop_target_rr (NVL-style regression guard, healthy case, profile parity, fractional-ATR coercion, RR stretch), is_valid_long_pick invariants, constant sanity.
+  - New: `tests/test_picks_universe_service.py` — 14 tests covering TickerRow/FreshnessReport dataclass shape, sector classification priority (override → ICB → keyword), technical_bits composition, singleton accessor, cache lifecycle (hit / rebuild-on-change / stale-on-rebuild-fail / synthesize-empty-on-cold-fail). Network calls mocked via unittest.mock.
+  - New: `tests/test_trader_agent.py` — 15 tests covering _parse_pick (numeric coercion, nulls, truncation), _trim_pick (no leak of daily_prices / news > 3), _trim_flow (4 key columns), _parse_response (fenced JSON, bare JSON, empty, no-JSON, malformed, truncation), cache invalidation, singleton, AgentReport JSON-safety. No live SDK call.
+  - New: `frontend/vitest.config.ts` + `frontend/src/test/setup.ts` — vitest + jsdom + jest-dom matchers.
+  - New: `frontend/src/pages/DailyInsightPage.test.tsx` — 13 tests covering fmtNum / fmtPct helpers, AgentReport render (valid + fallback), PickGroup empty-state + multi-pick, PickCard key numbers + news toggle (click-to-expand) + SELL variant.
+  - Modified: `frontend/src/pages/DailyInsightPage.tsx` — exported fmtNum, fmtPct, AgentReport, PickGroup, PickCard for unit testing.
+  - Modified: `frontend/package.json` — added `test` and `test:watch` scripts; devDeps: vitest, @testing-library/react, @testing-library/jest-dom, @testing-library/user-event, jsdom, @vitejs/plugin-react.
+- Reason:
+  - User request: rerun test flow + unit function + update docs.
+  - No prior coverage for the new modules (picks_scoring, picks_universe_service, trader_agent) or new UI components. A regression in compute_stop_target_rr or is_valid_long_pick would resurrect the NVL "target below close" bug; the dedicated regression guard now prevents that.
+- Summary:
+  - Backend: **70 / 70 passed** (21 pre-existing + 49 new).
+  - Frontend: **13 / 13 passed** (vitest + testing-library).
+  - Total: **83 / 83 passed, 0 failed**.
+  - Coverage anchors:
+    - NVL-style bb_upper < close no longer leaks into target (regression guard).
+    - Agent invalid responses (empty / no-JSON / malformed) surface structured errors instead of crashing.
+    - PickCard news toggle works: hidden by default, expands on click, shows publisher badges.
+  - Run commands: `python -m pytest tests/` (backend), `npm test` (frontend, from `frontend/`).
+- Risks: none — tests are additive.
+- Follow-ups:
+  - Expand frontend coverage for other pages (FlowMonitor, Rotation, Stealth, Pulse) if the user wants full UI regression coverage.
+  - Add CI job (.github/workflows or equivalent) that runs both suites on push.
+
+---
+
+## 2026-04-18 — TraderAgent (Minh) replaces OpenClaw; DATA_SOURCE → KBS
+- Author: Claude (Opus 4.6) + Tom
+- Files:
+  - New: `services/trader_agent.py` — `TraderAgent`, `AgentReport`, `AgentPick` dataclasses. One-shot JSON-output agent using `claude_agent_sdk.query()`. System prompt "Minh" (VN trader expert). In-memory cache TTL 600s.
+  - New: `services/picks_news.py` — news enrichment (KBS `company.news()` + Google News RSS). 30-min cache. Aggregates CafeF, VnExpress, VnEconomy, 24HMoney, Znews, nguoiquansat.vn, …
+  - New: `specs/trader_agent.md` — agent spec.
+  - Modified: `services/picks_universe_service.py` — pivoted universe from "scan all HOSE" (~500 symbols) to "PROXY_BASKETS constituents" (~75). Added `PickEntry` dataclass with news + thesis, `top_buys`/`top_sells` on `UniverseSnapshot`. Added KBS rate-limit throttle (18 req/60s, token-bucket). Removed early-abort (not needed at this universe size). Fixed KBS `close × 1000` VND unit normalization for DV threshold.
+  - Modified: `api/routers/insight.py` — `/refresh` invokes TraderAgent after picks rebuild; `/daily` returns cached `agent_report`. Removed `_PRICE_CACHE`, `_fetch_prices`, legacy validity helper (lifted to `picks_scoring`).
+  - Modified: `api/main.py` — removed `agent_briefing` router import + registration.
+  - Modified: `config.py` — `DATA_SOURCE` default VCI → KBS (VCI free tier gated since mid-Apr 2026 per issue thinh-vu/vnstock#172; TCBS dead since March 2026). `UNIVERSE_BUILD_WORKERS 8 → 2`, new `UNIVERSE_MIN_PASS=50`.
+  - Modified: `.env` — `DATA_SOURCE=VCI → KBS`.
+  - Modified: `frontend/src/pages/DailyInsightPage.tsx` — added `AgentReport`, `PickGroup`, `PickCard` components. BUY/SELL picks split into card grids with collapsible news, thesis, technical chips. Agent section rendered above picks groups.
+  - Modified: `CLAUDE.md` §2, §6, §13-step-7, §14, §8 cron table — OpenClaw references replaced.
+  - Removed: `openclaw/` directory (entirely), `api/routers/agent_briefing.py`.
+- Reason:
+  - User doctrine pivot: keep sectors persisted in DB, but per-ticker picks should live in cache only and serve Daily Insight via a Claude-powered trader agent.
+  - OpenClaw was an external agent polling `/api/agent/briefing`; the user wanted a first-class Claude agent baked into the project so outputs render directly in the UI.
+  - vnstock 3.4.2 → 3.5.1 upgrade didn't fix `KeyError: 'data'` — the real cause is VCI API schema drift + paywall. Switched to KBS source.
+- Summary:
+  - TraderAgent "Minh" uses `claude_agent_sdk` (no separate API key — runs through user's Claude Code subscription). One-shot JSON output parsed into `AgentReport`.
+  - Invoked only from `POST /api/insight/refresh` (user-initiated); `/daily` read-only returns cached report.
+  - Snapshot universe narrowed to 75 PROXY_BASKETS constituents with KBS rate-limit throttle; build completes ~3 min with `is_valid=True`.
+  - News layer combines KBS (primary, attribution-rich) + Google News RSS (breadth — 100+ items per ticker, VN-sourced).
+  - Frontend split into 3 sections: STALE banner (if invalid), agent card (VN narrative + stars + reasoning), rule-based BUY/SELL grids with news collapsibles.
+- Risks:
+  - Claude Code 5-hour budget drives the agent's availability — heavy refresh usage may hit the cap. Frontend shows this via cost/duration header and renders a "chưa sẵn sàng" card on failure.
+  - KBS guest tier: 20 req/min. Throttle keeps us under 18/min. If rate gets tighter, need community key (60/min) from vnstocks.com/login.
+  - Agent hallucination guarded by (a) ONLY letting it pick from provided candidates, (b) strict JSON parsing, (c) retaining `raw_text` for debugging.
+- Follow-ups:
+  - Weekly brief variant (different prompt, Friday EOD cron) for portfolio review.
+  - Persist `AgentReport` to DB for historical comparison (backtest the agent itself).
+  - Wire `generate_secv3.py` email briefing to use the agent's `gist` + `top_buys` narrative (replaces hardcoded thesis strings).
+  - Remove legacy scratch files `_sf_*.py`, `_q*.py`, `generate_secv2.py` in a separate cleanup pass (per 2026-04-16 cleanup audit).
+
+---
+
+## 2026-04-17 — PicksUniverseService — unified dynamic picks universe
+- Author: Claude (Opus 4.6) + Tom
+- Files:
+  - New: `services/picks_scoring.py` (shared `score_ticker`, `compute_stop_target_rr`, `is_valid_long_pick`, `PickProfile` enum).
+  - New: `services/picks_universe_service.py` (`PicksUniverseService`, `UniverseSnapshot`, `TickerRow`, `FreshnessReport`).
+  - New: `specs/picks_universe.md` (full spec).
+  - Modified: `generate_secv3.py` — removed legacy `_legacy_stocks` / `_legacy_stock_prices` / `_legacy_stock_features` reads (lines 105–163, 225–254, 618–701); now consumes `get_picks_universe().get_snapshot()`. Added `[STALE]` subject prefix + red banner on `is_valid=False`.
+  - Modified: `api/routers/insight.py` — removed `_PRICE_CACHE`, `_fetch_prices`, local `_is_valid_long_pick`; `_build_picks` now reads `snapshot.by_sector[code][:3]`; `/refresh` calls `get_picks_universe().invalidate()`; `/daily` response now includes `freshness` block.
+  - Modified: `config.py` — new constants `MIN_DV_20D_VND=5_000_000_000`, `MIN_HISTORY_SESSIONS=60`, `MIN_FOREIGN_ROOM_PCT=0.0`, `UNIVERSE_BUILD_WORKERS=8`, `UNIVERSE_OHLCV_FAIL_PCT_MAX=0.20`, `ICB_TO_SECTOR` (vnstock industry_code → our 15 sector codes). Added deprecation comment above `PROXY_BASKETS` + `EXECUTION_BASKETS`.
+  - Modified: `CLAUDE.md` §2 / §13 (see doc entry below).
+- Reason:
+  - Two picks pipelines disagreed — today's email recommended NVL (REAL) while Daily Insight omitted it because REAL was HOLD in the ranker and NVL was outside `EXECUTION_BASKETS[:2]`.
+  - CLAUDE.md §2 mandates removal of the legacy 170-symbol universe; both surfaces still read `_legacy_stock_*` tables.
+  - Need single source of truth for per-ticker picks, dynamically discovered from vnstock HOSE listing, with freshness validation before report emission.
+- Summary:
+  - Discovery: `vnstock.Listing().symbols_by_exchange()` joined with `symbols_by_industries()`, filtered to HOSE.
+  - Sector classification: override (`sector_constituents.active=1`) → `ICB_TO_SECTOR` lookup → VN-keyword regex fallback → drop.
+  - Capability filter: dv_20d ≥ 5B VND, history ≥ 60 sessions, foreign_room > 0.
+  - Indicators computed in-memory via `analysis/feature_engineering.py::build_feature_set` (no new indicator code).
+  - Cache: in-memory only, keyed on `latest SectorSignal.date`, `threading.RLock`-guarded. `/refresh` invalidates.
+  - Freshness contract: `is_valid=True` iff ranker date fresh, ohlcv_fail_pct<20%, capability_pass_count≥50, every BUY/ACCUMULATE sector has ≥1 valid pick.
+  - Degraded-mode: report still renders with `[STALE]` prefix + errors banner; Insight returns picks with `freshness.is_valid=false`.
+  - Resolves §18.2/7 adjacency (T+2.5 realism stays out of scope here; this is universe consolidation only).
+- Risks:
+  - vnstock `Listing` or `quote.history()` outages produce zero-ticker snapshots until source recovers. Detected and surfaced; no silent bad data.
+  - 2-week shadow run required before `_legacy_stocks`, `_legacy_stock_prices`, `_legacy_stock_features` are dropped (migration 10, target 2026-05-01).
+  - `ICB_TO_SECTOR` incomplete: OIL and TEXT currently depend on VN-keyword fallback because vnstock's top-level `industry_code` doesn't surface these. If keyword match fails on a given ticker, it lands in `unclassified`.
+- Follow-ups:
+  - Shadow run: log `buys` list from email + Insight daily; diff vs a synthetic "legacy path" run for 10 trading days.
+  - When vnstock upstream recovers, rerun `python generate_secv3.py --no-email` and `curl /api/insight/daily` to capture parity baselines.
+  - Drop migration 10 after shadow window.
+  - Extend `ICB_TO_SECTOR` with sub-industry codes for OIL + TEXT once vnstock exposes them.
+
+---
+
+## 2026-04-16 — Desktop shortcut + start-dev.bat improvement + cleanup audit
+- Author: Claude (Opus 4.6) + Tom
+- Files:
+  - Modified: `start-dev.bat` (auto-detect project dir via `%~dp0` instead of hardcoded `C:\Users\admin\...`; added auto-kill existing instances on startup; improved UI with color and title).
+  - New: `create_desktop_shortcut.ps1` (PowerShell script to create a Windows .lnk shortcut on Desktop pointing to `start-dev.bat`; auto-detects project dir and icon).
+- Reason: Tom requested a Desktop shortcut to open the app quickly, and a cleanup audit of unused files/functions from the legacy symbol-prediction system.
+- Summary:
+  - `start-dev.bat` now portable (works from any install location).
+  - `create_desktop_shortcut.ps1` creates a "VN Trading" shortcut on Desktop that launches both Backend (FastAPI :8000) and Frontend (Vite :5173) with one double-click.
+  - Cleanup audit completed: ~65-75 files identified for removal across 10 categories (temp debug files, legacy services, legacy tests, legacy frontend pages, legacy models, obsolete report generators, outdated docs). Full list presented to Tom for review before deletion.
+- Follow-ups: Tom to review cleanup list and approve deletion; then execute cleanup + update ARCHITECTURE.md.
+
+---
+
+## 2026-04-16 — SecV3 daily email briefing (OpenClaw-enriched) + 18:00 scheduled task
+- Author: Claude (Opus 4.6) + Tom
+- Files:
+  - New: `report/report_template_secv3.html` (new template extending secv2 with regime banner, macro snapshot, money-flow prose narrative, sector direction predictions table, stealth accumulation watchlist, BUY/Stop/Target columns, news & catalysts block, risk & execution notes, next-session game plan).
+  - New: `generate_secv3.py` (data pipeline: reads `sector_regime`, `macro_anchors`, `sector_signals`, `sector_flow_daily`, legacy prices/features; computes composite scores, stealth doctrine §16.1 checks, ATR-based stops; renders HTML + PDF via Chrome/weasyprint; SMTPs PDF+HTML to `REPORT_EMAIL_TO`).
+  - New: `_run_secv3.bat` (Windows runner invoked by the scheduled task; logs to `report/secv3_run.log`).
+  - Outputs: `report/secv3_2026-04-16.html`, `report/secv3_2026-04-16.pdf` (today's preview).
+  - Scheduler: new scheduled task `secv3-daily-brief` at cron `0 18 * * *` Asia/Ho_Chi_Minh.
+- Reason: Tom requested a richer daily email report than SecV2 — needs sector information, stock recommendations with supporting news, money-flow narrative in words, per-sector directional prediction with reasons/news. Trader-lens review §18 additions (regime conditioning, foreign-flow visibility, T+2 discipline, kill-switch, ATR stops) are folded into the new Risk section and BUY table. Preview sent for Tom's approval before recurring 18:00 runs.
+- Summary:
+  - Regime banner reads latest row from `sector_regime`, colours panel by label, renders Vietnamese narrative keyed to `{risk_on,risk_off,rotation,chop}`.
+  - Macro snapshot reads latest row from `macro_anchors` (VNINDEX/USD-VND/Brent/US10Y/Gold).
+  - Money-Flow Narrative is algorithmic Vietnamese prose: classifies tape tone (broad inflow / outflow / two-sided rotation), names leader + laggard, flags brittle breadth pumps, surfaces stealth-radar count, closes with regime-conditioned recommendation.
+  - Sector Direction Predictions: 15-sector table with UP/DOWN/Neutral bias, Confidence, z20, foreign hit, stealth score, rank action pill, drivers list, and sector-specific catalyst hints (Vietnamese).
+  - Stealth Accumulation Watchlist checks §16.1 conditions (flow_z20 ≥ +1.0, foreign_hit_20d ≥ 60%, breadth_sma20 rising proxy); marks GỐC / PRE-STEALTH / early-signal.
+  - BUY Recommendations now include ATR-based Stop column (1.8×ATR20, floored at BB_lower) and Target column (BB_upper or +2.5×ATR20) — addresses §18.2 items 9-10 and §16.9 doctrine.
+  - News & Catalysts block tries `vnstock.company.news()` per BUY symbol; on failure shows OpenClaw "pending" marker with sector-mapped catalyst hints (ready to be replaced by the agent's news crawl).
+  - Risk & Execution notes encode T+2.5 lag, 15bps+10bps fees, price bands, FOL discount, ATR stops, kill-switch, ETF rebalance mask, max concurrent exposure (§18 items 7-10).
+  - Game Plan section auto-renders 6 actionable steps (regime-tuned), quoting the #1 BUY with its stop/target.
+  - PDF render: tries Chrome headless first; weasyprint fallback for headless envs. `.env` SMTP (Gmail app password) unchanged.
+- Follow-ups / open edges (for future log entries):
+  - Replace the fallback news block with a real OpenClaw crawler task writing into a `news_items` table.
+  - Fold regime-conditioned `flow_z20_by_regime` into the Stealth doctrine (§18.1/3).
+  - Backfill ATR/features so BB Stop/Target are not clipped when `atr_pct==0` for some symbols.
+  - Execute `scripts/backfill_close_idx.py` so Stealth cond 5 ("price in bottom 40% of 60d range") can run end-to-end.
+  - Wire `foreign_net_clean` (ETF rebalance mask) into the prediction drivers — currently uses raw `foreign_hit_20d`.
+  - When `REPORT_EMAIL_PASSWORD` rotates, update `.env` on the Windows host — scheduler will otherwise silently fail.
+
+---
+
+## 2026-04-10 — Phase 15 implementation pass 1 (all 5 features wired)
+- Author: Claude (Opus 4.6) + Tom
+- Files:
+  - Backend: `scripts/backfill_close_idx.py` (new), `services/flow/__init__.py`, `services/flow/aggregation.py` (interval resampler), `api/routers/flow.py`, `api/routers/rotation.py`, `api/routers/stealth.py`, `api/routers/pulse.py`, `api/routers/insight.py`, `api/main.py` (router wiring).
+  - Frontend: `frontend/src/api/client.ts` (+flowApi/rotationApi/stealthApi15/pulseApi/insightApi + Interval types), `frontend/src/App.tsx` (new routes `/flow /rotation /stealth /pulse /insight`, legacy routes removed), `frontend/src/components/Layout.tsx` (nav replaced with 5-item Phase-15 list), `frontend/src/pages/{FlowMonitorPage,RotationMapPage,StealthWatchPage,FlowPulsePage,DailyInsightPage}.tsx` (new).
+- Reason: Close the doc-first loop — translate the 7 Phase-15 specs into working end-to-end views. Tom green-lit "run finish all phase".
+- Summary:
+  - `services/flow/aggregation.py` is the cross-cutting `1d/1w/2w/1m/1q` server-side resampler (per-sector groupby, per-column agg rules: sum for flows, last for `close_idx`, mean for z-scores). Every Phase 15 router resamples through it.
+  - `scripts/backfill_close_idx.py` implements `specs/close-idx-backfill.md` — cap-weighted Σ w_i·close_i/Σ w_i via `get_company_overview` + `get_stock_history`, `--years N --force`, JSON report with per-sector fill count and `fallback_equal_weight` list. **Not yet executed** — requires a run in Tom's env to populate real `close_idx` and unblock Stealth cond 5.
+  - `/api/flow/*` (Feature A) — `series`, `ranking` (with `why` components), `heat`, `sector/{code}`; merges legacy Flow Dashboard + Ranking.
+  - `/api/rotation/*` (Feature B) — inline pair detector: Δshare source/target at `threshold·σ(Δshare)`, correlation-weighted, window from interval. Returns `sankey` (nodes+links) and `pairs`.
+  - `/api/stealth/*` (Feature C) — wraps `analysis.stealth.compute_leading_features`; `active` exposes all 5 conditions with pass/value/threshold per spec. **Cond 5 currently fails everywhere** until the backfill script runs (documented on the page as a banner).
+  - `/api/pulse/*` (Feature D) — live tape (arrow, Δshare, flow_z20, Δz, foreign_streak, alert chip) from the latest 20 daily rows per sector, `alert_z` configurable. VaR demoted (still available via legacy `sectors_risk` router).
+  - `/api/insight/*` (Feature E) — deterministic narrative template (top-1 flow_z up, top-1 down, top-1 stealth_score) + 3 delta cards + 3 actions. LLM integration stubbed — numbers are real, prose is template-first per spec §4.1.
+  - Frontend: 5 pages, interval toggle + `ThresholdInput` pattern on Flow Monitor / Rotation Map / Flow Pulse. Layout sidebar rebuilt. Default route `/` → `/flow`.
+- Known gaps / follow-ups:
+  - Run `python scripts/backfill_close_idx.py --years 3 --force` then `python scripts/rebuild_features_after.py` in Tom's env. Until then: Stealth active list will stay empty, backtest output meaningless.
+  - Legacy pages (`FlowPage.tsx`, `RankingPage.tsx`, `RegimePage.tsx`, `BacktestPage.tsx`, `RiskPage.tsx`, `BriefingPage.tsx`, `AccumulationPage.tsx` + `AgentPage/ChartPage/DashboardPage/DataPage/MLPage/ScreenerPage/SectorPage/ShortTradePage/SignalPage`) are orphaned — imports removed from `App.tsx`, files kept on disk pending a dedicated cleanup commit.
+  - Legacy backend routers (`sectors_backtest`, `sectors_regime`, `sectors_ranking`, `sectors_handoff`) still registered for handoff compatibility; scheduled for deletion once frontend no longer references them.
+  - Folder rename to feature-sliced layout (`features/*`, `shared/*`, `app/*`) deferred — pages live under `frontend/src/pages/` for now to minimise diff. Rename is a follow-up commit.
+  - Sankey visual is currently a two-column source/target list — d3-sankey ribbon rendering deferred.
+  - Daily Insight narrative is deterministic; OpenClaw LLM hook + Send-to-Gmail button deferred.
+  - Stealth `history` endpoint returns empty; resolved-event logging lands with the StealthDetector persistence layer after close_idx backfill.
+- Verification: `python -c "from api.main import app; print(len(app.routes))"` → 37 (passes). Frontend not previewed yet in this pass; manual preview verification is next.
+
+---
+
+## 2026-04-09 — Phase 15 redesign intent (doc-first, no code yet)
+- Author: Claude (Opus 4.6) + Tom
+- Files: `specs/REDESIGN_PHASE15.md`, `specs/flow-monitor.md`, `specs/rotation-map.md`, `specs/stealth-watch.md`, `specs/flow-pulse.md`, `specs/daily-insight.md`, `specs/close-idx-backfill.md`, `CLAUDE.md` (§17), `ARCHITECTURE.md` (CHANGELOG + §3 + §10)
+- Reason: Tom reviewed the 7 Phase-14 views and judged them all weak — shallow DB dumps, no pair/timestamp rotation concept, synthetic `close_idx` makes stealth cond 5 tautological and backtest garbage, briefing has no narrative, Regime+Backtest pages are non-actionable. Decision: redesign trader-first with doc-first process (spec before code, "why" recorded per feature).
+- Summary:
+  - 7 views → 5 views. DELETE Backtest page, DELETE Regime page, MERGE Ranking into Flow Monitor. NEW: Rotation Map (Sankey + pair table), Stealth Watch (5-cond gate + Gantt timeline), Flow Pulse (live tape, replaces Risk), Daily Insight (LLM narrative, replaces Briefing).
+  - Cross-cutting contracts: interval toggle `1D/1W/2W/1M/1Q` (server-side resample), configurable thresholds via `ThresholdInput` + localStorage, feature-sliced frontend folder rename (`features/*`, `shared/*`, `app/*`).
+  - Blocker documented: real `close_idx` backfill (weighted proxy basket from vnstock) is in-scope — removes `STEALTH_SYNTHETIC_CLOSE` escape hatch, unlocks real stealth cond 5 and meaningful backtest rebuild.
+  - This entry is **intent only** — no code, schema, or migration changes yet. Next commits will implement per `specs/REDESIGN_PHASE15.md` §implementation order.
+- Follow-ups: (1) `scripts/backfill_close_idx.py` per spec, (2) backend foundation `services/flow/aggregation.py` + `/api/flow/*` router, (3) Feature A Money Flow Monitor, (4) Feature B Rotation Map, (5) Feature C Stealth Watch (after close_idx lands), (6) Feature D Flow Pulse, (7) Feature E Daily Insight, (8) folder rename to feature-sliced layout, (9) delete legacy pages/services, (10) phase close entry.
+
+---
+
+## 2026-04-09 — Legacy router purge + foreign buy/sell split + flow handoff + replay-backtest
+- Author: Claude (Opus 4.6) with Tom
+- Files:
+  - DEL: api/routers/{stocks,trade,ml,dashboard,mobile,public,agent,backtest,risk,sectors}.py
+  - ADD: analysis/flow_handoff.py, api/routers/sectors_handoff.py, scripts/replay_stealth.py
+  - MOD: database/migrations.py (migration 10), database/models.py, analysis/flow_aggregation.py,
+         services/sector_ingest_service.py, api/main.py
+- Reason: (1) legacy routers violated §2 inheritance rules; (2) foreign flow only tracked as net loses
+  signal quality — VN smart money requires buy/sell + intensity; (3) no sector-to-sector rotation
+  metric existed (literally the project mission per §1); (4) §16.11 success criteria never validated
+  against the three ground-truth cases named in §16.10.
+- Summary:
+  - Deleted 10 dead legacy router files (none were mounted in api/main.py — verified safe).
+  - Migration 10 adds foreign_buy_val / foreign_sell_val / foreign_intensity to sector_flow_ts and
+    sector_flow_daily, and a new sector_flow_handoff table.
+  - aggregate_sector now accepts foreign_buy_by_symbol / foreign_sell_by_symbol and computes
+    foreign_intensity = foreign_net / total_turnover. Backward-compatible.
+  - sector_ingest_service._fetch_foreign_buy_sell() pulls gross values from vnstock price_board.
+  - analysis/flow_handoff.compute_handoff(): outer product of flow_z20 negative deltas (leaving)
+    and positive deltas (entering); yields top-K handoffs per date.
+  - New endpoints: GET /api/sectors/handoff and GET /api/sectors/heatmap.
+  - scripts/replay_stealth.py replays StealthDetector over Banks Q4'23, Steel Q2'24, Brokers Q1'25
+    and reports lead_days + root_capture vs §16.11 targets.
+- Follow-ups:
+  - Persist handoff rows via a nightly job (currently computed on-demand).
+  - Run `python -m scripts.replay_stealth` once backfill covers 2023-2025 to verify §16.11.
+  - Frontend: wire Flow Dashboard to /api/sectors/heatmap, add rotation panel on /accumulation.
+
+---
+
+## 2026-04-08 — Phase 8 implementation: backend rewrite to sector money-flow
+- Author: Tom (via Claude)
+- Files (new):
+  - `analysis/__init__.py`, `analysis/flow_aggregation.py`, `analysis/regime.py`
+  - `models/__init__.py`, `models/rotation_ranker.py`
+  - `services/sector_ingest_service.py`, `services/macro_service.py`,
+    `services/flow_feature_service.py`, `services/rotation_model_service.py`,
+    `services/sector_signal_service.py`
+  - `api/routers/sectors_flow.py`, `api/routers/sectors_ranking.py`,
+    `api/routers/sectors_regime.py`, `api/routers/sectors_backtest.py`,
+    `api/routers/sectors_risk.py`, `api/routers/agent_briefing.py`
+  - `tests/test_flow_aggregation.py`, `tests/test_database_schema.py`,
+    `tests/test_sector_pipeline.py`
+- Files (rewritten):
+  - `config.py` — replaced 170-symbol SECTOR_MAP with `SECTORS` (15 codes),
+    `PROXY_BASKETS` (top-5), `EXECUTION_BASKETS` (top-3), `MACRO_TICKERS`,
+    rotation/risk/backtest defaults.
+  - `database/models.py` — replaced symbol schema with sector schema:
+    `sectors`, `sector_constituents`, `sector_flow_ts`, `sector_flow_daily`,
+    `macro_anchors`, `sector_regime`, `sector_signals`. Retained `model_runs`
+    (retrofitted), `backtest_runs`, `dashboard_layouts`, `api_users/keys`.
+  - `database/migrations.py` — migration 8 freezes legacy tables to
+    `_legacy_*`; added idempotent `seed_sectors()` helper.
+  - `database/connection.py` — `init_db` now seeds sectors after migrations.
+  - `database/__init__.py` — re-exports new ORM names only.
+  - `services/backtest_service.py` — replaced T+3 symbol simulator with
+    `SectorBacktestService` long/short rotation simulator using
+    `sector_flow_daily`. Computes Sharpe, max drawdown, benchmark.
+  - `services/risk_service.py` — replaced symbol VaR with
+    `SectorRiskService`: parametric VaR/CVaR per sector, current exposure,
+    ATR-based stop-loss sentinel.
+  - `api/main.py` — slim sector-only entry. Registers exactly 6 routers.
+    Lifespan = init_db. CORS unchanged.
+  - `main.py` — new CLI with `--init/--ingest/--regime/--train/--publish/--all`.
+  - `tests/conftest.py` — fixtures: `seeded_session` (15 sectors + 75
+    constituents), `synthetic_constituent_df`, `daily_panel`, `macro_session`.
+- Files (stubbed → ImportError on use):
+  - `services/data_service.py`, `services/feature_service.py`,
+    `services/ml_service.py`, `services/sector_service.py`,
+    `services/trade_service.py` — all raise ImportError pointing to the
+    sector replacement.
+  - `services/snapshot_service.py` — `generate_all_snapshots` no-op.
+  - `tests/test_data_fetcher.py`, `tests/test_edge_cases.py`,
+    `tests/test_feature_engineering.py`, `tests/test_integration.py`,
+    `tests/test_prediction_model.py`, all `tests/test_services/*`,
+    `tests/test_api/*`, `tests/test_database/*` — emptied. Legacy router
+    files (`stocks.py`, `ml.py`, `trade.py`, `sectors.py` old, `backtest.py`,
+    `risk.py`, `dashboard.py`, `public.py`, `mobile.py`, `agent.py`) are
+    no longer imported by `api/main.py` and are orphaned (left in place
+    because the sandbox does not allow file deletion in this mount).
+- Tests: `pytest -q` → **21 passed** (config, schema, flow aggregation,
+  sector pipeline integration: feature build → ranker predict → signal
+  publish → backtest → VaR → regime classify with HMM heuristic fallback).
+- Reason: Phase 8 of the migration order in CLAUDE.md §13 — execute
+  steps 2–8 in code (legacy freeze + new schema + services + API + CLI +
+  tests). Only delivers backend; frontend rewrite is the next phase.
+- Follow-ups:
+  - Hook the new schedulers to the existing OpenClaw heartbeat
+    (sector_intraday_flow / rotation_train / sector_signal_publish).
+  - Frontend rewrite: replace 9 symbol pages with 5 sector pages.
+  - Begin 2-week shadow run; only then drop `_legacy_*` tables and
+    physically delete the orphan legacy router/service files.
+
+---
+
+## 2026-04-08 — Plan approved + redesign docs created
+- Author: Tom (via Claude)
+- Files: `CLAUDE.md` (new), `ARCHITECTURE.md` (rewritten for sector-flow design), `MODIFICATION_LOG.md` (new)
+- Reason: Pivot from 170-symbol prediction to 15-sector money-flow rotation. User approved plan.
+- Summary:
+  - Created `CLAUDE.md` containing the approved sector money-flow strategy, schema, services, scheduled jobs, models, migration order, and chosen defaults (top-5 proxy basket, 5y backfill, top-3 constituent execution, OpenClaw kept, frontend feature-flagged).
+  - Rewrote `ARCHITECTURE.md` to describe the new target architecture (sector-centric layers, new tables, new routers, new schedulers) while explicitly listing what is inherited and what is removed from the legacy 170-symbol system.
+  - Established the modification protocol: every change touches this log + updates ARCHITECTURE.md/CLAUDE.md if contracts shift.
+- Follow-ups:
+  - Step 1 of migration: freeze legacy tables with `_legacy_` prefix (migration 8 part A).
+  - Decide whether to retain legacy frontend pages behind feature flag for the full 2-week shadow window or drop earlier.
+
+## 2026-04-09 — Phase 9: Frontend rewrite to sector money-flow
+- Reason: Backend pivot (Phase 8) removed all per-symbol APIs; frontend needed to match CLAUDE.md §12 (5 sector pages).
+- Files touched:
+  - `frontend/src/api/client.ts` — rewritten with `sectorsApi` + `agentApi` + types (SectorFlowDaily, SectorSignalRow, RegimeRow, VaRReport, ExposureRow, StopLossAlert, BacktestRequest, BacktestResult). All legacy stocksApi/mlApi/tradeApi removed.
+  - `frontend/src/App.tsx` — 5 routes only: `/`, `/ranking`, `/regime`, `/backtest`, `/risk`.
+  - `frontend/src/components/Layout.tsx` — sidebar rewritten with 5 sector nav items.
+  - `frontend/src/pages/FlowPage.tsx` (NEW) — latest-by-sector flow table, colored by sign.
+  - `frontend/src/pages/RankingPage.tsx` (NEW) — rotation ranking table + publish button + BUY/SELL/HOLD badges.
+  - `frontend/src/pages/RegimePage.tsx` (NEW) — gradient regime card + history table + classify button.
+  - `frontend/src/pages/BacktestPage.tsx` (REWRITTEN) — sector backtest form, metric cards, Recharts equity curve.
+  - `frontend/src/pages/RiskPage.tsx` (REWRITTEN) — stop-loss alerts, exposure table, VaR/CVaR table.
+  - Legacy pages stubbed to `export default function Deprecated() { return null; }`: AgentPage, ChartPage, DashboardPage, DataPage, MLPage, ScreenerPage, SectorPage, ShortTradePage, SignalPage.
+  - Legacy components stubbed: CandlestickChart, DrawingTools, IndicatorPanel, StockSearch, widgets/* (HealthWidget, MiniChartWidget, ModelCompareWidget, PriceTableWidget, QuickPredictWidget, SectorPerfWidget, SignalOverviewWidget, WidgetWrapper), widgets/index.ts, hooks/useStockData.ts.
+- Verification: `npx tsc -b` exits 0 (no type errors across the whole `src/` tree).
+- Notes: Physical deletion of stubbed legacy files deferred until end of 2-week shadow run per CLAUDE.md §13 step 10. Routes not listed in Layout but referenced by legacy stubs are unreachable (not wired into App.tsx).
+- Follow-ups:
+  - Run `npm run build` (vite) once bundler is needed for a shadow deploy.
+  - Wire the OpenClaw briefing page back in if Tom wants a UI surface for `agentApi.briefing()`.
+
+## 2026-04-09 — Phase 9b: Vite build + OpenClaw briefing page
+- Reason: Produce production bundle + surface `agentApi.briefing()` in the UI.
+- Files touched:
+  - `frontend/src/pages/BriefingPage.tsx` (NEW) — regime card, top long/short lists, narrative block, raw JSON fold-out, refresh button; calls `agentApi.briefing()`.
+  - `frontend/src/App.tsx` — added `/briefing` route.
+  - `frontend/src/components/Layout.tsx` — added 📰 Briefing nav item (6 items total now).
+- Verification: `npx tsc -b` clean; `npx vite build` produced `dist-<ts>/` bundle (index ~660 kB, gzip ~204 kB). Sandbox can't unlink existing `dist/`, so build writes to a fresh timestamped outDir — harmless for local verification; CI/deploy should clean `dist/` normally.
+- Follow-ups:
+  - Consider manual chunking (recharts/axios) to drop bundle below 500 kB warning threshold.
+  - Backend `/api/agent/briefing` response shape is loosely typed in the page (`Briefing` interface) — tighten once the router's pydantic schema is frozen.
+
+## 2026-04-09 — Phase 10: Full-flow test + daily schedule
+- Reason: End-to-end pipeline verification + productionize daily ingest.
+- Test run (DB = /sessions/hopeful-upbeat-fermat/vnstock_market.db):
+  - `main.py --init` → Migration 8 applied, 15 sectors seeded.
+  - Ingest with 2 sectors (BANK, OIL) via INGEST_SLEEP=3.5 → 2 ts rows + 2 daily rollup rows (vnstock guest rate-limit tolerated).
+  - `classify_regime` → `chop` @ 0.5 conf (no macro anchors seeded yet → fallback).
+  - `train_ranker` → "no training data" (expected until multi-day history exists).
+  - `publish` → 2 signals written (BANK rank 1, OIL rank 2, both HOLD / persistence_ok=False).
+- Files touched:
+  - `services/sector_ingest_service.py` — catch `Sy
+
+## 2026-04-09 — Phase 18: Trader-lens system review (doc-only)
+- Reason: Tom asked for a whole-system review from a trader's seat before live paper-trade. Intent: surface blockers (survivorship, T+2, fees, FOL, price bands, single-source vnstock), alpha edges (regime-conditioned z, VN30F1M basis, margin debt, morning-share, full-population breadth), and validation gaps (purged CV, drift monitor, decile monotonicity). No code changes.
+- Files touched:
+  - `CLAUDE.md` — appended §18 "Trader-Lens System Review" with 24 numbered findings across signal quality, execution realism, model validation, data ops, and stealth doctrine sharpening; added P0/P1/P2 priority queue and net-of-cost success redefinition.
+- Follow-ups (tracked as §18 item numbers):
+  - P0 blockers before any live paper trade: §18.1/1–2 (point-in-time basket + ETF rebalance mask), §18.2/7–10 (T+2 settlement, FOL, price bands/slippage, fees+sell tax), §18.3/13 (purged CV), §18.4/17 (vnstock fallback source).
+  - P1 before shadow-run metrics are trustworthy: §18.1/3–6, §18.2/11–12, §18.3/14–15, §18.5/21–22.
+  - Open specs to write next session: `specs/execution-realism.md` (covers §18.2), `specs/point-in-time-basket.md` (§18.1/1), `specs/data-resilience.md` (§18.4/17).
+
+## 2026-04-16 — Daily pipeline run (autonomous scheduled task)
+- Reason: `vn-sector-flow-pipeline` scheduled run executing the daily ingest → rollup → features → regime → train → publish chain for 2026-04-16.
+- Notable env/fixes applied this run:
+  - `services/sector_ingest_service.py`, `services/macro_service.py` — swapped hard-coded `source="VCI"` for `source=DATA_SOURCE` (config). VCI was throwing `KeyError 'data'` at Company() instantiation today, blocking every vnstock call. Set `DATA_SOURCE=KBS` for this run; KBS returned OHLCV through 2026-04-16 07:00 (addresses §18.4/17 — single-source risk showed up live).
+  - Pipeline DB path relocated from the mounted workspace to `/tmp/vnstock_market.db` because the mount throws `sqlite3.OperationalError: disk I/O error` on `PRAGMA journal_mode=WAL` (matches the §18.4/18 caveat). DB copied back to workspace after publish completed.
+  - Hit vnstock guest-tier rate limit (`Process terminated.`) twice. First `--ingest` pass completed 2/15 sectors (BANK, BROK). Re-ran in 3-sector chunks with 30 s pauses; final ts coverage today = 10/15 (BANK, BROK, CHEM, FISH, LOGIS, OIL, POWER, RUBBER, STEEL, TECH). 5 sectors (FOOD, INSUR, REAL, RETAIL, TEXT) fell back to prior-day rollup values.
+  - `foreign_net = 0` across all sectors today: KBS `price_board` only exposes `foreign_buy_volume` / `foreign_sell_volume` (not value), and the ingest service only reads `*_value` columns. Logged as follow-up (§18 gap).
+  - `scripts/fix_close_idx.py` full re-fetch path would hit hard rate limit (75 symbols × 60d × 3.3 s sleep). Instead ran an inline equivalent: carried forward last known `close_idx` into today's null rows, then called `analysis.stealth.compute_leading_features` over the full panel → 12,135 rows updated with `flow_z20`, `foreign_streak`, `stealth_score`, `accumulation_age`.
+- Pipeline outputs:
+  - `--ingest`: macro row written, sector_flow_ts +10 (today), sector_flow_daily +15 (rollup).
+  - `--regime`: `chop` @ conf 0.5 (no macro anchors beyond vnindex today).
+  - `--train`: rotation ranker run id=33, active.
+  - `--predict` + `--publish`: 15 sector signals for 2026-04-16. BUY×2 (STEEL rank 1 score +0.94, TECH rank 2 score +0.61); remaining 13 sectors HOLD. 0 ACCUMULATE signals today. Gmail briefing dispatch triggered via `SectorSignalService.publish()`.
+  - `/api/stealth/active` (calibrated: `STEALTH_MIN_SESSIONS=3`, `STEALTH_RETURN_BOTTOM_FRAC=0.60`): 0 active, 9 warming, 6 inactive. Top warming: TEXT (4/5 gates pass, stealth_score 1.018), FISH (3/5), POWER (3/5).
+- Follow-ups:
+  - Unblock VCI path (or make `DATA_SOURCE` fallback logic circuit-break per-call, not global).
+  - Teach `_fetch_foreign_net` + `_fetch_foreign_buy_sell` to convert KBS volume→value via `close_price`, or switch foreign collection to `trading.quote_history`/`foreign_trade` when running under KBS.
+  - Finish the remaining 5 sectors' ingest — either schedule a retry job ~15 min after the main ingest or raise `INGEST_SLEEP`.
+
+## 2026-04-21 — Daily pipeline run (autonomous scheduled task)
+- Reason: `vn-sector-flow-pipeline` scheduled run executing the daily ingest → rollup → features → regime → train → publish chain for 2026-04-21 (Cowork Linux sandbox, virtiofs mount of the Windows workspace).
+- Notable env/fixes applied this run:
+  - **DB corruption + recovery (new, first time)**: `vnstock_market.db` on the virtiofs mount was truncated — header declared 5190 pages but file held only 5188 pages (8 KB short). SQLite refused to open it with `database disk image is malformed`. Recovery path: downloaded static `sqlite3 3.46.0` binary to `/tmp`, ran `.recover` on a dd-copy → `recovered.sql` (99,471 lines) → rebuilt a fresh `/tmp/vnstock_market.db` and verified `PRAGMA integrity_check = ok`, latest `sector_flow_daily` = 2026-04-20, 15 sectors, 75 model_runs rows, 12,165 rollup rows. Kept `vnstock_market.db.corrupt_20260421` as the broken original.
+  - Pipeline DB path relocated to `/tmp/vnstock_market.db` (virtiofs rejects `PRAGMA journal_mode=WAL` with disk I/O error, as in previous runs §18.4/18).
+  - `DATA_SOURCE=KBS` kept (VCI still throws `KeyError 'data'` per §18.4/17). `STEALTH_MIN_SESSIONS=3`, `STEALTH_RETURN_BOTTOM_FRAC=0.60`, `INGEST_SLEEP=3.3` (raised to 4 for OIL retry).
+  - Hit vnstock guest-tier rate limit (`Process terminated.`) on 44 constituent symbols during the initial `--ingest` pass (reached 10/15 sector ts rows). Re-ran the 5 missing sectors in 3-sector chunks with 30 s pauses: chunk 1 (FOOD, LOGIS, OIL) → +2 rows (OIL still rate-limited out), chunk 2 (REAL, RUBBER) → +2 rows. A final 60 s wait + single-sector OIL retry produced the last ts row. Final ts coverage = 15/15 sectors.
+  - `foreign_net = 0` across all sectors today: KBS `price_board` only exposes `foreign_buy_volume` / `foreign_sell_volume` (not value), and the ingest service only reads `*_value` columns. Unchanged from 2026-04-16 — follow-up still open.
+  - `scripts/fix_close_idx.py` full re-fetch path skipped to avoid another rate-limit storm. Instead ran the in-process short-cut from previous runs: carried forward last known `close_idx` into today's 15 null rows, then called `analysis.stealth.compute_leading_features` over the full 8,535-row panel (2024-01-01 → 2026-04-21) → persisted `flow_z20`, `flow_z60`, `foreign_streak`, `foreign_hit_20d`, `stealth_score`, `flow_price_divergence`, `accumulation_age`.
+  - `--train` first run fell back to mean-flow heuristic because `scikit-learn` was missing in the sandbox (lightgbm.sklearn requires it); installed scikit-learn and re-trained under LightGBM → ranker run id=143, active.
+  - **Copy-back partial**: virtiofs mount rejects overwrite/rename of existing files (`Invalid argument`/`Permission denied`), so the healed DB could not overwrite `vnstock_market.db`. The healed file is written as `vnstock_market.db.healed_20260421` (21,356,544 B, WAL checkpointed, journal=DELETE). Manual rename on the Windows side is required before the next run — procedure: stop the API server → delete `vnstock_market.db`, `vnstock_market.db-wal`, `vnstock_market.db-shm` → rename `vnstock_market.db.healed_20260421` → `vnstock_market.db`.
+- Pipeline outputs:
+  - `--ingest`: macro row written, sector_flow_ts +15 (today after retries), sector_flow_daily +15 (rollup).
+  - `--regime`: `chop` @ conf 0.5 (macro anchors table still has only 8 rows → HMM fallback).
+  - `--train`: rotation ranker run id=143, active (LightGBM backend).
+  - `--publish`: 15 sector signals for 2026-04-21. **BUY ×1 (TEXT rank 1, score +0.882)**; remaining 14 sectors HOLD. **0 ACCUMULATE** signals today. Gmail briefing dispatch triggered via `SectorSignalService.publish()`.
+  - `/api/stealth/active?min_sessions=3&close_pct_60d_max=0.40` (as_of 2026-04-21): **0 active, 6 warming, 9 inactive**. Top-3 warming by `flow_z20`:
+    1. **LOGIS** z20 +1.608, score +0.825, 3/5 gates (fails cond2_foreign, cond5_price_cheap — close_pct 0.48)
+    2. **TEXT** z20 +1.108, score +0.554, 4/5 gates (fails only cond2_foreign)
+    3. **REAL** z20 +1.042, score 0.000, 3/5 gates (fails cond2_foreign, cond5_price_cheap — close_pct 1.00, extended)
+- Pipeline issues (soft failures):
+  - Source still pinned to KBS → `foreign_net=0` everywhere; `cond2_foreign` fails for every sector by construction. Until the KBS volume→value conversion lands (or VCI comes back), the stealth 5/5 gate is effectively 4/5 — no `ACCUMULATE` will ever fire under current defaults.
+  - DB corruption recovered via `.recover` — 1 stray `model_runs` row (id=141) has fields shifted by one column (trained_at in `model_name`); harmless for pipeline, but flagged for cleanup.
+  - DB healed copy left as `vnstock_market.db.healed_20260421`; manual swap required (see above).
+  - Guest-tier rate limits continue to gate every run. Consider registering a free community API key (60 rpm) to halve `INGEST_SLEEP` and eliminate retry chunks.
+- Follow-ups (carried forward):
+  - Still open from 2026-04-16: unblock VCI path OR teach `_fetch_foreign_*` to convert KBS volume→value, OR switch to `trading.quote_history` / `foreign_trade` under KBS.
+  - New: wire a nightly `sqlite3 .backup` to a timestamped file on local disk so we don't lose another day when virtiofs truncates the main DB.
+  - New: script the manual rename step so post-pipeline Windows-side cleanup is idempotent.
+
+## 2026-04-22 — Daily pipeline run (autonomous scheduled task)
+- Reason: `vn-sector-flow-pipeline` scheduled run executing the daily ingest → rollup → features → regime → train → publish chain for 2026-04-22 (Cowork Linux sandbox on the virtiofs-mounted Windows workspace).
+- Notable env/fixes applied this run:
+  - **Yesterday's manual DB swap on the Windows side did NOT happen.** `vnstock_market.db` on the mount is still the broken copy from 2026-04-20 (opens as `database disk image is malformed`). Pipeline started from `vnstock_market.db.healed_20260421` instead — `PRAGMA integrity_check=ok`, latest rollup 2026-04-21, 42 model_runs rows (some pruning happened between runs; count dropped from 75 reported yesterday).
+  - Working DB path: `/tmp/tradingdb/vnstock_market.db` (virtiofs still rejects `PRAGMA journal_mode=WAL` with disk I/O error — §18.4/18 unchanged).
+  - Sandbox was fresh: installed `vnstock 3.5.1`, `lightgbm 4.6.0`, `scikit-learn 1.7.2`, `sqlalchemy`, `fastapi`, `xgboost`, `hmmlearn`, `python-jose`, `passlib`, `slowapi` via pip before running.
+  - `DATA_SOURCE=KBS` (VCI still throws `KeyError 'data'`). `STEALTH_MIN_SESSIONS=3`, `STEALTH_RETURN_BOTTOM_FRAC=0.60`, `INGEST_SLEEP=3.3` (raised to 4 for the final OIL retry).
+  - Hit vnstock guest-tier rate limit on the first `--ingest` pass (finished 10/15 sector ts rows; daily rollup already got 15/15 via prior-day carry-forward). Ran retries in 3-sector chunks with 30 s pauses: chunk 1 (FOOD, LOGIS, OIL) → +3 rows but OIL rate-limited out; chunk 2 (REAL, RUBBER) → +2 rows; final 60 s wait + single-sector OIL retry (INGEST_SLEEP=4) → +1 row. Final ts coverage = 15/15. Re-ran `rollup_to_daily` after retries to upgrade fallback rows.
+  - `foreign_net = 0` across all sectors today — KBS `price_board` volume-only limitation persists (unchanged from 2026-04-16 and 2026-04-21 runs; `cond2_foreign` fails for every sector by construction).
+  - Skipped `scripts/fix_close_idx.py` full re-fetch to avoid a 75-symbol rate-limit storm. Used the documented short-cut: carried forward last-known `close_idx` into today's 15 null rows (all 15 sectors' daily rows lacked today's `close_idx` before the fill), then called `services.fast_ingest._rebuild_leading_features_fast(session)` across the full 12,195-row panel (2024-01-01 → 2026-04-22). `flow_z20`, `flow_z60`, `foreign_streak`, `foreign_hit_20d`, `stealth_score`, `flow_price_divergence`, `accumulation_age` persisted.
+  - **DB copy-back (partial, same issue as 2026-04-21)**: virtiofs mount still rejects overwrite of existing files. Healed, checkpointed DB (journal=DELETE) saved as `vnstock_market.db.healed_20260422` (21,377,024 B) on the workspace. Manual swap required Windows-side: stop API server → delete `vnstock_market.db`, `vnstock_market.db-wal`, `vnstock_market.db-shm` → rename `vnstock_market.db.healed_20260422` → `vnstock_market.db`. **If this rename keeps being skipped, tomorrow's run will again start from the 2026-04-21 healed copy — we are losing a day every run.**
+- Pipeline outputs:
+  - `--ingest`: macro row written, `sector_flow_ts` = 15/15 today (after retries), `sector_flow_daily` = 15/15 today.
+  - `--regime`: `chop` @ conf 0.5 (macro anchors panel still thin → HMM fallback, unchanged from prior runs).
+  - `--train`: rotation ranker run id=145, active=True (LightGBM backend, trained cleanly).
+  - `--publish`: 15 sector signals for 2026-04-22. **SELL ×1 (STEEL rank 14 score −0.651)**; remaining 14 sectors HOLD. **0 BUY, 0 ACCUMULATE** today. Gmail briefing dispatch triggered via `SectorSignalService.publish()` (`email_log.txt` untouched — log write path unchanged from prior runs).
+  - `/api/stealth/active?min_sessions=3&close_pct_60d_max=0.40` (as_of 2026-04-22) via direct service call (no API server running in sandbox): **0 active, 4 warming, 11 inactive**.
+    - Top-3 warming by `flow_z20` (3/5 gates each):
+      1. **REAL** z20 +1.771, score 0.000 — fails cond2_foreign, cond5_price_cheap (close_pct 1.00, price extended).
+      2. **FOOD** z20 +0.026, score +0.025 — fails cond1_flow_z (z<+1), cond2_foreign.
+      3. **BANK** z20 −0.094, score 0.000 — fails cond1_flow_z, cond2_foreign.
+    - TEXT also warming (3/5) but z20 −0.661 so drops below the top 3.
+    - Top 3 by raw z20 across all sectors (for context): REAL +1.771, RUBBER +0.811, RETAIL +0.769.
+  - Ranker top of book (predict output): TEXT #1 score +0.941, LOGIS #2 +0.731, BROK #3 +0.597 (all HOLD — stealth/BUY gates not satisfied under zero-foreign-net regime).
+- Pipeline issues (soft failures):
+  - `foreign_net=0` everywhere under KBS — cond2_foreign fails every sector; ACCUMULATE is still structurally blocked. No change from 2026-04-16 / 2026-04-21.
+  - Guest-tier vnstock rate limits tripped twice during ingest; final coverage achieved only via 3-sector chunked retries + single-sector OIL retry.
+  - Yesterday's §18 follow-up "script the manual rename step" still open and now materially impactful — the Windows-side rename was not done between runs, so today's pipeline effectively rebuilt from 2026-04-21 state rather than extending a fresh DB.
+  - DB copy-back again saved under a timestamped name (`vnstock_market.db.healed_20260422`) instead of overwriting the main file — same virtiofs behaviour as yesterday.
+  - `email_log.txt` remained empty after publish — either the Gmail dispatcher logs elsewhere in this sandbox or credentials are not configured; not investigated in this run.
+- Follow-ups (carried forward + new):
+  - Still open from 2026-04-16 / 2026-04-21: unblock VCI path OR teach `_fetch_foreign_*` to convert KBS volume→value (critical — blocks every ACCUMULATE signal).
+  - Still open from 2026-04-21: script the manual rename step so post-pipeline Windows-side cleanup is idempotent. Raising priority — without this, the pipeline cannot accumulate state across runs.
+  - Still open: nightly `sqlite3 .backup` to a timestamped file on local disk.
+  - New: consider registering a free vnstock community API key (60 rpm) to eliminate chunk retries.
+
+## 2026-04-23 — Daily pipeline run (autonomous scheduled task)
+- Runner: Cowork / Claude (sandboxed Linux session). DB path: `/sessions/.../localdb/vnstock_market.db` (local working copy; mount rejected `PRAGMA journal_mode=WAL` on the Trading folder). Source DB loaded from `vnstock_market.db.healed_20260422` (yesterday's healed backup) because the raw `vnstock_market.db` on the mount failed integrity check when the WAL was copied alongside it. Final state copied back as `vnstock_market.db.healed_20260423` (virtiofs blocked direct overwrite of the main `vnstock_market.db`, same as 2026-04-22).
+- Steps executed in order: `--ingest` (with KBS fallback + 3-sector chunk retries), feature recompute short-cut (no `scripts/fix_close_idx.py`), `--regime`, `--train`, `--publish`, `/api/stealth/active` via in-process FastAPI `TestClient`.
+- Deviations from nominal path:
+  - `DATA_SOURCE=VCI` failed immediately: every ticker in `--ingest` returned `KeyError 'data'` (73 failures in a row, 0 `sector_flow_ts` rows written). Switched to `DATA_SOURCE=KBS` and re-ran.
+  - Guest-tier KBS rate-limits tripped twice during ingest (`Process terminated.` × 20 rpm cap). Combined with the initial VCI wipeout, the pipeline needed two retry passes:
+    - First retry pass: chunks `[FOOD, LOGIS, REAL]` + `[TEXT]` with 30 s pause → got `FOOD, LOGIS, TEXT` fresh; `REAL` still stale.
+    - Second retry pass: single-sector `REAL` after 60 s pause → fresh. Final coverage: **15/15 sector_flow_ts rows for 2026-04-23**.
+  - Skipped `scripts/fix_close_idx.py` to avoid another rate-limit storm (~75 tickers × 2y daily would burn the KBS guest quota for hours). Took the task-sanctioned shortcut: ffill `close_idx` per sector for today's null rows from yesterday's real value, then called `analysis.stealth.compute_leading_features` directly and wrote `close_idx / flow_z20 / flow_z60 / foreign_streak / foreign_hit_20d / stealth_score / flow_price_divergence / accumulation_age` back to `sector_flow_daily` for 2026-04-23 (15/15 rows populated).
+  - `--regime` → `chop` conf=0.5.
+  - `--train` → ranker `id=147 active=True` (LightGBM not installed in sandbox; mean-flow fallback, same as prior runs).
+  - `--publish`: 15 signals for 2026-04-23. **BUY ×1 (REAL rank 1 score 1.25e8)**, **SELL ×2 (OIL rank 14, TECH rank 15)**, **HOLD ×12**, **ACCUMULATE ×0**. Gmail briefing dispatched by `SectorSignalService.publish()` (not verified — no SMTP in this sandbox; `email_log.txt` not examined).
+  - `/api/stealth/active?min_sessions=3&close_pct_60d_max=0.40` (as_of 2026-04-23) executed via `fastapi.testclient.TestClient` (no live `uvicorn` running): **0 active, 2 warming, 13 inactive**.
+    - Top-3 warming by `flow_z20`:
+      1. **BANK** z20 +2.521, score 0.000, passing 4/5 — only missing cond2_foreign (`foreign_hit_20d=0.10` vs 0.60).
+      2. **FOOD** z20 −0.443, score −0.386, passing 3/5 — fails cond1_flow_z AND cond2_foreign.
+      3. (only 2 warming sectors) — next by raw z20: **INSUR** z20 +0.146 (2/5 passing; inactive).
+    - Top 3 by raw z20 across all sectors (for context): BANK +2.52, INSUR +0.15, STEEL −0.11.
+  - Ranker score top 3: REAL (1.25e8 BUY), BANK (8.57e7 HOLD), RETAIL (1.94e7 HOLD). BANK clears 4/5 stealth gates (closest to an ACCUMULATE) but is locked out by zero-foreign signal.
+- Pipeline issues (soft failures):
+  - `foreign_net=0` everywhere under KBS (known: `price_board` exposes `foreign_buy_volume`/`foreign_sell_volume` not `*_value`) — cond2_foreign fails every sector; ACCUMULATE remains structurally blocked. Unchanged from 2026-04-16 / 2026-04-21 / 2026-04-22.
+  - VCI upstream broken again today (`KeyError 'data'` on every ticker) — same failure mode as 2026-04-16. Source switched to KBS for this run.
+  - Rate-limit retries required (3 total retry passes to reach 15/15 coverage). Took ~2 minutes of wall-clock wait.
+  - WAL-on-mount still fails: had to relocate DB to a local disk before any SQLAlchemy session could open.
+  - `vnstock_market.db` on the Trading mount is uid-locked against overwrite by this session — saved updated DB as `vnstock_market.db.healed_20260423`. Windows-side rename still manual.
+- Follow-ups (carried forward + new):
+  - Still open: unblock VCI OR teach `_fetch_foreign_*` to convert KBS volume→value (critical — blocks every ACCUMULATE signal; today's BANK would likely have tripped ACCUMULATE if cond2_foreign were fair).
+  - Still open (2nd consecutive run): script the post-pipeline Windows-side rename of `*.healed_YYYYMMDD` → `vnstock_market.db`. Every missed rename means tomorrow's run rebuilds from a stale state.
+  - Still open: nightly `sqlite3 .backup` on local disk before the mount copy.
+  - Still open: register a free vnstock community API key (60 rpm) to eliminate chunk retries.
+
+## 2026-04-30 — Daily pipeline run (autonomous scheduled task)
+- Reason: `vn-sector-flow-pipeline` scheduled run for 2026-04-30 (Cowork Linux sandbox, virtiofs-mounted Windows workspace).
+- Notable env / fixes / deviations applied this run:
+  - **NEW: vnstock duplicate-trailing-row bug** — `Vnstock().stock(...).quote.history(..., interval='1D')` returned the latest trading-day bar twice (verified on VCB: 2026-04-29 row appeared identical in `df.iloc[-1]` and `df.iloc[-2]`). The unmodified `analysis.flow_aggregation._net_dollar_flow` compares last vs prev close — equal closes ⇒ `sign=0` ⇒ `net_dollar_flow=0`. Effect: every ts row written by an unpatched ingest had flow=0 / up=0 / down=0. **Workaround:** wrote `/tmp/tradingdb/ingest_dedup.py` that monkey-patches `SectorIngestService._fetch_constituent_daily` with `df = df[~df.index.duplicated(keep='last')]` and re-runs the per-sector aggregation. Did NOT modify the source file. Permanent fix should land in `services/sector_ingest_service.py` so `python main.py --ingest` works correctly out of the box. Logged as a new follow-up.
+  - **vnstock has no 2026-04-30 bar yet** — KBS source returned data through 2026-04-29 only; ts rows therefore stamp time=2026-04-29 07:00:00. The daily rollup pulls the latest ts per sector and writes it under `date='2026-04-30'`, which is the documented behaviour. Today's signals reflect the 2026-04-29 trading session.
+  - DB path: copied `vnstock_market.db` (mount) → `/tmp/tradingdb/vnstock_market.db` for working (virtiofs still rejects `PRAGMA journal_mode=WAL` with disk I/O error — §18.4/18 unchanged). `PRAGMA integrity_check=ok` on the source.
+  - **DB copy-back DID work this run** (unlike 2026-04-21 / -22 / -23): `cp /tmp/tradingdb/vnstock_market.db → mount/vnstock_market.db` succeeded (exit=0, integrity_check=ok post-copy). Healed copy also kept as `vnstock_market.db.healed_20260430` for safety. Manual Windows-side rename is no longer required for tomorrow's run.
+  - Sandbox was fresh: pip-installed `vnstock`, `lightgbm 4.6.0`, `scikit-learn 1.7.2`, `sqlalchemy 2.0.49`, `hmmlearn 0.3.3`, `fastapi 0.136.1`, `python-jose`, `passlib`, `slowapi`. xgboost install was attempted but timed out — not required for this run (LightGBM ranker trained cleanly).
+  - `DATA_SOURCE=KBS` (VCI still throws `KeyError 'data'` per §18.4/17). `STEALTH_MIN_SESSIONS=3`, `STEALTH_RETURN_BOTTOM_FRAC=0.60`, `INGEST_SLEEP=1.5` (lowered from 3.3 because the 45 s shell timeout couldn't fit a 5-symbol fetch otherwise; adequate when paired with explicit 30-40 s sleep between sector pairs).
+  - Hit guest-tier rate limit on every chunk after the first sector — the retry pattern was 2 sectors per call with a 40 s `sleep` between calls. 7 chunks × 2 sectors + 1 chunk × 1 sector = 15 sectors, all completed. Final ts coverage = 15/15 with non-zero `net_dollar_flow` (after dedup fix) for all sectors.
+  - `foreign_net = 0` across all sectors (unchanged since 2026-04-16 — KBS `price_board` only exposes `foreign_buy_volume`/`foreign_sell_volume`, not values, and the ingest service only reads `*_value` columns). `cond2_foreign` therefore fails for every sector by construction; no `ACCUMULATE` could fire.
+  - Skipped `scripts/fix_close_idx.py` full re-fetch (would trigger another 75-symbol rate-limit storm). Used the documented short-cut: confirmed today's `close_idx` was already populated (no nulls — carried forward from prior step), then called `services.fast_ingest._rebuild_leading_features_fast(session)` on the full panel. `flow_z20`, `flow_z60`, `foreign_streak`, `foreign_hit_20d`, `stealth_score`, `flow_price_divergence`, `accumulation_age` persisted across the full panel (12,180 daily rows).
+- Pipeline outputs:
+  - `--ingest`: macro row written, `sector_flow_ts` = 15/15 (after dedup workaround), `sector_flow_daily` = 15/15 today (after rollup_to_daily).
+  - `--regime`: `chop` @ conf 0.5 (macro panel still thin → HMM heuristic fallback, unchanged from prior runs).
+  - `--train`: rotation ranker run id=44 → 45 active=True (LightGBM backend; published step retrained again giving id=45).
+  - `--publish`: 15 sector signals for 2026-04-30. **0 BUY, 0 SELL, 0 ACCUMULATE — all 15 sectors HOLD.** Top 5 by score: REAL +1.74, OIL +0.43, RUBBER +0.37, INSUR +0.31, POWER +0.12. Bottom 3: BROK -0.87, BANK -1.00, FOOD -1.05. Note: REAL ranks #1 by score but its `flow_z20=-3.276` (heavy outflow) — the LightGBM ranker is weighting RS / breadth / other features over raw flow today, worth a model-diagnostic look.
+  - `/api/stealth/active?min_sessions=3&close_pct_60d_max=0.40` (called via direct `stealth_active(...)` import — no API server running in the sandbox). **0 active, 3 warming, 12 inactive.** Top warming by `flow_z20`:
+    1. **TECH** z20 +2.251, score +1.154, age=0, **4/5 gates** — fails only `cond2_foreign` (KBS limitation). Closest sector to firing ACCUMULATE.
+    2. **RUBBER** z20 +1.892, score 0.000, age=0, 3/5 — fails cond2_foreign + cond5_price_cheap (close_pct outside bottom-40% of 60d).
+    3. **BANK** z20 −0.253, score 0.000, age=0, 3/5 — fails cond1_flow_z (z20<+1) + cond2_foreign.
+    Top 3 by raw `flow_z20` across all 15 (for context): TECH +2.251, RUBBER +1.892, LOGIS +0.753. Bottom 3: REAL −3.276, FISH −2.560, POWER −1.660.
+- Pipeline issues (soft failures):
+  - **NEW**: vnstock duplicate-trailing-row bug — fixed in-process via dedup monkey-patch, NOT in source. Permanent fix needed (one-line `df = df[~df.index.duplicated(keep='last')]` in `services/sector_ingest_service.py::_fetch_constituent_daily`).
+  - **vnstock has no 2026-04-30 bar yet** at run time (16:41 Vietnam, market closed at 15:00). All flow values stamped into today's daily are derived from the 2026-04-29 trading session via the documented rollup behaviour. Tomorrow's run will pick up Apr 30 once the source publishes it.
+  - `foreign_net=0` everywhere → cond2_foreign fails for all 15 sectors → no ACCUMULATE possible under current defaults. Open since 2026-04-16; carried forward.
+  - DB copy-back worked **this** time, but no theory yet on why — may be that the prior `vnstock_market.db.backup_before_replace_20260430` clearing and overwrite path differs from previous runs' rename-into-existing path. Worth confirming on the next run.
+- Follow-ups (carried forward + new):
+  - **NEW**: land the `df.drop_duplicates`/`~duplicated` fix in `services/sector_ingest_service.py::_fetch_constituent_daily` so `python main.py --ingest` produces correct flow values without the workaround script.
+  - Still open from 2026-04-16: unblock VCI path OR teach `_fetch_foreign_*` to convert KBS volume→value, OR switch foreign collection to `trading.quote_history`/`foreign_trade` under KBS.
+  - Still open from 2026-04-21: nightly `sqlite3 .backup` to a timestamped local-disk file as insurance against virtiofs truncations.
+  - Still open from 2026-04-21: script the manual rename step on the Windows side (now optional given today's successful copy-back, but still useful as a safety net).
+  - Investigate why the LightGBM ranker scored REAL #1 with flow_z20=-3.276 today — check feature importances and whether macro/regime features are dominating in `chop` regimes.

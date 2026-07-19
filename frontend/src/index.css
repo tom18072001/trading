@@ -1,0 +1,149 @@
+@import "tailwindcss";
+
+/* =========================================================================
+   VN Sector Flow — design tokens (2026-06-18 redesign)
+   Tailwind v4 CSS-first theme. Generates utilities like bg-panel, text-hi,
+   border-line, font-display, etc. Hex/values come from the redesign handoff.
+   ========================================================================= */
+@theme {
+  --color-bg: #0A0D12;
+  --color-sidebar: #0C1016;
+  --color-panel: #11151C;
+  --color-panel2: #161B24;
+  --color-raise: #1C222D;
+  --color-line: rgba(255, 255, 255, 0.07);
+  --color-line2: rgba(255, 255, 255, 0.13);
+  --color-hi: #EAF0F7;
+  --color-mid: #909DAF;
+  --color-lo: #5A6573;
+  --color-buy: #33D49A;
+  --color-sell: #FF5D73;
+  --color-warn: #F5B13D;
+  --color-acc: #46C9E6;
+
+  --font-display: "Space Grotesk", system-ui, sans-serif;
+  --font-body: "Manrope", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--color-bg);
+  color: var(--color-hi);
+  font-family: var(--font-body);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Numeric / tabular contexts (prices, z-scores, %, timestamps) */
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* Section label helper: 10.5px / 700 / uppercase / wide tracking / lo */
+.section-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--color-lo);
+}
+
+/* ---- Animations (redesign keyframes) ---- */
+@keyframes dotPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.85); }
+}
+.animate-dot-pulse { animation: dotPulse 1.8s ease-in-out infinite; }
+
+@keyframes livePing {
+  0% { box-shadow: 0 0 0 0 rgba(51, 212, 154, 0.45); }
+  70% { box-shadow: 0 0 0 7px rgba(51, 212, 154, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(51, 212, 154, 0); }
+}
+.animate-live-ping { animation: livePing 1.6s cubic-bezier(0, 0, 0.2, 1) infinite; }
+
+@keyframes nowPing {
+  0% { box-shadow: 0 0 0 0 rgba(70, 201, 230, 0.5); }
+  70% { box-shadow: 0 0 0 6px rgba(70, 201, 230, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(70, 201, 230, 0); }
+}
+.animate-now-ping { animation: nowPing 1.6s cubic-bezier(0, 0, 0.2, 1) infinite; }
+
+@keyframes spin360 { to { transform: rotate(360deg); } }
+.animate-spin360 { animation: spin360 0.9s linear infinite; }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-up { animation: fadeUp 0.35s cubic-bezier(0.4, 0, 0.2, 1) both; }
+
+/* Custom scrollbar for dark theme (redesign: 9px, #232A35 thumb, 2px bg border) */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #232A35;
+  border-radius: 6px;
+  border: 2px solid var(--color-bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2E3744;
+}
+
+/* Agent chat markdown tables */
+.prose-agent table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 13px;
+}
+.prose-agent th {
+  background: rgba(30, 41, 59, 0.8);
+  padding: 6px 12px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 500;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.prose-agent td {
+  padding: 6px 12px;
+  border-top: 1px solid rgba(51, 65, 85, 0.4);
+  color: #cbd5e1;
+}
+.prose-agent tr:hover td {
+  background: rgba(30, 41, 59, 0.4);
+}
+.prose-agent hr {
+  border-color: rgba(51, 65, 85, 0.5);
+  margin: 12px 0;
+}
+
+/* Smooth transitions on all interactive elements */
+button, a, input, select, textarea {
+  transition-property: all;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+/* Glow effect for active nav items */
+.nav-glow {
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.1);
+}
+
+/* Pulse animation for online indicator */
+@keyframes gentle-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.animate-gentle-pulse {
+  animation: gentle-pulse 2s ease-in-out infinite;
+}

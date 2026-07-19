@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { background: #0A0D12; font-family: 'Manrope', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #232A35; border-radius: 6px; border: 2px solid #0A0D12; }
+  ::-webkit-scrollbar-thumb:hover { background: #313a47; }
+  @keyframes dotPulse { 0%,100% { opacity: 1; transform: scale(1);} 50% { opacity:.35; transform: scale(.7);} }
+  @keyframes barShimmer { 0% { background-position: -200px 0; } 100% { background-position: 200px 0; } }
+  @keyframes fadeUp { from { opacity:0; transform: translateY(6px);} to { opacity:1; transform:none;} }
+  @keyframes nowPing { 0% { box-shadow: 0 0 0 0 rgba(70,201,230,.45);} 70%,100% { box-shadow: 0 0 0 7px rgba(70,201,230,0);} }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  input[type=range]{ -webkit-appearance:none; appearance:none; height:4px; border-radius:4px; background:#232A35; outline:none; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:15px; height:15px; border-radius:50%; background:var(--acc); cursor:pointer; border:2px solid #0A0D12; box-shadow:0 0 0 1px var(--acc); }
+</style>
+</helmet>
+
+<div style="--bg:#0A0D12;--panel:#11151C;--panel2:#161B24;--raise:#1C222D;--line:rgba(255,255,255,.07);--line2:rgba(255,255,255,.13);--hi:#EAF0F7;--mid:#909DAF;--lo:#5A6573;--buy:{{ buyColor }};--buyd:rgba(51,212,154,.13);--sell:#FF5D73;--selld:rgba(255,93,115,.13);--warn:#F5B13D;--warnd:rgba(245,177,61,.12);--acc:{{ accent }};--accd:rgba(70,201,230,.13);--cpad:{{ cardPad }}; display:flex; min-height:100vh; width:100%; background:var(--bg); color:var(--hi); font-family:'Manrope',sans-serif;">
+
+  <!-- ===================== SIDEBAR ===================== -->
+  <aside style="width:236px; flex:none; background:#0C1016; border-right:1px solid var(--line); display:flex; flex-direction:column; position:sticky; top:0; height:100vh;">
+    <div style="padding:22px 20px 18px; border-bottom:1px solid var(--line);">
+      <div style="display:flex; align-items:center; gap:11px;">
+        <div style="width:34px; height:34px; border-radius:10px; background:linear-gradient(140deg,var(--acc),#2C9C8E); display:flex; align-items:center; justify-content:center; box-shadow:0 4px 14px rgba(70,201,230,.25);">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 17l5-6 4 4 4-7 5 6" stroke="#06121A" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div style="line-height:1.15;">
+          <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:16px; letter-spacing:-.01em; color:var(--hi);">VN Sector Flow</div>
+          <div style="font-size:10.5px; color:var(--lo); margin-top:1px; letter-spacing:.02em;">Rotation · Money Flow · Regime</div>
+        </div>
+      </div>
+    </div>
+
+    <nav style="flex:1; padding:14px 12px; display:flex; flex-direction:column; gap:3px;">
+      <div style="font-size:10px; font-weight:700; letter-spacing:.16em; color:var(--lo); padding:6px 12px 8px;">PHÂN TÍCH</div>
+
+      <a href="Money Flow Monitor.dc.html" style="display:flex; align-items:center; gap:11px; padding:9px 12px; border-radius:9px; color:var(--mid); text-decoration:none; font-size:13.5px; font-weight:500;" style-hover="background:rgba(255,255,255,.04); color:var(--hi);">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 3c3 4 5 6.5 5 9.5A5 5 0 1 1 7 12.5C7 9.5 9 7 12 3z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+        <span>Money Flow Monitor</span>
+      </a>
+      <a href="Rotation Map.dc.html" style="display:flex; align-items:center; gap:11px; padding:9px 12px; border-radius:9px; color:var(--mid); text-decoration:none; font-size:13.5px; font-weight:500;" style-hover="background:rgba(255,255,255,.04); color:var(--hi);">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M20 7a8 8 0 1 0 1.5 6M20 3v4h-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Rotation Map</span>
+      </a>
+      <a href="Stealth Watch.dc.html" style="display:flex; align-items:center; gap:11px; padding:9px 12px; border-radius:9px; color:var(--mid); text-decoration:none; font-size:13.5px; font-weight:500;" style-hover="background:rgba(255,255,255,.04); color:var(--hi);">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="2.3" stroke="currentColor" stroke-width="1.7"/></svg>
+        <span>Stealth Watch</span>
+      </a>
+      <a href="Flow Pulse.dc.html" style="display:flex; align-items:center; gap:11px; padding:9px 12px; border-radius:9px; color:var(--mid); text-decoration:none; font-size:13.5px; font-weight:500;" style-hover="background:rgba(255,255,255,.04); color:var(--hi);">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 12h4l2.5-7 5 14 2.5-7H21" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Flow Pulse</span>
+      </a>
+
+      <div style="height:1px; background:var(--line); margin:11px 12px;"></div>
+
+      <a style="display:flex; align-items:center; gap:11px; padding:9px 12px; border-radius:9px; color:var(--acc); text-decoration:none; font-size:13.5px; font-weight:600; background:linear-gradient(90deg,var(--accd),transparent); border:1px solid rgba(70,201,230,.22); position:relative;">
+        <span style="position:absolute; left:0; top:8px; bottom:8px; width:2.5px; border-radius:2px; background:var(--acc);"></span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M5 3h11l3 3v15H5z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M15 3v4h4M8.5 11.5l2 2 4-4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Daily Insight</span>
+      </a>
+    </nav>
+
+    <div style="padding:14px 18px; border-top:1px solid var(--line);">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="width:7px; height:7px; border-radius:50%; background:var(--buy); animation:dotPulse 2.2s ease-in-out infinite;"></span>
+        <span style="font-size:11.5px; color:var(--mid); font-family:'JetBrains Mono',monospace;">api · localhost:8000</span>
+      </div>
+      <div style="font-size:10.5px; color:var(--lo); margin-top:5px;">15 sectors · top-5 proxy basket</div>
+    </div>
+  </aside>
+
+  <!-- ===================== MAIN ===================== -->
+  <main style="flex:1; min-width:0; display:flex; flex-direction:column;">
+
+    <!-- header -->
+    <header style="display:flex; align-items:flex-start; justify-content:space-between; gap:24px; padding:30px 36px 22px; border-bottom:1px solid var(--line);">
+      <div>
+        <div style="display:flex; align-items:center; gap:11px;">
+          <h1 style="margin:0; font-family:'Space Grotesk',sans-serif; font-size:29px; font-weight:700; letter-spacing:-.02em; color:var(--hi);">Daily Insight</h1>
+          <span style="font-size:11px; font-family:'JetBrains Mono',monospace; color:var(--mid); background:var(--panel2); border:1px solid var(--line); padding:3px 9px; border-radius:7px;">{{ data.date }}</span>
+        </div>
+        <p style="margin:7px 0 0; font-size:14px; color:var(--mid);">Hôm nay nên <span style="color:var(--buy); font-weight:600;">MUA</span> mã nào, <span style="color:var(--sell); font-weight:600;">BÁN</span> mã nào — chốt lời trong <span style="color:var(--hi); font-weight:600;">T+3</span>.</p>
+        <p style="margin:5px 0 0; font-size:11.5px; color:var(--lo); font-family:'JetBrains Mono',monospace;">cập nhật {{ data.generated_at_fmt }}</p>
+      </div>
+      <div style="display:flex; flex-direction:column; align-items:flex-end; gap:8px; flex:none;">
+        <button onClick="{{ onRefresh }}" style="display:flex; align-items:center; gap:8px; padding:11px 18px; border-radius:11px; border:1px solid rgba(70,201,230,.4); background:linear-gradient(180deg,rgba(70,201,230,.18),rgba(70,201,230,.07)); color:var(--acc); font-family:'Manrope',sans-serif; font-size:13.5px; font-weight:600; cursor:pointer;" style-hover="background:rgba(70,201,230,.26);">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" style="{{ spinStyle }}"><path d="M21 12a9 9 0 1 1-2.6-6.3M21 4v5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>{{ refreshLabel }}</span>
+        </button>
+        <sc-if value="{{ refreshing }}" hint-placeholder-val="{{ false }}">
+          <div style="width:248px;">
+            <div style="display:flex; justify-content:space-between; font-size:10.5px; color:var(--mid); font-family:'JetBrains Mono',monospace; margin-bottom:5px;">
+              <span>{{ refreshStageLabel }}</span><span>{{ refreshPct }}%</span>
+            </div>
+            <div style="height:5px; background:var(--panel2); border-radius:4px; overflow:hidden;">
+              <div style="height:100%; border-radius:4px; background:linear-gradient(90deg,var(--acc),#2C9C8E); width:{{ refreshPctWidth }}; transition:width .5s cubic-bezier(.4,0,.2,1);"></div>
+            </div>
+          </div>
+        </sc-if>
+      </div>
+    </header>
+
+    <div style="padding:24px 36px 56px; display:flex; flex-direction:column; gap:22px;">
+
+      <!-- ===== DATA QUALITY ===== -->
+      <sc-if value="{{ degraded }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex; align-items:center; gap:13px; padding:13px 17px; border-radius:13px; background:linear-gradient(90deg,var(--warnd),transparent); border:1px solid rgba(245,177,61,.3);">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" style="flex:none;"><path d="M12 3l9.5 17H2.5L12 3z" stroke="var(--warn)" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 10v4M12 17.2v.1" stroke="var(--warn)" stroke-width="2" stroke-linecap="round"/></svg>
+          <div style="flex:1;">
+            <div style="font-size:13px; font-weight:600; color:#F5C97A;">Dữ liệu degraded — picks vẫn hiển thị nhưng cần thận trọng</div>
+            <div style="font-size:11px; color:var(--mid); font-family:'JetBrains Mono',monospace; margin-top:2px;">ohlcv_fail {{ data.freshness.fail_pct }}% ≥ 25% · universe {{ data.freshness.universe_size }} · pass {{ data.freshness.capability_pass_count }}</div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== DECISION COCKPIT ===== -->
+      <section style="display:grid; grid-template-columns:300px 1fr; gap:16px;">
+        <!-- regime gauge -->
+        <div style="background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:var(--cpad); display:flex; flex-direction:column;">
+          <div style="font-size:10.5px; font-weight:700; letter-spacing:.15em; color:var(--lo); margin-bottom:8px;">TRẠNG THÁI THỊ TRƯỜNG</div>
+          <div style="display:flex; align-items:center; gap:14px;">
+            <svg width="120" height="74" viewBox="0 0 180 100">
+              <path d="{{ gauge.off }}" stroke="var(--sell)" stroke-width="9" fill="none" stroke-linecap="round" opacity=".85"/>
+              <path d="{{ gauge.chop }}" stroke="#4A5566" stroke-width="9" fill="none" stroke-linecap="round" opacity=".9"/>
+              <path d="{{ gauge.on }}" stroke="var(--buy)" stroke-width="9" fill="none" stroke-linecap="round" opacity=".85"/>
+              <line x1="90" y1="90" x2="{{ gauge.nx }}" y2="{{ gauge.ny }}" stroke="var(--hi)" stroke-width="3" stroke-linecap="round"/>
+              <circle cx="90" cy="90" r="6" fill="var(--hi)"/>
+              <circle cx="90" cy="90" r="2.6" fill="var(--bg)"/>
+            </svg>
+            <div>
+              <div style="font-family:'Space Grotesk',sans-serif; font-size:24px; font-weight:700; color:var(--hi); text-transform:capitalize; line-height:1;">{{ data.market_context.regime.label }}</div>
+              <div style="font-size:12px; color:var(--mid); margin-top:4px;">confidence <span style="font-family:'JetBrains Mono',monospace; color:var(--hi);">{{ regimeConf }}%</span></div>
+              <div style="display:inline-block; margin-top:8px; font-size:11px; font-weight:600; color:var(--warn); background:var(--warnd); border:1px solid rgba(245,177,61,.25); padding:3px 9px; border-radius:7px;">Tư thế phòng thủ</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- count tiles -->
+        <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:16px;">
+          <div style="background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:var(--cpad); position:relative; overflow:hidden;">
+            <div style="position:absolute; inset:0; background:linear-gradient(160deg,var(--buyd),transparent 60%);"></div>
+            <div style="position:relative;">
+              <div style="display:flex; align-items:center; gap:7px; font-size:10.5px; font-weight:700; letter-spacing:.13em; color:var(--buy);">
+                <span style="width:7px; height:7px; border-radius:2px; background:var(--buy);"></span>NÊN MUA
+              </div>
+              <div style="font-family:'Space Grotesk',sans-serif; font-size:42px; font-weight:700; color:var(--hi); line-height:1; margin-top:14px;">{{ data.market_context.buy_count }}</div>
+              <div style="font-size:11.5px; color:var(--mid); margin-top:6px;">ngành có tín hiệu vào lệnh</div>
+            </div>
+          </div>
+          <div style="background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:var(--cpad); position:relative; overflow:hidden;">
+            <div style="position:absolute; inset:0; background:linear-gradient(160deg,var(--selld),transparent 60%);"></div>
+            <div style="position:relative;">
+              <div style="display:flex; align-items:center; gap:7px; font-size:10.5px; font-weight:700; letter-spacing:.13em; color:var(--sell);">
+                <span style="width:7px; height:7px; border-radius:2px; background:var(--sell);"></span>NÊN BÁN / TRÁNH
+              </div>
+              <div style="font-family:'Space Grotesk',sans-serif; font-size:42px; font-weight:700; color:var(--hi); line-height:1; margin-top:14px;">{{ data.market_context.sell_count }}</div>
+              <div style="font-size:11.5px; color:var(--mid); margin-top:6px;">ngành flow âm / cắt lỗ</div>
+            </div>
+          </div>
+          <div style="background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:var(--cpad); position:relative; overflow:hidden;">
+            <div style="position:absolute; inset:0; background:linear-gradient(160deg,var(--warnd),transparent 60%);"></div>
+            <div style="position:relative;">
+              <div style="display:flex; align-items:center; gap:7px; font-size:10.5px; font-weight:700; letter-spacing:.13em; color:var(--warn);">
+                <span style="width:7px; height:7px; border-radius:2px; background:var(--warn);"></span>TÍCH LUỸ NGẦM
+              </div>
+              <div style="font-family:'Space Grotesk',sans-serif; font-size:42px; font-weight:700; color:var(--hi); line-height:1; margin-top:14px;">{{ data.market_context.stealth_count }}</div>
+              <div style="font-size:11.5px; color:var(--mid); margin-top:6px;">ngành stealth phase</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== SECTOR FLOW SPECTRUM ===== -->
+      <section style="background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:var(--cpad);">
+        <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:20px;">
+          <div style="font-size:10.5px; font-weight:700; letter-spacing:.15em; color:var(--lo);">DỊCH CHUYỂN DÒNG TIỀN GIỮA CÁC NGÀNH</div>
+          <div style="font-size:11px; color:var(--lo); font-family:'JetBrains Mono',monospace;">flow_z20 · 20 phiên</div>
+        </div>
+
+        <!-- spectrum axis -->
+        <div style="position:relative; height:84px; margin:0 8px 8px;">
+          <div style="position:absolute; left:0; right:0; top:50%; height:2px; background:linear-gradient(90deg,var(--sell),#39404D 50%,var(--buy)); border-radius:2px;"></div>
+          <div style="position:absolute; left:50%; top:14px; bottom:14px; width:1px; background:var(--line2); transform:translateX(-50%);"></div>
+          <div style="position:absolute; left:0; top:-4px; font-size:10px; font-weight:600; color:var(--sell);">◄ DÒNG TIỀN RA</div>
+          <div style="position:absolute; right:0; top:-4px; font-size:10px; font-weight:600; color:var(--buy);">DÒNG TIỀN VÀO ►</div>
+          <sc-for list="{{ spectrum }}" as="s" hint-placeholder-count="8">
+            <div style="position:absolute; top:50%; left:{{ s.leftPct }}; transform:translate(-50%,-50%); display:flex; flex-direction:column; align-items:center; cursor:default;">
+              <div style="font-size:10.5px; font-weight:700; color:{{ s.color }}; font-family:'JetBrains Mono',monospace; margin-bottom:{{ s.aboveGap }};">{{ s.codeAbove }}</div>
+              <div style="width:{{ s.dot }}; height:{{ s.dot }}; border-radius:50%; background:{{ s.color }}; box-shadow:0 0 0 4px {{ s.glow }}; z-index:2;"></div>
+              <div style="font-size:10.5px; font-weight:700; color:{{ s.color }}; font-family:'JetBrains Mono',monospace; margin-top:{{ s.belowGap }};">{{ s.codeBelow }}</div>
+            </div>
+          </sc-for>
+        </div>
+
+        <!-- delta rows -->
+        <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:22px;">
+          <sc-for list="{{ deltas }}" as="d" hint-placeholder-count="3">
+            <div style="background:var(--panel2); border:1px solid var(--line); border-radius:13px; padding:15px;">
+              <div style="display:flex; align-items:center; justify-content:space-between;">
+                <span style="font-size:10px; font-weight:700; letter-spacing:.1em; color:{{ d.tone }};">{{ d.label }}</span>
+                <svg width="74" height="26" viewBox="0 0 120 30" style="overflow:visible;"><polyline points="{{ d.points }}" fill="none" stroke="{{ d.tone }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="{{ d.lastX }}" cy="{{ d.lastY }}" r="2.6" fill="{{ d.tone }}"/></svg>
+              </div>
+              <div style="display:flex; align-items:baseline; gap:8px; margin-top:11px;">
+                <span style="font-family:'Space Grotesk',sans-serif; font-size:19px; font-weight:700; color:var(--hi);">{{ d.sector }}</span>
+                <span style="font-size:11.5px; color:var(--mid);">{{ d.name }}</span>
+              </div>
+              <div style="font-size:12px; font-family:'JetBrains Mono',monospace; color:{{ d.tone }}; margin-top:4px;">{{ d.metric }}</div>
+              <div style="font-size:11.5px; color:var(--mid); margin-top:9px; display:flex; gap:6px; line-height:1.4;"><span style="color:var(--acc);">→</span><span>{{ d.what_to_do }}</span></div>
+            </div>
+          </sc-for>
+        </div>
+      </section>
+
+      <!-- ===== TRADER AGENT MINH ===== -->
+      <section style="background:linear-gradient(135deg,var(--panel),rgba(70,201,230,.04)); border:1px solid rgba(70,201,230,.18); border-radius:16px; padding:var(--cpad);">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+          <div style="display:flex; align-items:center; gap:11px;">
+            <div style="width:36px; height:36px; border-radius:11px; background:linear-gradient(140deg,var(--acc),#2C9C8E); display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:700; color:#06121A; font-size:15px;">M</div>
+            <div>
+              <div style="font-size:13.5px; font-weight:700; color:var(--hi);">Trader Agent — Minh</div>
+              <div style="font-size:10.5px; color:var(--lo); letter-spacing:.05em;">phân tích định tính phiên hôm nay</div>
+            </div>
+          </div>
+          <div style="font-size:10.5px; color:var(--lo); font-family:'JetBrains Mono',monospace;">{{ data.agent.model }} · {{ data.agent.duration_ms }}ms · ${{ data.agent.cost_usd }}</div>
+        </div>
+        <div style="font-size:15px; font-weight:600; color:var(--hi); line-height:1.5; margin-top:16px;">{{ data.agent.gist }}</div>
+        <div style="font-size:13px; color:var(--mid); line-height:1.6; margin-top:9px;">{{ data.agent.regime_comment }}</div>
+        <div style="display:flex; gap:9px; align-items:flex-start; margin-top:16px; padding:13px 15px; background:rgba(70,201,230,.07); border:1px solid rgba(70,201,230,.18); border-radius:12px;">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" style="flex:none; margin-top:1px;"><path d="M3 7h18M3 12h18M3 17h12" stroke="var(--acc)" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <div style="font-size:12.5px; color:#BFE8F2; line-height:1.55;"><span style="font-weight:700;">Phân bổ:</span> {{ data.agent.portfolio_note }}</div>
+        </div>
+      </section>
+
+      <!-- ===== PICKS DECISION MODULE ===== -->
+      <section>
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:16px;">
+          <div style="display:flex; align-items:center; gap:11px;">
+            <h2 style="margin:0; font-family:'Space Grotesk',sans-serif; font-size:18px; font-weight:700; color:var(--hi);">Danh mục hành động</h2>
+            <span style="font-size:11.5px; color:var(--lo);">swing 3–5 phiên · tôn trọng stop</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:16px;">
+            <!-- capital sizing -->
+            <div style="display:flex; align-items:center; gap:10px; background:var(--panel); border:1px solid var(--line); border-radius:11px; padding:8px 14px;">
+              <span style="font-size:11px; color:var(--mid); font-weight:600;">Vốn</span>
+              <input type="range" min="50" max="500" step="10" value="{{ capital }}" onInput="{{ onCapital }}" style="width:120px;">
+              <span style="font-family:'JetBrains Mono',monospace; font-size:13px; font-weight:600; color:var(--acc); min-width:62px; text-align:right;">{{ capital }}tr</span>
+            </div>
+            <!-- view toggle -->
+            <div style="display:flex; background:var(--panel); border:1px solid var(--line); border-radius:11px; padding:3px;">
+              <button onClick="{{ onCards }}" style="{{ tabCards }}">Thẻ</button>
+              <button onClick="{{ onBoard }}" style="{{ tabBoard }}">Bảng</button>
+              <button onClick="{{ onTimeline }}" style="{{ tabTimeline }}">Timeline T+3</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ---- CARDS VIEW ---- -->
+        <sc-if value="{{ isCards }}" hint-placeholder-val="{{ true }}">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+            <sc-for list="{{ cards }}" as="c" hint-placeholder-count="3">
+              <div style="background:var(--panel); border:1px solid {{ c.borderClr }}; border-radius:16px; padding:var(--cpad); display:flex; flex-direction:column; gap:14px; animation:fadeUp .3s ease;">
+                <!-- card head -->
+                <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:10px;">
+                  <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                    <span style="font-family:'Space Grotesk',sans-serif; font-size:22px; font-weight:700; color:var(--hi); letter-spacing:-.01em;">{{ c.symbol }}</span>
+                    <span style="font-size:10.5px; font-weight:700; font-family:'JetBrains Mono',monospace; color:var(--acc); background:var(--accd); padding:3px 8px; border-radius:6px;">{{ c.sector }}</span>
+                    <span style="font-size:11px; color:var(--mid);">{{ c.sector_name }}</span>
+                  </div>
+                  <div style="display:flex; flex-direction:column; align-items:flex-end; gap:5px;">
+                    <span style="font-size:11px; font-weight:700; letter-spacing:.05em; color:{{ c.sideColor }}; background:{{ c.sideBg }}; border:1px solid {{ c.borderClr }}; padding:4px 11px; border-radius:8px;">{{ c.sideLabel }}</span>
+                    <span style="font-size:12px; color:var(--warn); letter-spacing:.12em;">{{ c.stars }}</span>
+                  </div>
+                </div>
+
+                <!-- BUY: price ladder + t3 -->
+                <sc-if value="{{ c.isBuy }}" hint-placeholder-val="{{ true }}">
+                  <div style="display:grid; grid-template-columns:1fr 132px; gap:16px;">
+                    <!-- ladder -->
+                    <div style="display:flex; gap:13px;">
+                      <div style="position:relative; width:8px; border-radius:5px; background:linear-gradient(180deg,var(--buyd),var(--selld)); flex:none;">
+                        <div style="position:absolute; left:-3px; right:-3px; top:{{ c.ladder.targetTop }}; height:2px; background:var(--buy);"></div>
+                        <div style="position:absolute; left:-3px; right:-3px; top:{{ c.ladder.stopTop }}; height:2px; background:var(--sell);"></div>
+                        <div style="position:absolute; left:50%; top:{{ c.ladder.currentTop }}; width:15px; height:15px; border-radius:50%; background:var(--hi); border:3px solid var(--panel); transform:translate(-50%,-50%); box-shadow:0 0 0 1px var(--line2);"></div>
+                      </div>
+                      <div style="flex:1; display:flex; flex-direction:column; justify-content:space-between; font-family:'JetBrains Mono',monospace; padding:1px 0;">
+                        <div><div style="font-size:9.5px; color:var(--buy); font-weight:600;">TARGET</div><div style="font-size:14px; color:var(--hi); font-weight:600;">{{ c.target }} <span style="font-size:10.5px; color:var(--buy);">{{ c.upside }}</span></div></div>
+                        <div><div style="font-size:9.5px; color:var(--mid); font-weight:600;">HIỆN TẠI · ENTRY {{ c.entry }}</div><div style="font-size:14px; color:var(--hi); font-weight:600;">{{ c.current }}</div></div>
+                        <div><div style="font-size:9.5px; color:var(--sell); font-weight:600;">STOP</div><div style="font-size:14px; color:var(--hi); font-weight:600;">{{ c.stop }} <span style="font-size:10.5px; color:var(--sell);">{{ c.downside }}</span></div></div>
+                      </div>
+                    </div>
+                    <!-- t3 schedule -->
+                    <div style="display:flex; flex-direction:column; gap:6px;">
+                      <div style="font-size:9.5px; font-weight:700; letter-spacing:.08em; color:var(--lo);">LỊCH T+3</div>
+                      <sc-for list="{{ c.t3 }}" as="t" hint-placeholder-count="4">
+                        <div style="display:flex; align-items:center; gap:8px; padding:5px 8px; border-radius:8px; background:{{ t.bg }}; border:1px solid {{ t.border }};">
+                          <span style="font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:700; color:{{ t.fg }}; min-width:26px;">{{ t.label }}</span>
+                          <span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; color:var(--mid);">{{ t.date }}</span>
+                          <span style="margin-left:auto; font-size:10px; font-weight:600; color:{{ t.fg }};">{{ t.sub }}</span>
+                        </div>
+                      </sc-for>
+                    </div>
+                  </div>
+                  <!-- sizing row -->
+                  <sc-if value="{{ showSizing }}" hint-placeholder-val="{{ true }}">
+                    <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px;">
+                      <div style="background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:9px 12px;"><div style="font-size:9.5px; color:var(--lo); font-weight:600;">R:R</div><div style="font-family:'JetBrains Mono',monospace; font-size:15px; font-weight:600; color:{{ c.rrTone }};">{{ c.rr }}</div></div>
+                      <div style="background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:9px 12px;"><div style="font-size:9.5px; color:var(--lo); font-weight:600;">PHÂN BỔ</div><div style="font-family:'JetBrains Mono',monospace; font-size:15px; font-weight:600; color:var(--hi);">{{ c.alloc }}<span style="font-size:10px; color:var(--mid);">tr</span></div></div>
+                      <div style="background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:9px 12px;"><div style="font-size:9.5px; color:var(--lo); font-weight:600;">RỦI RO TỐI ĐA</div><div style="font-family:'JetBrains Mono',monospace; font-size:15px; font-weight:600; color:var(--sell);">−{{ c.risk }}<span style="font-size:10px; color:var(--mid);">tr</span></div></div>
+                    </div>
+                  </sc-if>
+                </sc-if>
+
+                <!-- SELL: caution -->
+                <sc-if value="{{ c.isSell }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex; align-items:center; gap:14px; padding:14px; background:var(--selld); border:1px solid rgba(255,93,115,.25); border-radius:12px;">
+                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" style="flex:none;"><path d="M12 3l9.5 17H2.5L12 3z" stroke="var(--sell)" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 10v4M12 17v.1" stroke="var(--sell)" stroke-width="2" stroke-linecap="round"/></svg>
+                    <div style="flex:1;">
+                      <div style="font-size:11px; color:var(--mid); font-weight:600;">STOP-OUT nếu đang nắm</div>
+                      <div style="font-family:'JetBrains Mono',monospace; font-size:20px; font-weight:700; color:var(--sell);">{{ c.stop }}</div>
+                    </div>
+                    <div style="text-align:right;"><div style="font-size:11px; color:var(--mid);">giá hiện tại</div><div style="font-family:'JetBrains Mono',monospace; font-size:15px; color:var(--hi);">{{ c.current }}</div></div>
+                  </div>
+                </sc-if>
+
+                <!-- technical bits -->
+                <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                  <sc-for list="{{ c.bits }}" as="b" hint-placeholder-count="4">
+                    <span style="font-size:10.5px; font-family:'JetBrains Mono',monospace; color:var(--mid); background:var(--raise); border:1px solid var(--line); padding:3px 8px; border-radius:6px;">{{ b }}</span>
+                  </sc-for>
+                </div>
+
+                <div style="font-size:12.5px; color:#C6D2DF; line-height:1.55;">{{ c.thesis }}</div>
+
+                <sc-if value="{{ c.hasRisks }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex; flex-direction:column; gap:5px;">
+                    <sc-for list="{{ c.risks }}" as="r" hint-placeholder-count="1">
+                      <div style="display:flex; gap:7px; font-size:11.5px; color:#E7A9B2; line-height:1.45;"><span style="color:var(--sell);">⚠</span><span>{{ r }}</span></div>
+                    </sc-for>
+                  </div>
+                </sc-if>
+
+                <sc-if value="{{ c.hasNews }}" hint-placeholder-val="{{ false }}">
+                  <div>
+                    <button onClick="{{ c.onToggleNews }}" style="display:flex; align-items:center; gap:7px; background:none; border:none; padding:0; cursor:pointer; color:var(--acc); font-family:'Manrope',sans-serif; font-size:11.5px; font-weight:600;">
+                      <span>{{ c.newsCaret }}</span><span>Tin tức ({{ c.newsCount }})</span>
+                    </button>
+                    <sc-if value="{{ c.newsOpen }}" hint-placeholder-val="{{ false }}">
+                      <div style="margin-top:9px; display:flex; flex-direction:column; gap:8px; padding-left:4px; border-left:2px solid var(--line2);">
+                        <sc-for list="{{ c.news }}" as="n" hint-placeholder-count="2">
+                          <div style="padding-left:11px;">
+                            <div style="font-size:12px; color:#C6D2DF; line-height:1.4;">{{ n.title }}</div>
+                            <div style="font-size:10px; font-family:'JetBrains Mono',monospace; color:var(--lo); margin-top:2px;">{{ n.source }} · {{ n.published }}</div>
+                          </div>
+                        </sc-for>
+                      </div>
+                    </sc-if>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <!-- ---- BOARD VIEW ---- -->
+        <sc-if value="{{ isBoard }}" hint-placeholder-val="{{ false }}">
+          <div style="background:var(--panel); border:1px solid var(--line); border-radius:16px; overflow:hidden;">
+            <div style="display:grid; grid-template-columns:96px 90px 1.6fr 80px 80px 80px 80px 64px; gap:0; padding:11px 18px; background:var(--panel2); border-bottom:1px solid var(--line); font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--lo);">
+              <span>MÃ</span><span>NGÀNH</span><span>LUẬN ĐIỂM</span><span style="text-align:right;">GIÁ</span><span style="text-align:right;">ENTRY</span><span style="text-align:right;">TARGET</span><span style="text-align:right;">STOP</span><span style="text-align:right;">R:R</span>
+            </div>
+            <sc-for list="{{ cards }}" as="c" hint-placeholder-count="3">
+              <div style="display:grid; grid-template-columns:96px 90px 1.6fr 80px 80px 80px 80px 64px; gap:0; padding:13px 18px; border-bottom:1px solid var(--line); align-items:center;" style-hover="background:rgba(255,255,255,.02);">
+                <div style="display:flex; flex-direction:column; gap:4px;"><span style="font-family:'Space Grotesk',sans-serif; font-size:15px; font-weight:700; color:var(--hi);">{{ c.symbol }}</span><span style="font-size:9.5px; font-weight:700; color:{{ c.sideColor }}; background:{{ c.sideBg }}; padding:2px 6px; border-radius:5px; width:fit-content;">{{ c.sideLabel }}</span></div>
+                <div><span style="font-size:11px; font-family:'JetBrains Mono',monospace; color:var(--acc);">{{ c.sector }}</span><div style="font-size:10px; color:var(--lo);">{{ c.sector_name }}</div></div>
+                <div style="font-size:11.5px; color:var(--mid); line-height:1.4; padding-right:14px;">{{ c.thesisShort }}</div>
+                <div style="text-align:right; font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--hi);">{{ c.current }}</div>
+                <div style="text-align:right; font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--mid);">{{ c.entryCell }}</div>
+                <div style="text-align:right; font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--buy);">{{ c.targetCell }}</div>
+                <div style="text-align:right; font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--sell);">{{ c.stop }}</div>
+                <div style="text-align:right; font-family:'JetBrains Mono',monospace; font-size:13px; font-weight:600; color:{{ c.rrTone }};">{{ c.rrCell }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <!-- ---- TIMELINE VIEW ---- -->
+        <sc-if value="{{ isTimeline }}" hint-placeholder-val="{{ false }}">
+          <div style="background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:var(--cpad);">
+            <div style="display:grid; grid-template-columns:150px repeat(4,1fr); gap:0; margin-bottom:8px;">
+              <span></span>
+              <sc-for list="{{ t3Head }}" as="h" hint-placeholder-count="4">
+                <div style="text-align:center; padding-bottom:10px; border-bottom:1px solid var(--line);">
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:13px; font-weight:700; color:{{ h.fg }};">{{ h.label }}</div>
+                  <div style="font-size:10.5px; color:var(--mid); margin-top:2px;">{{ h.date }}</div>
+                  <div style="font-size:10px; color:{{ h.fg }}; font-weight:600; margin-top:2px;">{{ h.sub }}</div>
+                </div>
+              </sc-for>
+            </div>
+            <sc-for list="{{ timelineRows }}" as="row" hint-placeholder-count="2">
+              <div style="display:grid; grid-template-columns:150px repeat(4,1fr); gap:0; align-items:center; padding:16px 0; border-bottom:1px solid var(--line); position:relative;">
+                <div style="display:flex; flex-direction:column; gap:3px;">
+                  <div style="display:flex; align-items:center; gap:8px;"><span style="font-family:'Space Grotesk',sans-serif; font-size:16px; font-weight:700; color:var(--hi);">{{ row.symbol }}</span><span style="font-size:9.5px; font-weight:700; color:{{ row.sideColor }}; background:{{ row.sideBg }}; padding:2px 7px; border-radius:5px;">{{ row.sideLabel }}</span></div>
+                  <span style="font-size:11px; font-family:'JetBrains Mono',monospace; color:var(--mid);">{{ row.entryLabel }} → {{ row.targetLabel }}</span>
+                </div>
+                <!-- flow bar spanning T0..T3 -->
+                <div style="grid-column:2 / 6; position:relative; height:38px;">
+                  <div style="position:absolute; left:6%; right:6%; top:50%; height:6px; border-radius:4px; background:linear-gradient(90deg,{{ row.sideColor }},rgba(70,201,230,.25)); transform:translateY(-50%);"></div>
+                  <div style="position:absolute; left:6%; top:50%; transform:translate(-50%,-50%); display:flex; flex-direction:column; align-items:center; gap:3px;"><div style="width:14px; height:14px; border-radius:50%; background:{{ row.sideColor }}; border:3px solid var(--panel); animation:nowPing 2.4s infinite;"></div><span style="position:absolute; top:16px; font-size:9px; color:var(--mid); white-space:nowrap;">Mua {{ row.entryLabel }}</span></div>
+                  <div style="position:absolute; right:6%; top:50%; transform:translate(50%,-50%); display:flex; flex-direction:column; align-items:center;"><div style="width:14px; height:14px; border-radius:50%; background:var(--buy); border:3px solid var(--panel);"></div><span style="position:absolute; top:16px; font-size:9px; color:var(--buy); white-space:nowrap;">Chốt {{ row.targetLabel }}</span></div>
+                </div>
+              </div>
+            </sc-for>
+            <div style="font-size:11px; color:var(--lo); margin-top:14px; line-height:1.5;">Mua tại T0 (hôm nay), cổ phiếu về tài khoản và <span style="color:var(--buy); font-weight:600;">bán được từ T+3</span> theo quy định thanh toán HOSE. Chốt lời trong cửa sổ T+3 → T+5 nếu chạm target.</div>
+          </div>
+        </sc-if>
+      </section>
+
+      <div style="font-size:10.5px; color:var(--lo); line-height:1.6; border-top:1px solid var(--line); padding-top:16px;">
+        Đơn vị giá = nghìn VND · R:R = reward/risk, nên ≥ 1.5 · Tín hiệu: RSI / MACD / SMA / ADX / Volume / ATR · News: KBS + Google News (CafeF, VnExpress). Không phải khuyến nghị đầu tư.
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:1180},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#46C9E6&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;density&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;comfortable&quot;,&quot;compact&quot;],&quot;default&quot;:&quot;comfortable&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;showSizing&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  state = {
+    pickView: 'cards',
+    openNews: {},
+    refreshing: false,
+    refreshStage: null,
+    refreshPct: 0,
+    capital: 100,
+    data: {
+      date: '2026-06-18',
+      generated_at_fmt: '20:20:43 18/6/2026',
+      freshness: { is_valid: false, fail_pct: 26, universe_size: 75, capability_pass_count: 54 },
+      market_context: { regime: { label: 'chop', confidence: 0.5 }, score: 0.04, buy_count: 4, sell_count: 3, stealth_count: 2 },
+      agent: {
+        model: 'claude-haiku-4-5', duration_ms: 35983, cost_usd: '0.046',
+        gist: 'Thị trường chop, flow yếu; chỉ INSUR có tín hiệu BUY (score 0.49, foreign 65%). OIL tích luỹ nhưng flow chưa sustained; tránh REAL/BANK/STEEL do flow âm kéo dài.',
+        regime_comment: 'Regime chop (0.5 confidence) từ 30/4 chưa update. Sector rotation kiệt: INSUR duy nhất xanh; OIL, POWER, CHEM có flow_z20 dương nhưng chưa phản ánh trong action. Tư thế phòng ngự, ưu tiên giữ tiền mặt.',
+        portfolio_note: 'Tối đa 2 long, tổng ≤ 50% NAV. Giữ 50% tiền mặt do regime chop. Ưu tiên BVH (conviction cao nhất), PVS size nhỏ.',
+      },
+      deltas: [
+        { kind: 'flow_z_up', sector: 'CHEM', name: 'Hóa chất & Phân bón', metric: 'flow_z20 tăng +2.65', what_to_do: 'Theo dõi khối ngoại trước khi vào lệnh', spark: [0.2, 0.5, 0.4, 0.9, 1.3, 1.85, 2.65] },
+        { kind: 'flow_z_down', sector: 'TEXT', name: 'Dệt may', metric: 'flow_z20 giảm −2.97', what_to_do: 'Xem xét cắt long nếu đang giữ', spark: [-0.3, -0.6, -1.1, -1.5, -2.0, -2.5, -2.97] },
+        { kind: 'stealth_top', sector: 'POWER', name: 'Điện & Năng lượng', metric: 'stealth_score 1.97', what_to_do: 'Mở Stealth Watch xem gate 5 điều kiện', spark: [0.4, 0.6, 0.5, 0.85, 1.1, 1.55, 1.97] },
+      ],
+      spectrum: [
+        { code: 'TEXT', z: -2.97 }, { code: 'BANK', z: -1.1 }, { code: 'STEEL', z: -0.55 },
+        { code: 'INSUR', z: 0.6 }, { code: 'POWER', z: 0.9 }, { code: 'OIL', z: 1.14 },
+        { code: 'REAL', z: 1.32 }, { code: 'CHEM', z: 2.65 },
+      ],
+      t3: [
+        { label: 'T0', date: '18/6', sub: 'Mua', state: 'now' },
+        { label: 'T+1', date: '19/6', sub: 'Giữ', state: 'future' },
+        { label: 'T+2', date: '22/6', sub: 'Giữ', state: 'future' },
+        { label: 'T+3', date: '23/6', sub: 'Bán được', state: 'sell' },
+      ],
+      picks: [
+        { side: 'BUY', symbol: 'BVH', sector: 'INSUR', sector_name: 'Bảo hiểm', conviction: 4, entry: 67.0, target: 72.15, stop: 64.01, current: 66.0, rr: 1.7,
+          bits: ['RSI 46', '<SMA20/50', 'Foreign 65%', 'flow_z +0.6'],
+          thesis: 'Sector INSUR duy nhất BUY; foreign_hit_20d 65% + flow_z20 +0.6 cho thấy tích luỹ yên tĩnh. Kỹ thuật yếu (dưới SMA20/50, RSI 46) nhưng đó là entry sạch vào stealth phase gốc.',
+          risks: ['Tin nội bộ bán cổ phiếu (Vũ Thanh Hải) — xác nhận entry size 50% trước', 'Foreign room 161M; stop 64.01 bắt buộc'],
+          news: [ { title: 'BVH: lợi nhuận quý tăng nhờ mảng bảo hiểm nhân thọ', source: 'CafeF', published: '18/6 09:12' }, { title: 'Khối ngoại mua ròng nhóm bảo hiểm phiên thứ 3 liên tiếp', source: 'VnExpress', published: '17/6 15:40' } ] },
+        { side: 'BUY', symbol: 'PVS', sector: 'OIL', sector_name: 'Dầu khí', conviction: 4, entry: 39.0, target: 42.3, stop: 37.15, current: 38.5, rr: 1.8,
+          bits: ['RSI 51', '>SMA20/50', 'Vol 1.8x', 'flow_z +1.14'],
+          thesis: 'OIL flow_z20 +1.14 (tích luỹ sơ kỳ) + foreign 30% steady. PVS trên SMA20/50, RSI 51 trung lập, vol 1.8x. Q1 KQKD + siêu dự án điện gió là backing tích cực.',
+          risks: ['Flow chưa sang phase BUY thực tế (action vẫn HOLD) — risk early entry', 'OIL biến động theo giá Brent; tối đa 50% vốn'],
+          news: [ { title: 'PVS trúng thầu gói dịch vụ điện gió ngoài khơi', source: 'CafeF', published: '18/6 11:05' } ] },
+        { side: 'BUY', symbol: 'DGC', sector: 'CHEM', sector_name: 'Hóa chất & Phân bón', conviction: 5, entry: 92.0, target: 99.5, stop: 88.0, current: 91.2, rr: 1.9,
+          bits: ['RSI 58', '>SMA20/50', 'Vol 2.1x', 'flow_z +2.65'],
+          thesis: 'CHEM dẫn đầu inflow toàn thị trường (flow_z20 +2.65, mạnh nhất 3 tháng). DGC trên SMA20/50, vol 2.1x, giá phân bón thế giới hồi phục. Entry theo đà nhưng chờ khối ngoại xác nhận phiên chiều.',
+          risks: ['flow_z extreme — risk mua đuổi đỉnh ngắn hạn', 'Theo dõi khối ngoại trước khi vào full size'],
+          news: [ { title: 'Giá phospho vàng phục hồi, biên lợi nhuận DGC cải thiện', source: 'CafeF', published: '18/6 10:20' } ] },
+        { side: 'BUY', symbol: 'POW', sector: 'POWER', sector_name: 'Điện & Năng lượng', conviction: 3, entry: 13.2, target: 14.3, stop: 12.6, current: 13.05, rr: 1.8,
+          bits: ['RSI 49', 'stealth 1.97', 'Breadth ↑', 'flow_z +0.9'],
+          thesis: 'POWER ở stealth phase (score 1.97), giá nằm vùng đáy 60 phiên, breadth tăng. Tích luỹ ngầm điển hình — mua ở gốc, kiên nhẫn chờ breakout 8–14 ngày.',
+          risks: ['Stealth chưa fire đủ 5 gate — size nhỏ', 'Cần volume xác nhận trước khi tăng tỉ trọng'],
+          news: [] },
+        { side: 'SELL', symbol: 'VHM', sector: 'REAL', sector_name: 'Bất động sản', conviction: 4, entry: null, target: null, stop: 133.35, current: 135.0, rr: null,
+          bits: ['flow_z +1.32', 'action HOLD', 'score −1.56'],
+          thesis: 'REAL flow_z20 +1.32 nhưng action HOLD + score −1.56 phản ánh model không tin. Tin VHM: công ty con Phát Lộc tách ra = restructure risk. Dù kỹ thuật có hỗ trợ, tin này giảm conviction mạnh.',
+          risks: ['Stop-out 133.35 nếu đang nắm — thoát nếu thủng'], news: [] },
+        { side: 'SELL', symbol: 'TCB', sector: 'BANK', sector_name: 'Ngân hàng', conviction: 3, entry: null, target: null, stop: 24.5, current: 25.1, rr: null,
+          bits: ['flow_z −1.1', 'Foreign bán ròng', 'Breadth ↓'],
+          thesis: 'BANK flow_z20 −1.1 sau 3 phiên khối ngoại bán ròng. Setup tương tự 10/2024 trước nhịp chỉnh −6%. Tránh mua mới, hạ tỉ trọng nếu đang nắm.',
+          risks: ['Stop-out 24.5 nếu thủng hỗ trợ'], news: [] },
+        { side: 'SELL', symbol: 'TNG', sector: 'TEXT', sector_name: 'Dệt may', conviction: 4, entry: null, target: null, stop: 21.8, current: 22.5, rr: null,
+          bits: ['flow_z −2.97', 'Outflow mạnh nhất', 'RSI 38'],
+          thesis: 'TEXT outflow mạnh nhất thị trường (flow_z20 −2.97). Dòng tiền rút khỏi dệt may rõ rệt; TNG dưới SMA20/50, RSI 38 yếu. Cắt long, tránh bắt đáy.',
+          risks: ['Stop-out 21.8 — thoát nếu đang giữ'], news: [] },
+      ],
+    },
+  };
+
+  componentWillUnmount() { clearTimeout(this._t); }
+
+  onRefresh = () => {
+    if (this.state.refreshing) return;
+    const seq = [['publishing_signals', 14], ['rebuilding_universe', 58], ['trader_agent', 86], ['assembling', 97], ['done', 100]];
+    this.setState({ refreshing: true, refreshStage: 'queued', refreshPct: 4 });
+    let i = 0;
+    const step = () => {
+      if (i >= seq.length) { this.setState({ refreshing: false, refreshStage: null, refreshPct: 0 }); return; }
+      const [stage, pct] = seq[i++];
+      this.setState({ refreshStage: stage, refreshPct: pct });
+      if (stage === 'done') this._t = setTimeout(() => this.setState({ refreshing: false, refreshStage: null, refreshPct: 0 }), 950);
+      else this._t = setTimeout(step, 1150);
+    };
+    this._t = setTimeout(step, 650);
+  };
+  onCards = () => this.setState({ pickView: 'cards' });
+  onBoard = () => this.setState({ pickView: 'board' });
+  onTimeline = () => this.setState({ pickView: 'timeline' });
+  onCapital = (e) => this.setState({ capital: Number(e.target.value) });
+
+  // ---- helpers ----
+  pt(deg, rad) { const a = deg * Math.PI / 180; return [90 + rad * Math.cos(a), 90 - rad * Math.sin(a)]; }
+  arc(d1, d2, rad) { const [x1, y1] = this.pt(d1, rad); const [x2, y2] = this.pt(d2, rad); const large = Math.abs(d2 - d1) > 180 ? 1 : 0; const sweep = d1 > d2 ? 1 : 0; return `M ${x1.toFixed(1)} ${y1.toFixed(1)} A ${rad} ${rad} 0 ${large} ${sweep} ${x2.toFixed(1)} ${y2.toFixed(1)}`; }
+  spark(arr) { const w = 120, h = 26, min = Math.min(...arr), max = Math.max(...arr), rng = (max - min) || 1; const pts = arr.map((v, i) => [(i / (arr.length - 1)) * w, (h - ((v - min) / rng) * h) + 2]); return { str: pts.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' '), last: pts[pts.length - 1] }; }
+
+  renderVals() {
+    const d = this.state.data;
+    const acc = this.props.accent || '#46C9E6';
+    const buyColor = '#33D49A';
+    const cardPad = (this.props.density === 'compact') ? '16px' : '22px';
+    const showSizing = this.props.showSizing !== false;
+    const mc = d.market_context;
+    const view = this.state.pickView;
+
+    // gauge
+    const score = mc.score || 0; // -1..1
+    const needleDeg = 90 - Math.max(-1, Math.min(1, score)) * 78;
+    const [nx, ny] = this.pt(needleDeg, 62);
+    const gauge = {
+      off: this.arc(180, 124, 72), chop: this.arc(120, 60, 72), on: this.arc(56, 0, 72),
+      nx: nx.toFixed(1), ny: ny.toFixed(1),
+    };
+
+    // spectrum
+    const spectrum = d.spectrum.map((s, i) => {
+      const left = Math.max(4, Math.min(96, (s.z + 3) / 6 * 100));
+      const color = s.z > 0.3 ? 'var(--buy)' : (s.z < -0.3 ? 'var(--sell)' : '#7A8696');
+      const glow = s.z > 0.3 ? 'rgba(51,212,154,.16)' : (s.z < -0.3 ? 'rgba(255,93,115,.16)' : 'rgba(122,134,150,.16)');
+      const big = Math.abs(s.z) > 2;
+      const above = i % 2 === 0;
+      return { leftPct: left.toFixed(1) + '%', color, glow, dot: big ? '15px' : '11px',
+        codeAbove: above ? s.code : '', codeBelow: above ? '' : s.code,
+        aboveGap: above ? '7px' : '0px', belowGap: above ? '0px' : '7px' };
+    });
+
+    // deltas
+    const toneMap = { flow_z_up: 'var(--buy)', flow_z_down: 'var(--sell)', stealth_top: 'var(--warn)' };
+    const labelMap = { flow_z_up: 'DÒNG TIỀN VÀO', flow_z_down: 'DÒNG TIỀN RA', stealth_top: 'TÍCH LUỸ NGẦM' };
+    const deltas = d.deltas.map(x => { const sp = this.spark(x.spark); return {
+      tone: toneMap[x.kind] || 'var(--mid)', label: labelMap[x.kind] || x.kind,
+      sector: x.sector, name: x.name, metric: x.metric, what_to_do: x.what_to_do,
+      points: sp.str, lastX: sp.last[0].toFixed(1), lastY: sp.last[1].toFixed(1) }; });
+
+    // sizing
+    const cap = this.state.capital;
+    const buys = d.picks.filter(p => p.side === 'BUY');
+    const totW = buys.reduce((s, p) => s + p.conviction, 0) || 1;
+    const deployable = cap * 0.5;
+    const stars = n => '★★★★★☆☆☆☆☆'.slice(5 - n, 10 - n);
+    const fmt = v => (v == null ? '—' : v.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+
+    const cards = d.picks.map(p => {
+      const isBuy = p.side === 'BUY';
+      const sideColor = isBuy ? 'var(--buy)' : 'var(--sell)';
+      const sideBg = isBuy ? 'var(--buyd)' : 'var(--selld)';
+      const borderClr = isBuy ? 'rgba(51,212,154,.28)' : 'rgba(255,93,115,.28)';
+      let ladder = null, upside = '', downside = '', alloc = '0', risk = '0';
+      if (isBuy) {
+        const rng = p.target - p.stop;
+        const pct = v => Math.max(3, Math.min(97, 100 - (v - p.stop) / rng * 100));
+        ladder = { targetTop: pct(p.target).toFixed(1) + '%', stopTop: pct(p.stop).toFixed(1) + '%', currentTop: pct(p.current).toFixed(1) + '%' };
+        upside = '+' + ((p.target - p.entry) / p.entry * 100).toFixed(1) + '%';
+        downside = '−' + ((p.entry - p.stop) / p.entry * 100).toFixed(1) + '%';
+        const a = deployable * p.conviction / totW;
+        alloc = a.toFixed(0);
+        risk = (a * (p.entry - p.stop) / p.entry).toFixed(1);
+      }
+      const t3 = isBuy ? d.t3.map(t => {
+        const now = t.state === 'now', sell = t.state === 'sell';
+        return { label: t.label, date: t.date, sub: t.sub,
+          bg: now ? 'var(--accd)' : (sell ? 'var(--buyd)' : 'var(--panel2)'),
+          border: now ? 'rgba(70,201,230,.3)' : (sell ? 'rgba(51,212,154,.3)' : 'var(--line)'),
+          fg: now ? 'var(--acc)' : (sell ? 'var(--buy)' : 'var(--mid)') };
+      }) : [];
+      const sym = p.symbol;
+      const newsOpen = !!this.state.openNews[sym];
+      return {
+        symbol: sym, sector: p.sector, sector_name: p.sector_name, side: p.side,
+        isBuy, isSell: !isBuy, sideColor, sideBg, borderClr,
+        sideLabel: isBuy ? 'MUA' : 'BÁN / TRÁNH', stars: stars(p.conviction),
+        entry: fmt(p.entry), target: fmt(p.target), stop: fmt(p.stop), current: fmt(p.current),
+        rr: p.rr != null ? p.rr.toFixed(1) : '—', rrTone: (p.rr || 0) >= 1.8 ? 'var(--buy)' : 'var(--warn)',
+        upside, downside, ladder, t3, alloc, risk,
+        bits: p.bits, thesis: p.thesis, thesisShort: p.thesis.length > 120 ? p.thesis.slice(0, 118) + '…' : p.thesis,
+        risks: p.risks, hasRisks: p.risks && p.risks.length > 0,
+        news: p.news, hasNews: p.news && p.news.length > 0, newsCount: p.news ? p.news.length : 0,
+        newsOpen, newsCaret: newsOpen ? '▾' : '▸',
+        onToggleNews: () => this.setState(s => ({ openNews: { ...s.openNews, [sym]: !s.openNews[sym] } })),
+        entryCell: isBuy ? fmt(p.entry) : '—', targetCell: isBuy ? fmt(p.target) : '—',
+        rrCell: p.rr != null ? p.rr.toFixed(1) : '—',
+        entryLabel: isBuy ? fmt(p.entry) : fmt(p.current), targetLabel: isBuy ? fmt(p.target) : fmt(p.stop),
+      };
+    });
+
+    // timeline header + rows (buys only for the swing flow)
+    const t3Head = d.t3.map(t => ({ label: t.label, date: t.date, sub: t.sub,
+      fg: t.state === 'now' ? 'var(--acc)' : (t.state === 'sell' ? 'var(--buy)' : 'var(--mid)') }));
+    const timelineRows = cards.filter(c => c.isBuy);
+
+    // tabs
+    const tab = (active) => `padding:7px 14px; border-radius:8px; border:none; cursor:pointer; font-family:'Manrope',sans-serif; font-size:12.5px; font-weight:600; ${active ? 'background:var(--raise); color:var(--hi); box-shadow:0 1px 3px rgba(0,0,0,.3);' : 'background:transparent; color:var(--mid);'}`;
+
+    const stageLabels = { queued: 'Đang khởi tạo…', publishing_signals: 'Xuất tín hiệu xếp hạng…', rebuilding_universe: 'Dựng universe HOSE (KBS)…', trader_agent: 'Minh đang phân tích…', assembling: 'Tổng hợp kết quả…', done: 'Hoàn tất' };
+
+    return {
+      accent: acc, buyColor, cardPad, showSizing,
+      data: d, degraded: d.freshness.is_valid === false,
+      regimeConf: ((mc.regime.confidence || 0) * 100).toFixed(0),
+      gauge, spectrum, deltas, cards, t3Head, timelineRows,
+      capital: cap,
+      isCards: view === 'cards', isBoard: view === 'board', isTimeline: view === 'timeline',
+      tabCards: tab(view === 'cards'), tabBoard: tab(view === 'board'), tabTimeline: tab(view === 'timeline'),
+      onRefresh: this.onRefresh, onCards: this.onCards, onBoard: this.onBoard, onTimeline: this.onTimeline, onCapital: this.onCapital,
+      refreshing: this.state.refreshing, refreshPct: this.state.refreshPct, refreshPctWidth: this.state.refreshPct + '%',
+      refreshStageLabel: stageLabels[this.state.refreshStage] || '',
+      refreshLabel: this.state.refreshing ? (stageLabels[this.state.refreshStage] || 'Đang làm mới…') : 'Refresh (~4–5 phút)',
+      spinStyle: this.state.refreshing ? 'animation: spin 1s linear infinite; transform-origin:center;' : '',
+    };
+  }
+}
+</script>
+</body>
+</html>

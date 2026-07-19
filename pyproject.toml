@@ -1,0 +1,8 @@
+[project]
+name = "trading"
+version = "1.0.0"
+description = "VN Stock Market Analysis & Prediction System"
+requires-python = ">=3.11"
+
+[tool.setuptools]
+packages = ["data", "analysis", "models", "database", "services", "api", "api.routers"]

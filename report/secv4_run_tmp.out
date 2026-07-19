@@ -1,0 +1,107 @@
+[secv4] date=2026-04-23 db=C:\Users\admin\Documents\claude\Trading\vnstock_market.db
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃                                                                                 ┃
+┃  ⚠️ THÔNG BÁO QUAN TRỌNG                                                        ┃
+┃                                                                                 ┃
+┃  Phát hành vnstock 3.4.0 với nguồn dữ liệu KBS, hoạt động tốt trên Colab.       ┃
+┃  Cập nhật: pip install vnstock -U                                               ┃
+┃  AI Agent Guide: https://github.com/vnstock-hq/vnstock-agent-guide/             ┃
+┃                                                                                 ┃
+┃  ────────────────────────────────────────────────────────────────────────────── ┃
+┃                                                                                 ┃
+┃  🚀 VNSTOCK INSIDERS PROGRAM - NÂNG TẦM TRẢI NGHIỆM CỦA BẠN! 🚀                 ┃
+┃                                                                                 ┃
+┃  Nếu bạn cảm thấy khó chịu với các thông báo và quảng cáo:                      ┃
+┃                                                                                 ┃
+┃  ✨ Ẩn toàn bộ thông báo và quảng cáo khó chịu                                  ┃
+┃  🔓 Mở rộng khả năng sử dụng tối đa                                             ┃
+┃  ⚡ Tăng tốc tải dữ liệu lên đến 10 lần                                          ┃
+┃  📈 Tăng giới hạn rate limit lên đến 5 lần                                      ┃
+┃  🤖 Dùng AI Agent viết code cực nhanh với tài liệu hướng dẫn                    ┃
+┃                                                                                 ┃
+┃  🔗 Tham gia ngay: https://vnstocks.com/insiders-program#tiers                  ┃
+┃                                                                                 ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+  [OK] BID: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] VCB: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] TCB: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] CTG: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] MBB: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] SSI: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] VND: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] HCM: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] SHS: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] VCI: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] VHM: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] VIC: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] KDH: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] NVL: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] DXG: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] HPG: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] NKG: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] HSG: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] POM: 14 rows (2026-01-03 -> 2026-04-23)
+  [OK] TLH: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] FRT: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] MWG: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] DGW: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] PNJ: 75 rows (2026-01-03 -> 2026-04-23)
+  [OK] VNM: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] VRE: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] SAB: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] MSN: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] QNS: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] MCH: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] PLX: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] GAS: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] PVS: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] PVD: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] POW: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] BSR: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] GEG: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] PC1: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] NT2: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] FPT: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] ELC: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] CMG: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] ITD: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] SAM: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] HVN: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] VJC: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] GMD: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] ACV: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] VTP: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] BVH: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] BMI: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] MIG: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] PVI: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] BIC: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] DPM: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] DCM: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] LAS: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] DGC: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] BFC: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] TCM: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] STK: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] MSH: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] TNG: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] VGT: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] GVR: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] CSM: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] NTP: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] BMP: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] VHC: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] IDI: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] ANV: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] CMX: 74 rows (2026-01-03 -> 2026-04-23)
+  [OK] MPC: 74 rows (2026-01-03 -> 2026-04-23)
+[secv4] universe snapshot as_of=2026-04-18 tickers=62 is_valid=True
+[secv4] trader_agent: invoking Minh...
+[secv4] trader_agent done: is_valid=True dur=36781ms cost=$0.08524985
+[secv4] ranker align: BUY/ACCUMULATE=['Công nghệ', 'Thép & Vật liệu XD']  SELL=none
+[secv4] rendering charts...
+[secv4] validity gate filtered 1 buys: HPG (r_r 1.50 < 1.5)
+[secv4] HTML: C:\Users\admin\Documents\claude\Trading\report\secv4_2026-04-23.html (667,277 bytes)
+[secv4] PDF via chrome: C:\Users\admin\Documents\claude\Trading\report\secv4_2026-04-23.pdf (1,010,863 bytes)
+[secv4] [SENT] anhchitruong18@gmail.com, hill.nguyen.1373@gmail.com
+[secv4] done

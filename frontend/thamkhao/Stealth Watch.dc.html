@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { background: #0A0D12; font-family: 'Manrope', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #232A35; border-radius: 6px; border: 2px solid #0A0D12; }
+  @keyframes dotPulse { 0%,100% { opacity: 1; transform: scale(1);} 50% { opacity:.35; transform: scale(.7);} }
+</style>
+</helmet>
+
+<div style="--bg:#0A0D12;--panel:#11151C;--panel2:#161B24;--raise:#1C222D;--line:rgba(255,255,255,.07);--line2:rgba(255,255,255,.13);--hi:#EAF0F7;--mid:#909DAF;--lo:#5A6573;--buy:#33D49A;--buyd:rgba(51,212,154,.13);--sell:#FF5D73;--selld:rgba(255,93,115,.13);--warn:#F5B13D;--warnd:rgba(245,177,61,.12);--acc:#46C9E6;--accd:rgba(70,201,230,.13); display:flex; min-height:100vh; width:100%; background:var(--bg); color:var(--hi); font-family:'Manrope',sans-serif;">
+
+  <aside style="width:236px; flex:none; background:#0C1016; border-right:1px solid var(--line); display:flex; flex-direction:column; position:sticky; top:0; height:100vh;">
+    <div style="padding:22px 20px 18px; border-bottom:1px solid var(--line);">
+      <div style="display:flex; align-items:center; gap:11px;">
+        <div style="width:34px; height:34px; border-radius:10px; background:linear-gradient(140deg,var(--acc),#2C9C8E); display:flex; align-items:center; justify-content:center; box-shadow:0 4px 14px rgba(70,201,230,.25);">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 17l5-6 4 4 4-7 5 6" stroke="#06121A" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div style="line-height:1.15;">
+          <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:16px; letter-spacing:-.01em; color:var(--hi);">VN Sector Flow</div>
+          <div style="font-size:10.5px; color:var(--lo); margin-top:1px; letter-spacing:.02em;">Rotation · Money Flow · Regime</div>
+        </div>
+      </div>
+    </div>
+    <nav style="flex:1; padding:14px 12px; display:flex; flex-direction:column; gap:3px;">
+      <div style="font-size:10px; font-weight:700; letter-spacing:.16em; color:var(--lo); padding:6px 12px 8px;">PHÂN TÍCH</div>
+      <a href="Money Flow Monitor.dc.html" style="display:flex; align-items:center; gap:11px; padding:9px 12px; border-radius:9px; color:var(--mid); text-decoration:none; font-size:13.5px; font-weight:500;" style-hover="background:rgba(255,255,255,.04); color:var(--hi);">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 3c3 4 5 6.5 5 9.5A5 5 0 1 1 7 12.5C7 9.5 9 7 12 3z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+        <span>Money Flow Monitor</span>
+      </a>
+      <a href="Rotation Map.dc.html" style="display:flex; align-items:center; gap:11px; padding:9px 12px; border-radius:9px; color:var(--mid); text-decoration:none; font-size:13.5px; font-weight:500;" style-hover="background:rgba(255,255,255,.04); color:var(--hi);">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M20 7a8 8 0 1 0 1.5 6M20 3v4h-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Rotation Map</span>
+      </a>
+      <a href="Stealth Watch.dc.html" style="display:flex; align-items:center; gap:11px; padding:9px 12px; border-radius:9px; color:var(--acc); text-decoration:none; font-size:13.5px; font-weight:600; background:linear-gradient(90deg,var(--accd),transparent); border:1px solid rgba(70,201,230,.22); position:relative;">
+        <span style="position:absolute; left:0; top:8px; bottom:8px; width:2.5px; border-radius:2px; background:var(--acc);"></span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="2.3" stroke="currentColor" stroke-width="1.7"/></svg>
+        <span>Stealth Watch</span>
+      </a>
+      <a href="Flow Pulse.dc.html" style="display:flex; align-items:center; gap:11px; padding:9px 12px; border-radius:9px; color:var(--mid); text-decoration:none; font-size:13.5px; font-weight:500;" style-hover="background:rgba(255,255,255,.04); color:var(--hi);">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 12h4l2.5-7 5 14 2.5-7H21" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Flow Pulse</span>
+      </a>
+      <div style="height:1px; background:var(--line); margin:11px 12px;"></div>
+      <a href="Daily Insight.dc.html" style="display:flex; align-items:center; gap:11px; padding:9px 12px; border-radius:9px; color:var(--mid); text-decoration:none; font-size:13.5px; font-weight:500;" style-hover="background:rgba(255,255,255,.04); color:var(--hi);">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M5 3h11l3 3v15H5z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M15 3v4h4M8.5 11.5l2 2 4-4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Daily Insight</span>
+      </a>
+    </nav>
+    <div style="padding:14px 18px; border-top:1px solid var(--line);">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="width:7px; height:7px; border-radius:50%; background:var(--buy); animation:dotPulse 2.2s ease-in-out infinite;"></span>
+        <span style="font-size:11.5px; color:var(--mid); font-family:'JetBrains Mono',monospace;">api · localhost:8000</span>
+      </div>
+      <div style="font-size:10.5px; color:var(--lo); margin-top:5px;">15 sectors · top-5 proxy basket</div>
+    </div>
+  </aside>
+
+  <main style="flex:1; min-width:0; display:flex; flex-direction:column;">
+    <header style="display:flex; align-items:flex-end; justify-content:space-between; gap:24px; padding:30px 36px 22px; border-bottom:1px solid var(--line);">
+      <div>
+        <h1 style="margin:0; font-family:'Space Grotesk',sans-serif; font-size:29px; font-weight:700; letter-spacing:-.02em; color:var(--hi);">Stealth Watch</h1>
+        <p style="margin:7px 0 0; font-size:14px; color:var(--mid);">Ngành nào đang <span style="color:var(--warn); font-weight:600;">tích luỹ ngầm</span>, mua được ở gốc, dự đoán breakout khi nào?</p>
+      </div>
+      <div style="font-size:11.5px; color:var(--lo); font-family:'JetBrains Mono',monospace; flex:none;">foreign≥60% · breadth↑ · atr≤0.5 · ≥5 phiên</div>
+    </header>
+
+    <div style="padding:24px 36px 56px; display:flex; flex-direction:column; gap:22px;">
+      <!-- TIMELINE -->
+      <section style="background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:22px;">
+        <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:18px;">
+          <div style="font-size:10.5px; font-weight:700; letter-spacing:.15em; color:var(--lo);">DÒNG THỜI GIAN TÍCH LUỸ · 30 PHIÊN</div>
+          <div style="display:flex; gap:14px; font-size:10.5px; color:var(--mid);">
+            <span style="display:flex; align-items:center; gap:6px;"><span style="width:11px; height:11px; border-radius:3px; background:var(--warn);"></span>active</span>
+            <span style="display:flex; align-items:center; gap:6px;"><span style="width:11px; height:11px; border-radius:3px; background:rgba(245,177,61,.35);"></span>resolved (đã breakout)</span>
+          </div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:10px;">
+          <sc-for list="{{ timeline }}" as="t" hint-placeholder-count="5">
+            <div style="display:grid; grid-template-columns:62px 1fr; gap:14px; align-items:center;">
+              <span style="font-family:'Space Grotesk',sans-serif; font-size:14px; font-weight:700; color:var(--hi);">{{ t.code }}</span>
+              <div style="position:relative; height:26px; background:var(--panel2); border-radius:7px;">
+                <sc-for list="{{ t.events }}" as="e" hint-placeholder-count="2">
+                  <div style="position:absolute; top:3px; bottom:3px; left:{{ e.left }}; width:{{ e.width }}; border-radius:5px; background:{{ e.bg }}; border:1px solid {{ e.border }}; display:flex; align-items:center; padding:0 8px; overflow:hidden;">
+                    <span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:{{ e.fg }}; white-space:nowrap;">{{ e.label }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="display:grid; grid-template-columns:62px 1fr; gap:14px; margin-top:8px;">
+          <span></span>
+          <div style="display:flex; justify-content:space-between; font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--lo);">
+            <span>20/5</span><span>27/5</span><span>3/6</span><span>10/6</span><span style="color:var(--acc);">hôm nay 18/6</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ACTIVE / WARMING TABS -->
+      <div style="display:flex; align-items:center; gap:12px;">
+        <div style="display:flex; background:var(--panel); border:1px solid var(--line); border-radius:11px; padding:3px;">
+          <button onClick="{{ onActive }}" style="{{ tabActive }}">Đang active ({{ activeCount }})</button>
+          <button onClick="{{ onWarming }}" style="{{ tabWarming }}">Đang ấm lên ({{ warmingCount }})</button>
+        </div>
+      </div>
+
+      <!-- ACTIVE CARDS -->
+      <sc-if value="{{ showActive }}" hint-placeholder-val="{{ true }}">
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px;">
+          <sc-for list="{{ active }}" as="a" hint-placeholder-count="3">
+            <div style="background:var(--panel); border:1px solid {{ a.borderClr }}; border-radius:16px; padding:20px; display:flex; flex-direction:column; gap:14px;">
+              <div style="display:flex; align-items:flex-start; justify-content:space-between;">
+                <div>
+                  <div style="font-family:'Space Grotesk',sans-serif; font-size:22px; font-weight:700; color:var(--hi);">{{ a.code }}</div>
+                  <div style="font-size:11.5px; color:var(--mid);">{{ a.name }}</div>
+                </div>
+                <div style="text-align:right;">
+                  <div style="font-size:9.5px; color:var(--lo); font-weight:600;">STEALTH SCORE</div>
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:20px; font-weight:700; color:{{ a.scoreColor }};">{{ a.score }}</div>
+                </div>
+              </div>
+              <!-- gate -->
+              <div style="display:flex; flex-direction:column; gap:7px;">
+                <sc-for list="{{ a.gate }}" as="g" hint-placeholder-count="5">
+                  <div style="display:flex; align-items:center; gap:9px;">
+                    <span style="width:18px; height:18px; border-radius:50%; background:{{ g.iconBg }}; display:flex; align-items:center; justify-content:center; flex:none;">{{ g.icon }}</span>
+                    <span style="flex:1; font-size:11.5px; color:var(--mid);">{{ g.label }}</span>
+                    <span style="font-family:'JetBrains Mono',monospace; font-size:11.5px; font-weight:600; color:{{ g.valColor }};">{{ g.value }}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <!-- persistence -->
+              <div>
+                <div style="display:flex; justify-content:space-between; font-size:10px; color:var(--lo); margin-bottom:4px;"><span>PERSISTENCE</span><span style="font-family:'JetBrains Mono',monospace; color:var(--hi);">{{ a.persistText }}</span></div>
+                <div style="height:5px; background:var(--panel2); border-radius:3px; overflow:hidden;"><div style="height:100%; border-radius:3px; background:var(--warn); width:{{ a.persistPct }};"></div></div>
+              </div>
+              <!-- lead time -->
+              <div style="display:flex; align-items:center; justify-content:space-between; padding:11px 13px; background:var(--accd); border:1px solid rgba(70,201,230,.2); border-radius:11px;">
+                <span style="font-size:11px; color:var(--mid);">Dự kiến breakout</span>
+                <span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:var(--acc);">~{{ a.leadMed }}d <span style="font-size:10.5px; color:var(--mid);">({{ a.leadRange }})</span></span>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <!-- WARMING -->
+      <sc-if value="{{ showWarming }}" hint-placeholder-val="{{ false }}">
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px;">
+          <sc-for list="{{ warming }}" as="w" hint-placeholder-count="2">
+            <div style="background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:20px;">
+              <div style="display:flex; align-items:center; justify-content:space-between;">
+                <div><div style="font-family:'Space Grotesk',sans-serif; font-size:20px; font-weight:700; color:var(--hi);">{{ w.code }}</div><div style="font-size:11.5px; color:var(--mid);">{{ w.name }}</div></div>
+                <div style="font-size:11px; font-weight:600; color:var(--warn); background:var(--warnd); padding:5px 11px; border-radius:8px;">{{ w.passing }}/5 gate</div>
+              </div>
+              <div style="display:flex; align-items:baseline; gap:8px; margin-top:14px;"><span style="font-size:10px; color:var(--lo);">flow_z cao nhất</span><span style="font-family:'JetBrains Mono',monospace; font-size:16px; font-weight:600; color:var(--buy);">{{ w.highestZ }}</span></div>
+              <div style="height:6px; background:var(--panel2); border-radius:4px; overflow:hidden; margin-top:12px;"><div style="height:100%; border-radius:4px; background:var(--warn); width:{{ w.pct }};"></div></div>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <!-- HISTORY -->
+      <section style="background:var(--panel); border:1px solid var(--line); border-radius:16px; overflow:hidden;">
+        <div style="padding:18px 22px 14px; border-bottom:1px solid var(--line); font-size:10.5px; font-weight:700; letter-spacing:.15em; color:var(--lo);">LỊCH SỬ TÍCH LUỸ ĐÃ KẾT THÚC</div>
+        <div style="display:grid; grid-template-columns:96px 100px 100px 110px 100px 1fr; gap:0; padding:11px 22px; background:var(--panel2); border-bottom:1px solid var(--line); font-size:10px; font-weight:700; letter-spacing:.06em; color:var(--lo);">
+          <span>NGÀNH</span><span>BẮT ĐẦU</span><span>KẾT THÚC</span><span style="text-align:right;">PEAK RETURN</span><span style="text-align:right;">LEAD</span><span style="padding-left:18px;">KẾT QUẢ</span>
+        </div>
+        <sc-for list="{{ history }}" as="h" hint-placeholder-count="4">
+          <div style="display:grid; grid-template-columns:96px 100px 100px 110px 100px 1fr; gap:0; padding:13px 22px; border-bottom:1px solid var(--line); align-items:center;" style-hover="background:rgba(255,255,255,.02);">
+            <span style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:14px; color:var(--hi);">{{ h.code }}</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--mid);">{{ h.start }}</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--mid);">{{ h.end }}</span>
+            <span style="text-align:right; font-family:'JetBrains Mono',monospace; font-size:13px; font-weight:600; color:{{ h.retColor }};">{{ h.ret }}</span>
+            <span style="text-align:right; font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--mid);">{{ h.lead }}</span>
+            <span style="padding-left:18px;"><span style="font-size:10px; font-weight:700; color:{{ h.clColor }}; background:{{ h.clBg }}; padding:4px 10px; border-radius:7px;">{{ h.classification }}</span></span>
+          </div>
+        </sc-for>
+      </section>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:1180}}">
+class Component extends DCLogic {
+  state = { tab: 'active' };
+  onActive = () => this.setState({ tab: 'active' });
+  onWarming = () => this.setState({ tab: 'warming' });
+
+  WIN = 30;
+  TIMELINE = [
+    { code: 'POWER', events: [ { start: 2, age: 10, score: 1.4, resolved: true }, { start: 17, age: 12, score: 1.97, resolved: false } ] },
+    { code: 'OIL', events: [ { start: 20, age: 9, score: 1.14, resolved: false } ] },
+    { code: 'INSUR', events: [ { start: 22, age: 7, score: 0.9, resolved: false } ] },
+    { code: 'CHEM', events: [ { start: 25, age: 4, score: 1.2, resolved: false } ] },
+    { code: 'FISH', events: [ { start: 5, age: 13, score: 2.1, resolved: true } ] },
+  ];
+  ACTIVE = [
+    { code: 'POWER', name: 'Điện & Năng lượng', score: 1.97, persist: 12,
+      gate: [ ['flow_z20 > +1.0σ', 1.20, true], ['foreign_hit ≥ 60%', '62%', true], ['breadth SMA20 tăng', 'rising', true], ['ATR rank ≤ 0.5', 0.35, true], ['giá đáy 40% / 60 phiên', '28%', true] ],
+      leadMed: 11, leadRange: '7–18d' },
+    { code: 'OIL', name: 'Dầu khí', score: 1.14, persist: 9,
+      gate: [ ['flow_z20 > +1.0σ', 1.14, true], ['foreign_hit ≥ 60%', '30%', false], ['breadth SMA20 tăng', 'rising', true], ['ATR rank ≤ 0.5', 0.42, true], ['giá đáy 40% / 60 phiên', '45%', false] ],
+      leadMed: 14, leadRange: '9–21d' },
+    { code: 'INSUR', name: 'Bảo hiểm', score: 0.90, persist: 7,
+      gate: [ ['flow_z20 > +1.0σ', 0.60, false], ['foreign_hit ≥ 60%', '65%', true], ['breadth SMA20 tăng', 'flat', false], ['ATR rank ≤ 0.5', 0.30, true], ['giá đáy 40% / 60 phiên', '35%', true] ],
+      leadMed: 12, leadRange: '8–18d' },
+  ];
+  WARMING = [
+    { code: 'REAL', name: 'Bất động sản', passing: 3, highestZ: 1.32, pct: 60 },
+    { code: 'TECH', name: 'Công nghệ', passing: 2, highestZ: 0.85, pct: 40 },
+  ];
+  HISTORY = [
+    { code: 'FISH', start: '1/4', end: '18/4', ret: 12.3, lead: 11, cl: 'HIT' },
+    { code: 'POWER', start: '22/5', end: '1/6', ret: 9.2, lead: 9, cl: 'HIT' },
+    { code: 'BROK', start: '2/5', end: '14/5', ret: 2.1, lead: 6, cl: 'FALSE_POS' },
+    { code: 'STEEL', start: '20/4', end: '24/5', ret: -1.8, lead: null, cl: 'TIMEOUT' },
+  ];
+
+  intensity(score, resolved) {
+    const a = Math.min(1, score / 2.2);
+    if (resolved) return { bg: `rgba(245,177,61,${(0.14 + a * 0.18).toFixed(2)})`, border: 'rgba(245,177,61,.3)', fg: '#D9B26A' };
+    return { bg: `rgba(245,177,61,${(0.45 + a * 0.4).toFixed(2)})`, border: 'rgba(245,177,61,.6)', fg: '#1A1206' };
+  }
+
+  renderVals() {
+    const tab = this.state.tab;
+    const tabStyle = (act) => `padding:8px 16px; border-radius:8px; border:none; cursor:pointer; font-family:'Manrope',sans-serif; font-size:12.5px; font-weight:600; ${act ? 'background:var(--raise); color:var(--hi); box-shadow:0 1px 3px rgba(0,0,0,.3);' : 'background:transparent; color:var(--mid);'}`;
+
+    const timeline = this.TIMELINE.map(t => ({ code: t.code, events: t.events.map(e => {
+      const c = this.intensity(e.score, e.resolved);
+      return { left: (e.start / this.WIN * 100).toFixed(1) + '%', width: (e.age / this.WIN * 100).toFixed(1) + '%',
+        bg: c.bg, border: c.border, fg: c.fg, label: (e.resolved ? '' : 'score ') + e.score.toFixed(2) };
+    }) }));
+
+    const checkIcon = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M5 12l4 4 10-11" stroke="%2333D49A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    const active = this.ACTIVE.map(a => {
+      const passN = a.gate.filter(g => g[2]).length;
+      return { code: a.code, name: a.name, score: a.score.toFixed(2),
+        scoreColor: a.score >= 1.5 ? 'var(--buy)' : 'var(--warn)',
+        borderClr: a.score >= 1.5 ? 'rgba(51,212,154,.28)' : 'var(--line)',
+        gate: a.gate.map(g => ({ label: g[0], value: (typeof g[1] === 'number' ? g[1].toFixed(2) : g[1]),
+          icon: g[2] ? '✓' : '✕', iconBg: g[2] ? 'rgba(51,212,154,.18)' : 'rgba(255,93,115,.18)',
+          valColor: g[2] ? 'var(--buy)' : 'var(--sell)' })),
+        persistText: a.persist + ' / 5 phiên', persistPct: Math.min(100, a.persist / 5 * 100).toFixed(0) + '%',
+        leadMed: a.leadMed, leadRange: a.leadRange };
+    });
+
+    const warming = this.WARMING.map(w => ({ code: w.code, name: w.name, passing: w.passing,
+      highestZ: '+' + w.highestZ.toFixed(2), pct: w.pct + '%' }));
+
+    const clStyle = { HIT: ['var(--buy)', 'var(--buyd)', 'HIT'], FALSE_POS: ['var(--warn)', 'var(--warnd)', 'FALSE POSITIVE'], TIMEOUT: ['var(--mid)', 'var(--raise)', 'DRY-POWDER TIMEOUT'] };
+    const history = this.HISTORY.map(h => { const [c, b, lbl] = clStyle[h.cl];
+      return { code: h.code, start: h.start, end: h.end,
+        ret: (h.ret >= 0 ? '+' : '') + h.ret.toFixed(1) + '%', retColor: h.ret >= 0 ? 'var(--buy)' : 'var(--sell)',
+        lead: h.lead != null ? h.lead + 'd' : '—', classification: lbl, clColor: c, clBg: b }; });
+
+    return { timeline, active, warming, history,
+      tab, showActive: tab === 'active', showWarming: tab === 'warming',
+      tabActive: tabStyle(tab === 'active'), tabWarming: tabStyle(tab === 'warming'),
+      activeCount: this.ACTIVE.length, warmingCount: this.WARMING.length,
+      onActive: this.onActive, onWarming: this.onWarming };
+  }
+}
+</script>
+</body>
+</html>

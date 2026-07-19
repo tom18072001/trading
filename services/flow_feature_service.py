@@ -1,0 +1,130 @@
+# ============================================
+# services/flow_feature_service.py
+# ============================================
+# Builds the model-ready feature frame from sector_flow_daily + macro_anchors.
+# Pure read-side service: no writes. Returns a DataFrame ready for the
+# rotation ranker (date, sector_code, features..., target).
+
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+from sqlalchemy.orm import Session
+
+from config import ROTATION_TARGET_HORIZON_DAYS
+from database.models import MacroAnchor, SectorFlowDaily
+
+FEATURE_COLS = [
+    "net_dollar_flow",
+    "foreign_net",
+    "up_down_vol_ratio",
+    "breadth_sma20",
+    "breadth_sma50",
+    "rs_vnindex_5d",
+    "rs_vnindex_20d",
+    "atr_pct",
+    "flow_lag_1",
+    "flow_lag_3",
+    "flow_lag_5",
+    "macro_vn_ret_5d",
+    # --- §16.2 leading / stealth features (2026-06-18: wired into ranker) ---
+    # Previously computed in analysis/stealth.py and stored on sector_flow_daily
+    # but NEVER fed to the model — the ranker was blind to the early-flow edge.
+    "flow_z20",
+    "flow_z60",
+    "foreign_streak",
+    "foreign_hit_20d",
+    "stealth_score",
+    "flow_price_divergence",
+    "accumulation_age",
+]
+
+# Leading features can be NaN for the first ~20-60 rows of each sector (rolling
+# windows) or when stealth features haven't been backfilled. We 0-fill them so
+# a dropna on FEATURE_COLS+target doesn't decimate the training panel. They are
+# z-scores / counts centred near 0, so 0 is a neutral fill.
+_LEADING_FILL_COLS = [
+    "flow_z20", "flow_z60", "foreign_streak", "foreign_hit_20d",
+    "stealth_score", "flow_price_divergence", "accumulation_age",
+]
+
+
+class FlowFeatureService:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def _load_daily(self) -> pd.DataFrame:
+        rows = self.session.query(SectorFlowDaily).all()
+        if not rows:
+            return pd.DataFrame()
+        df = pd.DataFrame([{
+            "date": r.date,
+            "sector_code": r.sector_code,
+            "net_dollar_flow": r.net_dollar_flow,
+            "foreign_net": r.foreign_net,
+            "up_down_vol_ratio": r.up_down_vol_ratio,
+            "breadth_sma20": r.breadth_sma20,
+            "breadth_sma50": r.breadth_sma50,
+            "rs_vnindex_5d": r.rs_vnindex_5d,
+            "rs_vnindex_20d": r.rs_vnindex_20d,
+            "atr_pct": r.atr_pct,
+            "close_idx": r.close_idx,
+            "return_1d": r.return_1d,
+            # §16.2 leading / stealth features
+            "flow_z20": r.flow_z20,
+            "flow_z60": r.flow_z60,
+            "foreign_streak": r.foreign_streak,
+            "foreign_hit_20d": r.foreign_hit_20d,
+            "stealth_score": r.stealth_score,
+            "flow_price_divergence": r.flow_price_divergence,
+            "accumulation_age": r.accumulation_age,
+        } for r in rows])
+        return df.sort_values(["sector_code", "date"]).reset_index(drop=True)
+
+    def _load_macro(self) -> pd.DataFrame:
+        rows = self.session.query(MacroAnchor).order_by(MacroAnchor.time).all()
+        if not rows:
+            return pd.DataFrame()
+        return pd.DataFrame([{
+            "time": r.time, "vnindex": r.vnindex, "usdvnd": r.usdvnd,
+            "brent": r.brent, "us10y": r.us10y, "gold": r.gold,
+        } for r in rows])
+
+    def build(self, with_target: bool = True) -> pd.DataFrame:
+        df = self._load_daily()
+        if df.empty:
+            return df
+        df["flow_lag_1"] = df.groupby("sector_code")["net_dollar_flow"].shift(1)
+        df["flow_lag_3"] = df.groupby("sector_code")["net_dollar_flow"].shift(3)
+        df["flow_lag_5"] = df.groupby("sector_code")["net_dollar_flow"].shift(5)
+
+        # Ensure §16.2 leading columns exist + are 0-filled (see _LEADING_FILL_COLS).
+        for col in _LEADING_FILL_COLS:
+            if col in df.columns:
+                df[col] = df[col].fillna(0.0)
+            else:
+                df[col] = 0.0
+
+        macro = self._load_macro()
+        if not macro.empty and "vnindex" in macro:
+            macro["macro_vn_ret_5d"] = macro["vnindex"].pct_change(5)
+            macro["date"] = pd.to_datetime(macro["time"]).dt.strftime("%Y-%m-%d")
+            macro_daily = macro.groupby("date")["macro_vn_ret_5d"].last().reset_index()
+            df = df.merge(macro_daily, on="date", how="left")
+        else:
+            df["macro_vn_ret_5d"] = np.nan
+
+        if with_target:
+            df["fwd_return"] = (
+                df.groupby("sector_code")["close_idx"]
+                  .shift(-ROTATION_TARGET_HORIZON_DAYS) / df["close_idx"] - 1
+            )
+            df["target"] = df["fwd_return"]
+        return df
+
+    def latest_features(self) -> pd.DataFrame:
+        df = self.build(with_target=False)
+        if df.empty:
+            return df
+        last_date = df["date"].max()
+        return df[df["date"] == last_date].reset_index(drop=True)

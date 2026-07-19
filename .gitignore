@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Database
+*.db
+*.db-wal
+*.db-shm
+
+# ML Models (binary artifacts)
+models/saved/*.pkl
+models/saved/*.json
+
+# Data artifacts
+data/*.csv
+output/
+
+# Environment
+.env
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Notebooks
+notebooks/.ipynb_checkpoints/
+
+# Local archive (DB backups, old build outputs, FUSE remnants)
+backup/
+_trash_*/
+.fuse_hidden*
+frontend/dist-*/
+
+# Runtime artifacts
+report/jobs/*.log
+report/*.log
+email_log.txt
+daily.json
+refresh.json
+weekly_flow.csv
+.pytest_cache/

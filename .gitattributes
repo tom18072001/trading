@@ -1,0 +1,16 @@
+# Normalize line endings. Project was originally built on Linux/WSL but runs
+# on native Windows: cmd.exe requires CRLF in .bat (LF-only .bat files caused
+# the 2026-07-19 "'M' is not recognized" parse failures in every job).
+* text=auto
+
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+*.sh   text eol=lf
+
+# Binary
+*.db     binary
+*.pkl    binary
+*.docx   binary
+*.png    binary
+*.ico    binary

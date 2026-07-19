@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { background: #0A0D12; font-family: 'Manrope', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #232A35; border-radius: 6px; border: 2px solid #0A0D12; }
+  @keyframes dotPulse { 0%,100% { opacity: 1; transform: scale(1);} 50% { opacity:.35; transform: scale(.7);} }
+</style>
+</helmet>
+
+<div style="--bg:#0A0D12;--panel:#11151C;--panel2:#161B24;--raise:#1C222D;--line:rgba(255,255,255,.07);--line2:rgba(255,255,255,.13);--hi:#EAF0F7;--mid:#909DAF;--lo:#5A6573;--buy:#33D49A;--buyd:rgba(51,212,154,.13);--sell:#FF5D73;--selld:rgba(255,93,115,.13);--warn:#F5B13D;--warnd:rgba(245,177,61,.12);--acc:#46C9E6;--accd:rgba(70,201,230,.13); display:flex; min-height:100vh; width:100%; background:var(--bg); color:var(--hi); font-family:'Manrope',sans-serif;">
+
+  <aside style="width:236px; flex:none; background:#0C1016; border-right:1px solid var(--line); display:flex; flex-direction:column; position:sticky; top:0; height:100vh;">
+    <div style="padding:22px 20px 18px; border-bottom:1px solid var(--line);">
+      <div style="display:flex; align-items:center; gap:11px;">
+        <div style="width:34px; height:34px; border-radius:10px; background:linear-gradient(140deg,var(--acc),#2C9C8E); display:flex; align-items:center; justify-content:center; box-shadow:0 4px 14px rgba(70,201,230,.25);">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 17l5-6 4 4 4-7 5 6" stroke="#06121A" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div style="line-height:1.15;">
+          <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:16px; letter-spacing:-.01em; color:var(--hi);">VN Sector Flow</div>
+          <div style="font-size:10.5px; color:var(--lo); margin-top:1px; letter-spacing:.02em;">Rotation · Money Flow · Regime</div>
+        </div>
+      </div>
+    </div>
+    <nav style="flex:1; padding:14px 12px; display:flex; flex-direction:column; gap:3px;">
+      <div style="font-size:10px; font-weight:700; letter-spacing:.16em; color:var(--lo); padding:6px 12px 8px;">PHÂN TÍCH</div>
+      <a href="Money Flow Monitor.dc.html" style="display:flex; align-items:center; gap:11px; padding:9px 12px; border-radius:9px; color:var(--mid); text-decoration:none; font-size:13.5px; font-weight:500;" style-hover="background:rgba(255,255,255,.04); color:var(--hi);">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 3c3 4 5 6.5 5 9.5A5 5 0 1 1 7 12.5C7 9.5 9 7 12 3z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+        <span>Money Flow Monitor</span>
+      </a>
+      <a href="Rotation Map.dc.html" style="display:flex; align-items:center; gap:11px; padding:9px 12px; border-radius:9px; color:var(--acc); text-decoration:none; font-size:13.5px; font-weight:600; background:linear-gradient(90deg,var(--accd),transparent); border:1px solid rgba(70,201,230,.22); position:relative;">
+        <span style="position:absolute; left:0; top:8px; bottom:8px; width:2.5px; border-radius:2px; background:var(--acc);"></span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M20 7a8 8 0 1 0 1.5 6M20 3v4h-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Rotation Map</span>
+      </a>
+      <a href="Stealth Watch.dc.html" style="display:flex; align-items:center; gap:11px; padding:9px 12px; border-radius:9px; color:var(--mid); text-decoration:none; font-size:13.5px; font-weight:500;" style-hover="background:rgba(255,255,255,.04); color:var(--hi);">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="2.3" stroke="currentColor" stroke-width="1.7"/></svg>
+        <span>Stealth Watch</span>
+      </a>
+      <a href="Flow Pulse.dc.html" style="display:flex; align-items:center; gap:11px; padding:9px 12px; border-radius:9px; color:var(--mid); text-decoration:none; font-size:13.5px; font-weight:500;" style-hover="background:rgba(255,255,255,.04); color:var(--hi);">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 12h4l2.5-7 5 14 2.5-7H21" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Flow Pulse</span>
+      </a>
+      <div style="height:1px; background:var(--line); margin:11px 12px;"></div>
+      <a href="Daily Insight.dc.html" style="display:flex; align-items:center; gap:11px; padding:9px 12px; border-radius:9px; color:var(--mid); text-decoration:none; font-size:13.5px; font-weight:500;" style-hover="background:rgba(255,255,255,.04); color:var(--hi);">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M5 3h11l3 3v15H5z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M15 3v4h4M8.5 11.5l2 2 4-4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Daily Insight</span>
+      </a>
+    </nav>
+    <div style="padding:14px 18px; border-top:1px solid var(--line);">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="width:7px; height:7px; border-radius:50%; background:var(--buy); animation:dotPulse 2.2s ease-in-out infinite;"></span>
+        <span style="font-size:11.5px; color:var(--mid); font-family:'JetBrains Mono',monospace;">api · localhost:8000</span>
+      </div>
+      <div style="font-size:10.5px; color:var(--lo); margin-top:5px;">15 sectors · top-5 proxy basket</div>
+    </div>
+  </aside>
+
+  <main style="flex:1; min-width:0; display:flex; flex-direction:column;">
+    <header style="display:flex; align-items:flex-end; justify-content:space-between; gap:24px; padding:30px 36px 22px; border-bottom:1px solid var(--line);">
+      <div>
+        <h1 style="margin:0; font-family:'Space Grotesk',sans-serif; font-size:29px; font-weight:700; letter-spacing:-.02em; color:var(--hi);">Rotation Map</h1>
+        <p style="margin:7px 0 0; font-size:14px; color:var(--mid);">Tiền đang dịch chuyển <span style="color:var(--sell); font-weight:600;">TỪ</span> ngành nào <span style="color:var(--buy); font-weight:600;">SANG</span> ngành nào?</p>
+      </div>
+      <div style="display:flex; align-items:center; gap:14px; flex:none;">
+        <span style="font-size:11.5px; color:var(--lo); font-family:'JetBrains Mono',monospace;">cửa sổ 10/6 → 18/6 · 1W</span>
+        <span style="font-size:12px; font-weight:600; color:#C7CFDA; background:var(--panel2); border:1px solid var(--line2); padding:6px 13px; border-radius:9px;">min Δz · 1.5σ</span>
+      </div>
+    </header>
+
+    <div style="padding:24px 36px 56px; display:flex; flex-direction:column; gap:22px;">
+      <!-- SANKEY -->
+      <section style="background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:22px;">
+        <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:6px;">
+          <div style="font-size:10.5px; font-weight:700; letter-spacing:.15em; color:var(--lo);">SƠ ĐỒ DỊCH CHUYỂN DÒNG TIỀN</div>
+          <div style="font-size:11px; color:var(--lo); font-family:'JetBrains Mono',monospace;">độ rộng dải ∝ lượng tiền chuyển · click cặp để lọc</div>
+        </div>
+        <div style="display:flex; justify-content:space-between; padding:0 4px 8px; font-size:10px; font-weight:700; letter-spacing:.1em;">
+          <span style="color:var(--sell);">◄ NGÀNH BỊ RÚT TIỀN</span>
+          <span style="color:var(--buy);">NGÀNH ĐƯỢC BƠM TIỀN ►</span>
+        </div>
+        <svg viewBox="0 0 1000 420" style="width:100%; height:420px; display:block;">
+          <sc-for list="{{ ribbons }}" as="rb" hint-placeholder-count="6">
+            <path d="{{ rb.d }}" fill="{{ rb.color }}" opacity="{{ rb.opacity }}" stroke="none"/>
+          </sc-for>
+          <sc-for list="{{ nodes }}" as="n" hint-placeholder-count="7">
+            <rect x="{{ n.x }}" y="{{ n.y }}" width="14" height="{{ n.h }}" rx="3" fill="{{ n.color }}"/>
+            <text x="{{ n.labelX }}" y="{{ n.labelY }}" text-anchor="{{ n.anchor }}" font-family="Space Grotesk, sans-serif" font-weight="700" font-size="15" fill="#EAF0F7">{{ n.code }}</text>
+            <text x="{{ n.labelX }}" y="{{ n.subY }}" text-anchor="{{ n.anchor }}" font-family="JetBrains Mono, monospace" font-size="11" fill="{{ n.dColor }}">{{ n.dFmt }}</text>
+          </sc-for>
+        </svg>
+      </section>
+
+      <!-- PAIR TABLE -->
+      <section style="background:var(--panel); border:1px solid var(--line); border-radius:16px; overflow:hidden;">
+        <div style="padding:18px 22px 14px; border-bottom:1px solid var(--line); font-size:10.5px; font-weight:700; letter-spacing:.15em; color:var(--lo);">CÁC CẶP XOAY DÒNG TIỀN</div>
+        <div style="display:grid; grid-template-columns:40px 1.5fr 96px 96px 90px 70px 96px 70px 116px; gap:0; padding:11px 22px; background:var(--panel2); border-bottom:1px solid var(--line); font-size:10px; font-weight:700; letter-spacing:.06em; color:var(--lo);">
+          <span>#</span><span>CẶP CHUYỂN DỊCH</span><span style="text-align:right;">Δz NGUỒN</span><span style="text-align:right;">Δz ĐÍCH</span><span style="text-align:right;">BẮT ĐẦU</span><span style="text-align:right;">TUỔI</span><span style="text-align:right;">PERSIST</span><span style="text-align:right;">CORR</span><span style="text-align:center;">TRẠNG THÁI</span>
+        </div>
+        <sc-for list="{{ pairs }}" as="p" hint-placeholder-count="5">
+          <div onClick="{{ p.onSelect }}" style="display:grid; grid-template-columns:40px 1.5fr 96px 96px 90px 70px 96px 70px 116px; gap:0; padding:14px 22px; border-bottom:1px solid var(--line); align-items:center; cursor:pointer; background:{{ p.rowBg }};" style-hover="background:rgba(255,255,255,.03);">
+            <span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--lo);">{{ p.rank }}</span>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="display:flex; align-items:center; gap:6px;"><span style="width:8px; height:8px; border-radius:2px; background:{{ p.fromColor }};"></span><span style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:14px; color:var(--hi);">{{ p.from }}</span></span>
+              <svg width="22" height="12" viewBox="0 0 22 12" fill="none"><path d="M1 6h17m0 0l-4-4m4 4l-4 4" stroke="var(--acc)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span style="display:flex; align-items:center; gap:6px;"><span style="width:8px; height:8px; border-radius:2px; background:{{ p.toColor }};"></span><span style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:14px; color:var(--hi);">{{ p.to }}</span></span>
+            </div>
+            <span style="text-align:right; font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--sell);">{{ p.dzSrc }}</span>
+            <span style="text-align:right; font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--buy);">{{ p.dzTgt }}</span>
+            <span style="text-align:right; font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--mid);">{{ p.started }}</span>
+            <span style="text-align:right; font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--mid);">{{ p.age }}d</span>
+            <span style="text-align:right; font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--mid);">{{ p.persist }} · lag {{ p.lag }}</span>
+            <span style="text-align:right; font-family:'JetBrains Mono',monospace; font-size:13px; color:{{ p.corrColor }};">{{ p.corr }}</span>
+            <span style="text-align:center;"><span style="font-size:10px; font-weight:700; color:{{ p.stColor }}; background:{{ p.stBg }}; padding:4px 9px; border-radius:7px;">{{ p.status }}</span></span>
+          </div>
+        </sc-for>
+        <div style="padding:13px 22px; font-size:11px; color:var(--lo); line-height:1.5;">CONFIRMED = rotation đã xác nhận (persist ≥ 6, corr ≥ 0.6) · EMERGING = mới chớm · FADING = đang suy yếu. Lag = số phiên ngành đích trễ sau ngành nguồn.</div>
+      </section>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:1080}}">
+class Component extends DCLogic {
+  state = { selected: null };
+
+  COLOR = { BANK: '#FF8FA0', TEXT: '#FF5D73', STEEL: '#E08A6B', CHEM: '#33D49A', OIL: '#7FB2FF', POWER: '#B98BFF', INSUR: '#F5B13D' };
+  LINKS = [
+    { from: 'BANK', to: 'CHEM', w: 5.0 }, { from: 'BANK', to: 'OIL', w: 3.0 }, { from: 'BANK', to: 'POWER', w: 2.0 },
+    { from: 'TEXT', to: 'CHEM', w: 4.0 }, { from: 'TEXT', to: 'POWER', w: 2.5 },
+    { from: 'STEEL', to: 'INSUR', w: 2.0 },
+  ];
+  SRC = ['BANK', 'TEXT', 'STEEL'];
+  TGT = ['CHEM', 'OIL', 'POWER', 'INSUR'];
+  DSHARE = { BANK: -10.0, TEXT: -6.5, STEEL: -2.0, CHEM: 9.0, OIL: 3.0, POWER: 4.5, INSUR: 2.0 };
+  PAIRS = [
+    { from: 'BANK', to: 'CHEM', dzSrc: -1.8, dzTgt: 2.6, started: '10/6', age: 8, persist: 6, lag: 2, corr: 0.62, status: 'CONFIRMED' },
+    { from: 'BANK', to: 'OIL', dzSrc: -1.8, dzTgt: 1.14, started: '9/6', age: 9, persist: 7, lag: 3, corr: 0.58, status: 'CONFIRMED' },
+    { from: 'TEXT', to: 'CHEM', dzSrc: -2.97, dzTgt: 2.6, started: '12/6', age: 6, persist: 5, lag: 1, corr: 0.55, status: 'EMERGING' },
+    { from: 'TEXT', to: 'POWER', dzSrc: -2.97, dzTgt: 0.9, started: '13/6', age: 5, persist: 3, lag: 2, corr: 0.41, status: 'EMERGING' },
+    { from: 'STEEL', to: 'INSUR', dzSrc: -0.55, dzTgt: 0.6, started: '11/6', age: 7, persist: 4, lag: 2, corr: 0.50, status: 'FADING' },
+  ];
+
+  onSelect = (key) => () => this.setState(s => ({ selected: s.selected === key ? null : key }));
+
+  renderVals() {
+    const sel = this.state.selected;
+    const scale = 17.5, g = 14, H = 360, top0 = 30, nodeW = 14, srcX = 156, tgtX = 830;
+    const sTot = {}, tTot = {};
+    this.LINKS.forEach(l => { sTot[l.from] = (sTot[l.from] || 0) + l.w; tTot[l.to] = (tTot[l.to] || 0) + l.w; });
+    const layout = (order, tot, x) => {
+      const colH = order.reduce((a, c) => a + tot[c] * scale, 0) + (order.length - 1) * g;
+      let y = top0 + (H - colH) / 2; const n = {};
+      order.forEach(c => { const h = tot[c] * scale; n[c] = { x, y, h, cursor: y }; y += h + g; });
+      return n;
+    };
+    const sN = layout(this.SRC, sTot, srcX), tN = layout(this.TGT, tTot, tgtX);
+
+    const ribbons = this.LINKS.map(l => {
+      const sn = sN[l.from], tn = tN[l.to]; const h = l.w * scale;
+      const sy0 = sn.cursor; sn.cursor += h; const ty0 = tn.cursor; tn.cursor += h;
+      const sx = sn.x + nodeW, tx = tn.x, mx = (sx + tx) / 2;
+      const d = `M ${sx} ${sy0.toFixed(1)} C ${mx} ${sy0.toFixed(1)} ${mx} ${ty0.toFixed(1)} ${tx} ${ty0.toFixed(1)} L ${tx} ${(ty0 + h).toFixed(1)} C ${mx} ${(ty0 + h).toFixed(1)} ${mx} ${(sy0 + h).toFixed(1)} ${sx} ${(sy0 + h).toFixed(1)} Z`;
+      const key = l.from + '>' + l.to;
+      const op = sel ? (sel === key ? 0.7 : 0.07) : 0.34;
+      return { d, color: this.COLOR[l.from], opacity: op };
+    });
+
+    const mkNode = (code, n, side) => {
+      const isSrc = side === 'src';
+      const ds = this.DSHARE[code];
+      return { code, x: n.x, y: n.y.toFixed(1), h: n.h.toFixed(1), color: this.COLOR[code],
+        labelX: isSrc ? n.x - 10 : n.x + nodeW + 10, anchor: isSrc ? 'end' : 'start',
+        labelY: (n.y + n.h / 2 - 2).toFixed(1), subY: (n.y + n.h / 2 + 13).toFixed(1),
+        dFmt: (ds >= 0 ? '+' : '') + ds.toFixed(1) + '%', dColor: ds >= 0 ? '#33D49A' : '#FF5D73' };
+    };
+    const nodes = [...this.SRC.map(c => mkNode(c, sN[c], 'src')), ...this.TGT.map(c => mkNode(c, tN[c], 'tgt'))];
+
+    const stStyle = { CONFIRMED: ['var(--buy)', 'var(--buyd)'], EMERGING: ['var(--warn)', 'var(--warnd)'], FADING: ['var(--mid)', 'var(--raise)'] };
+    const pairs = this.PAIRS.map((p, i) => {
+      const [sc, sb] = stStyle[p.status]; const key = p.from + '>' + p.to;
+      return { rank: i + 1, from: p.from, to: p.to, fromColor: this.COLOR[p.from], toColor: this.COLOR[p.to],
+        dzSrc: p.dzSrc.toFixed(2), dzTgt: '+' + p.dzTgt.toFixed(2), started: p.started, age: p.age,
+        persist: p.persist, lag: p.lag, corr: p.corr.toFixed(2), corrColor: p.corr >= 0.6 ? 'var(--buy)' : 'var(--mid)',
+        status: p.status, stColor: sc, stBg: sb,
+        rowBg: sel === key ? 'rgba(70,201,230,.06)' : 'transparent', onSelect: this.onSelect(key) };
+    });
+
+    return { ribbons, nodes, pairs };
+  }
+}
+</script>
+</body>
+</html>
