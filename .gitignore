@@ -56,3 +56,7 @@ daily.json
 refresh.json
 weekly_flow.csv
 .pytest_cache/
+
+# Downloaded tooling binaries (63MB - not source)
+scripts/cloudflared.exe
+*.exe
