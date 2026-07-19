@@ -341,8 +341,13 @@ def insight_daily():
     # "DB đứng N ngày" line makes a dead pipeline impossible to miss.
     freshness_out = {**snapshot.freshness.to_dict(), "is_valid": snapshot.is_valid}
     freshness_out["errors"] = list(freshness_out.get("errors") or [])
-    if isinstance(dates[0], _date):
-        db_gap = (_date.today() - dates[0]).days
+    # SectorFlowDaily.date is String(20) "YYYY-MM-DD", not a date object.
+    try:
+        _latest = _datetime.strptime(str(dates[0])[:10], "%Y-%m-%d").date()
+    except ValueError:
+        _latest = None
+    if _latest is not None:
+        db_gap = (_date.today() - _latest).days
         freshness_out["db_gap_days"] = db_gap
         if db_gap > 5:  # weekends + VN holiday clusters stay under 5
             freshness_out["is_valid"] = False

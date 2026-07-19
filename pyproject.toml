@@ -3,6 +3,44 @@ name = "trading"
 version = "1.0.0"
 description = "VN Stock Market Analysis & Prediction System"
 requires-python = ">=3.11"
+# Single source of truth for deps (uv.lock is generated from this).
+# requirements.txt is kept only as a human-readable mirror; `uv sync`
+# is the install command. Includes packages the code imports that the
+# old requirements.txt missed (claude-agent-sdk, matplotlib, yfinance,
+# hmmlearn, requests). weasyprint is intentionally absent: its import
+# is guarded and PDF gen falls back to headless Chrome on Windows.
+dependencies = [
+    "vnstock>=3.2.0",
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "scikit-learn>=1.3.0",
+    "xgboost>=2.0.0",
+    "lightgbm>=4.0.0",
+    "hmmlearn>=0.3.0",
+    "ta>=0.11.0",
+    "tqdm>=4.65.0",
+    "joblib>=1.3.0",
+    "python-dotenv>=1.0.0",
+    "sqlalchemy>=2.0.0",
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "pydantic>=2.0.0",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "slowapi>=0.1.9",
+    "requests>=2.31.0",
+    "matplotlib>=3.8.0",
+    "yfinance>=0.2.40",
+    "claude-agent-sdk>=0.1.0",
+]
 
 [tool.setuptools]
 packages = ["data", "analysis", "models", "database", "services", "api", "api.routers"]
+
+[tool.uv]
+# App-style repo: code runs from the project root (main.py, api/, services/).
+# Without this, `uv sync` installs a frozen COPY of the package into
+# site-packages which shadows live source for any process whose sys.path
+# prefers site-packages — the server then executes stale code while the
+# files on disk look correct (bug hunted 2026-07-19).
+package = false
