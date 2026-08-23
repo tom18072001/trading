@@ -378,7 +378,13 @@ def test_local_provider_posts_openai_compatible_request(monkeypatch):
 
 
 def test_local_provider_connect_error_is_actionable(monkeypatch):
-    """Ollama not running must surface a clear message, not a raw httpx trace."""
+    """A dead endpoint must surface a clear, CORRECT message.
+
+    2026-08-23: this used to assert the word "ollama". The message hardcoded
+    "is Ollama running? (`ollama serve`)" long after the transport moved to
+    9Router, so it sent people chasing a service this box does not run. The
+    message must name what is actually configured.
+    """
     import httpx
     import services.trader_agent as ta
 
@@ -388,11 +394,19 @@ def test_local_provider_connect_error_is_actionable(monkeypatch):
         ta.httpx, "AsyncClient",
         _fake_client_factory(captured, raise_exc=httpx.ConnectError("refused")))
 
-    agent = ta.TraderAgent(model="qwen3:8b")
+    agent = ta.TraderAgent(model="claude-opus-5")
     report = agent.analyze_sync(
         {"as_of": "2026-07-20", "top_buys": [], "top_sells": []}, {})
     assert report.is_valid is False
-    assert "ollama" in (report.error or "").lower()
+
+    err = (report.error or "").lower()
+    # names the endpoint it could not reach, and the model it was going to use
+    assert ta.LOCAL_BASE_URL.lower() in err
+    assert "claude-opus-5" in err
+    # tells you what to do
+    assert "listening" in err or "start" in err
+    # and does NOT send you after a service that is not configured
+    assert "ollama serve" not in err
 
 
 def test_parse_response_strips_think_block():

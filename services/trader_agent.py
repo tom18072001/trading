@@ -3,10 +3,12 @@
 Replaces the legacy OpenClaw "Trung" agent (see CLAUDE.md §7) with an
 in-process Python agent. Three transports, picked by `config.AGENT_PROVIDER`:
 
-  "local" (default, 2026-07-20) — plain HTTP to an OpenAI-compatible server
-      running on this machine (Ollama / LM Studio / llama.cpp). No API key,
-      no per-call cost, no internet, and no `claude_agent_sdk` subprocess.
-      The agent uses one turn and no tools, so the SDK was pure overhead here.
+  "local" (default, 2026-07-20) — plain HTTP to any OpenAI-compatible
+      /chat/completions endpoint reachable from this box. In practice that is
+      9Router (a local router on :20128 that fronts hosted models), but LM
+      Studio, llama.cpp and Ollama all speak the same shape. No
+      `claude_agent_sdk` subprocess: the agent takes one turn and uses no
+      tools, so the SDK was pure overhead here.
   "glm"   — `claude_agent_sdk` pointed at Z.ai's Anthropic-compatible
       endpoint (GLM models). Needs GLM_API_KEY in .env.
   "claude"— native Claude Code subscription path via `claude_agent_sdk`.
@@ -52,6 +54,8 @@ import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
+
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -311,9 +315,10 @@ class TraderAgent:
     async def _consume_http(self, prompt: str, acc: dict[str, Any]) -> None:
         """One-shot POST to an OpenAI-compatible /chat/completions endpoint.
 
-        Covers Ollama, LM Studio and llama.cpp's server — all three speak this
-        shape. Non-streaming: the reply is short (~500 tokens) and the caller
-        already wraps us in asyncio.wait_for, so streaming buys nothing.
+        Endpoint-agnostic: 9Router, LM Studio, llama.cpp and Ollama all speak
+        this shape, so nothing here assumes a particular one. Non-streaming:
+        the reply is short (~500 tokens) and the caller already wraps us in
+        asyncio.wait_for, so streaming buys nothing.
         """
         url = f"{LOCAL_BASE_URL.rstrip('/')}/chat/completions"
         payload = {
@@ -336,20 +341,31 @@ class TraderAgent:
                 resp.raise_for_status()
                 data = resp.json()
         except httpx.ConnectError as e:
+            # Name what is actually configured. This message used to hardcode
+            # "is Ollama running? (`ollama serve`)", which sent people chasing
+            # a service this box does not use once the transport moved to
+            # 9Router (2026-08-23). Nothing connects: the server at
+            # LOCAL_BASE_URL is down, not misconfigured.
+            host = urlsplit(LOCAL_BASE_URL).netloc or LOCAL_BASE_URL
             raise RuntimeError(
-                f"cannot reach local LLM at {url} — is Ollama running? "
-                f"(`ollama serve`) [{e}]"
+                f"nothing is listening at {url} (AGENT_PROVIDER=local, "
+                f"model '{self.model}'). Start whatever serves {host} — on "
+                f"this box that is 9Router, dashboard at http://{host.split(':')[0]}"
+                f":20128/dashboard. Change LOCAL_BASE_URL in .env to point "
+                f"somewhere else. [{e}]"
             ) from e
         except httpx.HTTPStatusError as e:
             body = (e.response.text or "")[:300]
             raise RuntimeError(
-                f"local LLM returned HTTP {e.response.status_code}: {body} "
-                f"(is model '{self.model}' pulled? check `ollama list`)"
+                f"the model endpoint returned HTTP {e.response.status_code}: {body} "
+                f"(is model '{self.model}' offered by {LOCAL_BASE_URL}? "
+                f"GET {LOCAL_BASE_URL.rstrip('/')}/models lists what it has)"
             ) from e
 
         choices = data.get("choices") or []
         if not choices:
-            raise RuntimeError(f"local LLM returned no choices: {str(data)[:300]}")
+            raise RuntimeError(
+                f"the model endpoint returned no choices: {str(data)[:300]}")
         acc["raw_text"] = (choices[0].get("message") or {}).get("content") or ""
         acc["model_used"] = data.get("model") or self.model
         acc["stop_reason"] = choices[0].get("finish_reason")

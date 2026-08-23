@@ -200,20 +200,30 @@ BACKTEST_LONG_ONLY       = True   # VN cash market cannot short — §18.2/12
 # until the frontend's 20-min ceiling, surfacing as "time exceed". These knobs
 # bound it. Tune via env without editing source.
 # 2026-07-20: provider switch. Three transports, selected by AGENT_PROVIDER:
-#   "local" (default) — plain HTTP to an OpenAI-compatible server on this box
-#       (Ollama / LM Studio / llama.cpp). No API key, no cost, no internet, and
-#       no claude_agent_sdk subprocess. Best fit for a 1-call/day agent.
+#   "local" (default) — plain HTTP to any OpenAI-compatible /chat/completions
+#       endpoint. "local" names the TRANSPORT, not where the model runs: on
+#       this box it points at 9Router, which fronts hosted Claude models from
+#       a local port. LM Studio, llama.cpp and Ollama speak the same shape, so
+#       switching is a one-line change to LOCAL_BASE_URL. No claude_agent_sdk
+#       subprocess either way — best fit for a 1-call/day agent.
 #   "glm"   — claude_agent_sdk transport pointed at Z.ai's Anthropic-compatible
 #       endpoint (GLM models). Needs GLM_API_KEY in .env.
 #   "claude"— native Claude Code subscription path via claude_agent_sdk (no key).
 AGENT_PROVIDER     = os.environ.get("AGENT_PROVIDER", "local").lower()
 
-# --- local (Ollama-style OpenAI-compatible endpoint) ---
-# LOCAL_MODEL must match a tag you have actually pulled — check `ollama list`.
-# Sized for a 6GB-VRAM card: an 8B at Q4 sits ~5GB and stays fully on the GPU.
-LOCAL_BASE_URL     = os.environ.get("LOCAL_BASE_URL", "http://localhost:11434/v1")
-LOCAL_API_KEY      = os.environ.get("LOCAL_API_KEY", "ollama")  # Ollama ignores it; LM Studio wants something
-LOCAL_MODEL        = os.environ.get("LOCAL_MODEL", "qwen3:8b")
+# --- local transport: any OpenAI-compatible endpoint ---
+# 2026-08-23: defaults moved off Ollama. This box runs 9Router on :20128
+# (dashboard at http://localhost:20128/dashboard), which routes to hosted
+# Claude models — so the agent gets a frontier model with a local-transport
+# setup. The old defaults pointed at Ollama on :11434 with an 8B sized for a
+# 6GB card; Ollama was never actually running, which is why the agent failed
+# silently for weeks.
+#
+# LOCAL_MODEL must be a model the endpoint actually offers. List them with
+#   GET {LOCAL_BASE_URL}/models
+LOCAL_BASE_URL     = os.environ.get("LOCAL_BASE_URL", "http://localhost:20128/v1")
+LOCAL_API_KEY      = os.environ.get("LOCAL_API_KEY", "")   # empty = no Authorization header
+LOCAL_MODEL        = os.environ.get("LOCAL_MODEL", "claude-opus-5")
 
 # --- glm (Z.ai) ---
 GLM_BASE_URL       = os.environ.get("GLM_BASE_URL", "https://api.z.ai/api/anthropic")
@@ -222,9 +232,10 @@ GLM_API_KEY        = os.environ.get("GLM_API_KEY", "")
 _DEFAULT_MODEL_BY_PROVIDER = {"local": LOCAL_MODEL, "glm": "glm-5.2", "claude": "haiku"}
 AGENT_MODEL        = os.environ.get(
     "AGENT_MODEL", _DEFAULT_MODEL_BY_PROVIDER.get(AGENT_PROVIDER, "haiku"))
-# Local models on a 6GB card are slower than a hosted frontier API — a 500-token
-# VN JSON reply runs ~20-40s on an 8B. 120s stays adequate; raise for MoE offload.
-AGENT_TIMEOUT_SEC  = float(os.environ.get("AGENT_TIMEOUT_SEC", "120"))  # hard wall on the agent call
+# Measured through 9Router on 2026-08-23: a real TraderAgent call (full prompt,
+# ~500-token VN JSON reply) returned in 17.7s. 90s leaves headroom for a slow
+# route without letting a stalled transport hold the refresh open for minutes.
+AGENT_TIMEOUT_SEC  = float(os.environ.get("AGENT_TIMEOUT_SEC", "90"))  # hard wall on the agent call
 AGENT_MAX_BUYS     = int(os.environ.get("AGENT_MAX_BUYS", "3"))   # cap output size → faster
 AGENT_MAX_AVOID    = int(os.environ.get("AGENT_MAX_AVOID", "2"))
 # 2026-06-18: candidate caps lowered (10→6 / 6→4) and news-per-candidate cut
