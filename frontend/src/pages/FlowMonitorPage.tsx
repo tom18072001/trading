@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { flowApi } from '../api/client';
 import type { FlowRankingResponse, FlowHeatResponse, FlowSeriesResponse, Interval } from '../api/client';
+import { FlowBadge } from '../lib/actions';
 
 const INTERVALS: Interval[] = ['1d', '1w', '2w', '1m', '1q'];
 
@@ -157,10 +158,6 @@ function HeatStrip({ heat }: { heat: FlowHeatResponse | null }) {
   );
 }
 
-const ACTION_CHIP: Record<string, string> = {
-  HOT: 'bg-buy/[0.13] text-buy', COOL: 'bg-sell/[0.13] text-sell', NEUTRAL: 'bg-raise text-mid',
-};
-
 export default function FlowMonitorPage() {
   const [interval, setInterval] = useState<Interval>('1d');
   const [flowZHot, setFlowZHot] = useState(1.0);
@@ -273,8 +270,8 @@ export default function FlowMonitorPage() {
               <th className="p-2.5 text-right">Flow Z20</th>
               <th className="p-2.5 text-right">Net Flow (tỷ)</th>
               <th className="p-2.5 text-right">Breadth</th>
-              <th className="p-2.5 text-left">Action</th>
-              <th className="p-2.5 text-left">Why</th>
+              <th className="p-2.5 text-left">Dòng tiền</th>
+              <th className="p-2.5 text-left">Vì sao</th>
             </tr>
           </thead>
           <tbody>
@@ -294,7 +291,7 @@ export default function FlowMonitorPage() {
                   <td className={`p-2.5 text-right font-mono ${r.flow_z20 > 0 ? 'text-buy' : 'text-sell'}`}>{r.flow_z20 >= 0 ? '+' : ''}{r.flow_z20.toFixed(2)}</td>
                   <td className="p-2.5 text-right font-mono text-mid">{(r.net_dollar_flow / 1e9).toFixed(2)}</td>
                   <td className="p-2.5 text-right font-mono text-mid">{r.breadth_sma20.toFixed(2)}</td>
-                  <td className="p-2.5"><span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold ${ACTION_CHIP[r.action] || 'bg-raise text-mid'}`}>{r.action}</span></td>
+                  <td className="p-2.5"><FlowBadge state={r.action} /></td>
                   <td className="p-2.5 text-[11px] text-mid">{r.why}</td>
                 </tr>
               );

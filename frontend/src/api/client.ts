@@ -20,7 +20,10 @@ export type SectorSignalRow = {
   sector_code: string;
   score: number;
   rank: number;
-  action: 'BUY' | 'SELL' | 'HOLD';
+  // CLAUDE.md §16.3. sector_signal_service.py emits four of the five today —
+  // TRIM is defined in doctrine but never written, so the UI renders it if it
+  // ever appears rather than falling back to a raw string.
+  action: 'ACCUMULATE' | 'BUY' | 'TRIM' | 'SELL' | 'HOLD';
   persistence_ok: boolean;
 };
 
@@ -151,6 +154,9 @@ export type FlowRankingRow = {
   net_dollar_flow: number;
   breadth_sma20: number;
   atr_pct: number;
+  // NOT a §16.3 trade action — api/routers/flow.py:176 derives this from
+  // flow_z alone. It describes the tape, not what to do. Rendered with
+  // FlowBadge, deliberately flatter than ActionBadge (lib/actions.tsx).
   action: 'HOT' | 'COOL' | 'NEUTRAL';
   why: string;
 };

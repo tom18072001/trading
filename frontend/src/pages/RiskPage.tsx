@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { sectorsApi, type VaRReport, type ExposureRow, type StopLossAlert } from '../api/client';
+import { ActionBadge } from '../lib/actions';
 
 export default function RiskPage() {
   const [vars, setVars] = useState<VaRReport[]>([]);
@@ -22,36 +23,47 @@ export default function RiskPage() {
   const fmtPct = (n: number) => `${(n * 100).toFixed(2)}%`;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="px-8 py-8 max-w-[1240px] mx-auto space-y-[22px]">
       <header>
-        <h1 className="text-2xl font-bold text-slate-100">Risk</h1>
-        <p className="text-sm text-slate-500">VaR/CVaR per sector, current exposure, stop-loss sentinel.</p>
+        <h1 className="font-display text-[29px] font-bold text-hi tracking-tight">
+          Rủi ro &amp; Vị thế
+        </h1>
+        <p className="text-[13px] text-mid mt-1">
+          VaR/CVaR theo ngành · tỷ trọng đang nắm · cảnh báo cắt lỗ
+        </p>
       </header>
 
-      {loading && <div className="text-slate-400 text-sm">Loading…</div>}
-      {error && <div className="text-rose-400 text-sm">Error: {error}</div>}
+      {loading && <div className="text-mid text-sm">Đang tải…</div>}
+      {error && (
+        <div className="p-3 bg-sell/[0.12] border border-sell/40 text-sell rounded-xl text-sm">
+          Lỗi: {error}
+        </div>
+      )}
 
       {!loading && !error && (
         <>
-          <section>
-            <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">
-              Stop-loss alerts
-            </h2>
+          <section className="rounded-2xl bg-panel border border-line overflow-hidden">
+            <div className="px-4 py-3 border-b border-line section-label">Cảnh báo cắt lỗ</div>
             {alerts.length === 0 ? (
-              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 text-sm text-slate-500">
-                No breaches — all held sectors within stop.
+              <div className="p-8 text-center text-mid text-[13px]">
+                Không có vi phạm — mọi ngành đang nắm vẫn trên ngưỡng stop.
               </div>
             ) : (
-              <div className="rounded-xl border border-rose-900/50 bg-rose-950/20 divide-y divide-rose-900/30">
+              <div>
                 {alerts.map((a) => (
-                  <div key={`${a.sector_code}-${a.date}`} className="p-3 flex items-center justify-between">
+                  <div
+                    key={`${a.sector_code}-${a.date}`}
+                    className="p-3 flex items-center justify-between border-b border-line bg-sell/[0.06]"
+                  >
                     <div>
-                      <div className="font-semibold text-rose-300">{a.sector_code}</div>
-                      <div className="text-xs text-slate-400">{a.severity} · {a.date}</div>
+                      <div className="font-semibold text-sell">{a.sector_code}</div>
+                      <div className="text-[11px] font-mono text-mid tabular">
+                        {a.severity} · {a.date}
+                      </div>
                     </div>
-                    <div className="text-right text-xs tabular-nums text-slate-300">
-                      <div>return {fmtPct(a.return_1d)}</div>
-                      <div className="text-slate-500">threshold {fmtPct(a.threshold)}</div>
+                    <div className="text-right text-[11px] font-mono tabular text-hi">
+                      <div>lợi suất {fmtPct(a.return_1d)}</div>
+                      <div className="text-lo">ngưỡng {fmtPct(a.threshold)}</div>
                     </div>
                   </div>
                 ))}
@@ -59,94 +71,72 @@ export default function RiskPage() {
             )}
           </section>
 
-          <section>
-            <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">
-              Current exposure
-            </h2>
-            <div className="rounded-xl border border-slate-800 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-900/60 text-slate-400 text-xs uppercase tracking-wider">
-                  <tr>
-                    <th className="px-3 py-2 text-left">Sector</th>
-                    <th className="px-3 py-2 text-left">Side</th>
-                    <th className="px-3 py-2 text-right">Weight</th>
-                    <th className="px-3 py-2 text-right">Rank</th>
+          <section className="rounded-2xl bg-panel border border-line overflow-hidden">
+            <div className="px-4 py-3 border-b border-line section-label">Vị thế đang mở</div>
+            <table className="w-full text-[13px]">
+              <thead className="bg-panel2 border-b border-line text-[10px] uppercase tracking-wider text-mid">
+                <tr>
+                  <th className="p-2.5 text-left">Ngành</th>
+                  <th className="p-2.5 text-left">Hành động</th>
+                  <th className="p-2.5 text-right">Tỷ trọng</th>
+                  <th className="p-2.5 text-right">Hạng</th>
+                </tr>
+              </thead>
+              <tbody>
+                {exposure.map((e) => (
+                  <tr key={e.sector_code} className="border-b border-line hover:bg-panel2/60">
+                    <td className="p-2.5 font-semibold text-hi">{e.sector_code}</td>
+                    <td className="p-2.5"><ActionBadge action={e.side} /></td>
+                    <td className="p-2.5 text-right font-mono tabular text-hi">{fmtPct(e.weight)}</td>
+                    <td className="p-2.5 text-right font-mono tabular text-lo">#{e.rank}</td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800">
-                  {exposure.map((e) => (
-                    <tr key={e.sector_code} className="hover:bg-slate-900/40">
-                      <td className="px-3 py-2 font-semibold text-slate-200">{e.sector_code}</td>
-                      <td className="px-3 py-2">
-                        <span className={e.side === 'BUY' ? 'text-emerald-400' : 'text-rose-400'}>
-                          {e.side}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-slate-300">
-                        {fmtPct(e.weight)}
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-slate-500">
-                        #{e.rank}
-                      </td>
-                    </tr>
-                  ))}
-                  {exposure.length === 0 && (
-                    <tr>
-                      <td colSpan={4} className="px-3 py-6 text-center text-slate-500">
-                        No open sector positions.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                ))}
+                {exposure.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="p-8 text-center text-mid text-[13px]">
+                      Chưa có vị thế ngành nào đang mở.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </section>
 
-          <section>
-            <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">
+          <section className="rounded-2xl bg-panel border border-line overflow-hidden">
+            <div className="px-4 py-3 border-b border-line section-label">
               VaR / CVaR (95%)
-            </h2>
-            <div className="rounded-xl border border-slate-800 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-900/60 text-slate-400 text-xs uppercase tracking-wider">
-                  <tr>
-                    <th className="px-3 py-2 text-left">Sector</th>
-                    <th className="px-3 py-2 text-right">N</th>
-                    <th className="px-3 py-2 text-right">Mean</th>
-                    <th className="px-3 py-2 text-right">Std</th>
-                    <th className="px-3 py-2 text-right">VaR 95%</th>
-                    <th className="px-3 py-2 text-right">CVaR 95%</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800">
-                  {vars.map((v) => (
-                    <tr key={v.sector_code} className="hover:bg-slate-900/40">
-                      <td className="px-3 py-2 font-semibold text-slate-200">{v.sector_code}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-slate-400">{v.n_obs}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-slate-300">
-                        {fmtPct(v.mean)}
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-slate-300">
-                        {fmtPct(v.std)}
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-rose-300">
-                        {fmtPct(v.var_95)}
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-rose-400">
-                        {fmtPct(v.cvar_95)}
-                      </td>
-                    </tr>
-                  ))}
-                  {vars.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="px-3 py-6 text-center text-slate-500">
-                        No VaR data yet.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
             </div>
+            <table className="w-full text-[13px]">
+              <thead className="bg-panel2 border-b border-line text-[10px] uppercase tracking-wider text-mid">
+                <tr>
+                  <th className="p-2.5 text-left">Ngành</th>
+                  <th className="p-2.5 text-right">N</th>
+                  <th className="p-2.5 text-right">Trung bình</th>
+                  <th className="p-2.5 text-right">Độ lệch</th>
+                  <th className="p-2.5 text-right">VaR 95%</th>
+                  <th className="p-2.5 text-right">CVaR 95%</th>
+                </tr>
+              </thead>
+              <tbody>
+                {vars.map((v) => (
+                  <tr key={v.sector_code} className="border-b border-line hover:bg-panel2/60">
+                    <td className="p-2.5 font-semibold text-hi">{v.sector_code}</td>
+                    <td className="p-2.5 text-right font-mono tabular text-mid">{v.n_obs}</td>
+                    <td className="p-2.5 text-right font-mono tabular text-hi">{fmtPct(v.mean)}</td>
+                    <td className="p-2.5 text-right font-mono tabular text-hi">{fmtPct(v.std)}</td>
+                    <td className="p-2.5 text-right font-mono tabular text-sell">{fmtPct(v.var_95)}</td>
+                    <td className="p-2.5 text-right font-mono tabular text-sell">{fmtPct(v.cvar_95)}</td>
+                  </tr>
+                ))}
+                {vars.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="p-8 text-center text-mid text-[13px]">
+                      Chưa có dữ liệu VaR.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </section>
         </>
       )}

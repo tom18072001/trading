@@ -490,3 +490,24 @@ docs/reviews/           ← the dated reviews (§21: dated records keep their na
 **No Python file moved.** `scripts/jobs/*.bat` invoke `main.py` from the repo
 root under Task Scheduler, and `MODIFICATION_LOG.md` 2026-07-19 already records
 one path move that left shortcuts pointing at a dead directory.
+
+
+### 22.8 One design system, one action vocabulary — 2026-08-23
+The four "Ra quyết định" pages were wired on 2026-08-23 (§12) but had never
+been through the redesign, so they still shipped raw Tailwind while the five
+"Theo dõi" pages used the `@theme` tokens. They are on the tokens now — class
+swaps only, no new design.
+
+The bigger fix is vocabulary. Three pages spoke three alphabets, and none was
+the five-state enum §16.3 defines. `frontend/src/lib/actions.tsx` is now the
+single source, and it separates two things that were being conflated:
+
+| component | means | source | states |
+|---|---|---|---|
+| `ActionBadge` | what to do with money | `sector_signal_service.py` (§16.3) | ACCUMULATE · BUY · TRIM · SELL · HOLD |
+| `FlowBadge` | what the tape is doing | `api/routers/flow.py:176`, from `flow_z` alone | HOT · COOL · NEUTRAL |
+
+`FlowBadge` is styled flatter on purpose: a HOT tape is an observation, not an
+instruction, and it must never read like a BUY. **TRIM is rendered but never
+emitted** — the signal service has no path to it, so §16.3 is still four states
+in practice. That is a doctrine-vs-code gap of the same family as P1-1.

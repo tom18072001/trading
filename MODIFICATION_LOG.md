@@ -14,6 +14,53 @@
 
 ---
 
+## 2026-08-23 (late) — One design system, one action vocabulary
+- Author: Claude Code on behalf of Tom
+- Files:
+  - new `frontend/src/lib/actions.tsx`
+  - `frontend/src/pages/{RankingPage,RegimePage,RiskPage,BacktestPage}.tsx`
+  - `frontend/src/pages/{FlowMonitorPage,DailyInsightPage}.tsx` (badge call sites)
+  - `frontend/src/api/client.ts` (two type comments + the `SectorSignalRow.action` union)
+- Reason: sponsor review §B. The four "Ra quyết định" pages were route-wired on
+  2026-08-23 and had never been through the redesign, so they still used raw
+  Tailwind (`slate-800`, `emerald-600`, `rounded-xl`) while the five "Theo dõi"
+  pages used the `@theme` tokens. Clicking between the two groups read as two
+  different products. Separately, three pages spoke three action alphabets —
+  HOT/COOL/NEUTRAL, BUY/SELL/HOLD, BUY/ACCUMULATE/SELL — and none of them was
+  the five-state enum CLAUDE.md §16.3 defines.
+- Summary:
+  - **Vocabulary.** `lib/actions.tsx` holds the whole alphabet in one place and
+    splits what was being conflated. `ActionBadge` renders the §16.3 *trade
+    instruction* (ACCUMULATE / BUY / TRIM / SELL / HOLD) in Vietnamese with the
+    §16.1 gốc/cành-cao/ngọn hint in the tooltip; `FlowBadge` renders the
+    HOT/COOL/NEUTRAL *tape observation* that `api/routers/flow.py:176` derives
+    from `flow_z` alone, styled deliberately flatter so it never reads as a
+    buy order. TRIM is in the table but the signal service never emits it —
+    doctrine-only today, and the UI will render it the day it appears.
+  - **Style.** No new design: only class swaps onto the existing tokens
+    (`bg-panel`/`bg-panel2`, `text-hi`/`text-mid`/`text-lo`, `border-line`,
+    `rounded-2xl`, `section-label`, `font-display`/`font-mono`) plus Vietnamese
+    labels. `grep -n 'slate-|emerald-|rose-|amber-|cyan-'` over the four pages
+    now returns nothing. Recharts takes colour strings, not classes, so
+    BacktestPage's six hardcoded hexes were repointed at the `@theme` values
+    rather than removed.
+  - HOLD renders without its hint — 13 of 15 ranking rows are HOLD and spelling
+    out "chưa đủ điều kiện" on each was noise. The tooltip still carries it.
+- Verification: `tsc --noEmit` clean; vitest 13/13; `npm run build` 6.7 s, main
+  bundle 376.43 kB (unchanged — `lib/actions.tsx` is ~1 kB and the four pages
+  stay lazy). Exercised against the running server at 1440×900: `/ranking`
+  shows `#3 INSUR ✓ Mua · cành cao — xác nhận momentum` and 13 `Đứng ngoài`;
+  `/regime` shows the Risk-off card on `bg-sell/[0.10]`; `/risk` shows
+  `INSUR Mua 100.00% #3` through the shared badge; `/backtest` re-ran live
+  (−43.72% vs benchmark 16.59%, Sharpe −4.20 with the §18.2 caveat intact).
+  `preview_inspect` confirms `bg-panel` resolves to `rgb(17,21,28)`. Zero
+  console errors.
+- Follow-ups: sponsor steps 3–6 remain — merge nav 9→5, watchlist +
+  kill-switch + "đã vào lệnh", Backtest strategy/fees/benchmark/trade-log, and
+  the global filter + Stealth presets.
+
+---
+
 ## 2026-08-23 (evening) — Frontend defect pass (A1–A8), outdated docs deleted, repo reorganised by topic
 - Author: Claude Code on behalf of Tom
 - Reason: a business-sponsor review of the running web app produced seven

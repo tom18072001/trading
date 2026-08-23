@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { insightApi, type InsightRefreshStatus } from '../api/client';
+import { ActionBadge } from '../lib/actions';
 
 // Polls /insight/refresh/status until the background run completes. Used by
 // the Refresh button so the UI can surface stage + progress % instead of
@@ -357,9 +358,7 @@ function PickCard({ p, kind, alloc }: { p: any; kind: 'BUY' | 'SELL'; alloc: num
           <div className="text-[11px] text-lo mt-1">{p.sector_name}</div>
         </div>
         <div className="text-right">
-          <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${
-            isBuy ? 'bg-buy/[0.13] text-buy' : 'bg-sell/[0.13] text-sell'
-          }`}>{p.action}</span>
+          <ActionBadge action={p.action} />
           <div className="text-[12px] text-warn mt-1 tracking-tight" title={`Conviction ${conv}/5`}>{starStr(conv)}</div>
         </div>
       </div>
@@ -556,9 +555,7 @@ export function PickTable({ title, subtitle, kind, picks }: {
                 <tr className="border-b border-line hover:bg-panel2/60 align-top">
                   <td className="p-2">
                     <div className="font-bold text-hi">{sym}</div>
-                    <span className={`inline-block mt-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold ${
-                      kind === 'BUY' ? 'bg-buy/[0.13] text-buy' : 'bg-sell/[0.13] text-sell'
-                    }`}>{p.action}</span>
+                    <div className="mt-0.5"><ActionBadge action={p.action} /></div>
                   </td>
                   <td className="p-2 text-xs">
                     <span className="font-mono text-acc">{pSecCode(p)}</span>

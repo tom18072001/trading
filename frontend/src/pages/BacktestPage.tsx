@@ -28,44 +28,35 @@ export default function BacktestPage() {
     }
   };
 
+  const inputCls =
+    'w-full bg-panel2 border border-line rounded-lg px-3 py-2 text-[13px] text-hi font-mono';
+
   return (
-    <div className="p-6 space-y-6">
+    <div className="px-8 py-8 max-w-[1240px] mx-auto space-y-[22px]">
       <header>
-        <h1 className="text-2xl font-bold text-slate-100">Sector Backtest</h1>
-        <p className="text-sm text-slate-500">
-          Long/short rotation strategy — ranks sectors daily by net dollar flow.
+        <h1 className="font-display text-[29px] font-bold text-hi tracking-tight">Backtest</h1>
+        <p className="text-[13px] text-mid mt-1">
+          Chiến lược luân chuyển ngành — xếp hạng theo dòng tiền ròng mỗi phiên
         </p>
       </header>
 
-      <div className="rounded-xl border border-slate-800 p-5 bg-slate-900/40 grid grid-cols-2 md:grid-cols-4 gap-4">
-        <label className="text-xs text-slate-400 space-y-1">
-          <div>Name</div>
-          <input
-            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200"
-            value={name} onChange={(e) => setName(e.target.value)}
-          />
+      <section className="rounded-2xl bg-panel border border-line p-5 grid grid-cols-2 md:grid-cols-4 gap-4">
+        <label className="space-y-1">
+          <div className="section-label">Tên lần chạy</div>
+          <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
         </label>
-        <label className="text-xs text-slate-400 space-y-1">
-          <div>Start date</div>
-          <input
-            type="date"
-            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200"
-            value={start} onChange={(e) => setStart(e.target.value)}
-          />
+        <label className="space-y-1">
+          <div className="section-label">Từ ngày</div>
+          <input type="date" className={inputCls} value={start} onChange={(e) => setStart(e.target.value)} />
         </label>
-        <label className="text-xs text-slate-400 space-y-1">
-          <div>End date</div>
-          <input
-            type="date"
-            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200"
-            value={end} onChange={(e) => setEnd(e.target.value)}
-          />
+        <label className="space-y-1">
+          <div className="section-label">Đến ngày</div>
+          <input type="date" className={inputCls} value={end} onChange={(e) => setEnd(e.target.value)} />
         </label>
-        <label className="text-xs text-slate-400 space-y-1">
-          <div>Initial capital (VND)</div>
+        <label className="space-y-1">
+          <div className="section-label">Vốn ban đầu (VND)</div>
           <input
-            type="number"
-            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200"
+            type="number" className={inputCls}
             value={capital} onChange={(e) => setCapital(Number(e.target.value))}
           />
         </label>
@@ -73,19 +64,23 @@ export default function BacktestPage() {
           <button
             onClick={run}
             disabled={running}
-            className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-sm font-medium text-white"
+            className="px-5 py-2 rounded-xl bg-acc/[0.13] text-acc border border-acc/30 hover:bg-acc/[0.2] disabled:opacity-50 text-[13px] font-semibold"
           >
-            {running ? 'Running…' : 'Run backtest'}
+            {running ? 'Đang chạy…' : 'Chạy backtest'}
           </button>
         </div>
-      </div>
+      </section>
 
-      {error && <div className="text-rose-400 text-sm">Error: {error}</div>}
+      {error && (
+        <div className="p-3 bg-sell/[0.12] border border-sell/40 text-sell rounded-xl text-sm">
+          Lỗi: {error}
+        </div>
+      )}
 
       {result && (
-        <div className="space-y-5">
+        <div className="space-y-[22px]">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Metric label="Total return" value={`${result.total_return_pct.toFixed(2)}%`} positive={result.total_return_pct >= 0} />
+            <Metric label="Tổng lợi suất" value={`${result.total_return_pct.toFixed(2)}%`} positive={result.total_return_pct >= 0} />
             <Metric label="Benchmark" value={`${result.benchmark_return_pct.toFixed(2)}%`} />
             {/* 2026-08-23 (review A7): Sharpe was rendered bare. CLAUDE.md
                 §18.2/7-10 lists T+2 settlement, broker fees, the 0.1% sell tax
@@ -98,27 +93,28 @@ export default function BacktestPage() {
               positive={Math.abs(result.sharpe_ratio) > 5 ? undefined : result.sharpe_ratio >= 1}
               note={Math.abs(result.sharpe_ratio) > 5 ? 'kiểm tra dữ liệu' : 'chưa gồm T+2, phí, thuế, price-band'}
             />
-            <Metric label="Max DD" value={`${result.max_drawdown_pct.toFixed(2)}%`} positive={result.max_drawdown_pct > -15} />
-            <Metric label="Trades" value={String(result.total_trades)} />
-            <Metric label="Win rate" value={`${(result.win_rate * 100).toFixed(0)}%`} positive={result.win_rate >= 0.5} />
-            <Metric label="Final" value={result.final_capital.toLocaleString(undefined, { maximumFractionDigits: 0 })} />
-            <Metric label="Initial" value={result.initial_capital.toLocaleString(undefined, { maximumFractionDigits: 0 })} />
+            <Metric label="Sụt giảm tối đa" value={`${result.max_drawdown_pct.toFixed(2)}%`} positive={result.max_drawdown_pct > -15} />
+            <Metric label="Số lệnh" value={String(result.total_trades)} />
+            <Metric label="Tỷ lệ thắng" value={`${(result.win_rate * 100).toFixed(0)}%`} positive={result.win_rate >= 0.5} />
+            <Metric label="Vốn cuối" value={result.final_capital.toLocaleString(undefined, { maximumFractionDigits: 0 })} />
+            <Metric label="Vốn đầu" value={result.initial_capital.toLocaleString(undefined, { maximumFractionDigits: 0 })} />
           </div>
 
-          <div className="rounded-xl border border-slate-800 p-4 bg-slate-900/40 h-80">
+          <section className="rounded-2xl bg-panel border border-line p-4 h-80">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={result.equity_curve}>
-                <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
-                <XAxis dataKey="date" stroke="#64748b" fontSize={11} />
-                <YAxis stroke="#64748b" fontSize={11} domain={['auto', 'auto']} />
+                {/* colours mirror index.css @theme — recharts takes strings, not classes */}
+                <CartesianGrid stroke="#1C222D" strokeDasharray="3 3" />
+                <XAxis dataKey="date" stroke="#5A6573" fontSize={11} />
+                <YAxis stroke="#5A6573" fontSize={11} domain={['auto', 'auto']} />
                 <Tooltip
-                  contentStyle={{ background: '#0f172a', border: '1px solid #334155' }}
-                  labelStyle={{ color: '#94a3b8' }}
+                  contentStyle={{ background: '#11151C', border: '1px solid rgba(255,255,255,0.13)', borderRadius: 12 }}
+                  labelStyle={{ color: '#909DAF' }}
                 />
-                <Line type="monotone" dataKey="equity" stroke="#10b981" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="equity" stroke="#33D49A" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
-          </div>
+          </section>
         </div>
       )}
     </div>
@@ -127,16 +123,12 @@ export default function BacktestPage() {
 
 function Metric({ label, value, positive, note }: { label: string; value: string; positive?: boolean; note?: string }) {
   const color =
-    positive === undefined
-      ? 'text-slate-200'
-      : positive
-      ? 'text-emerald-400'
-      : 'text-rose-400';
+    positive === undefined ? 'text-hi' : positive ? 'text-buy' : 'text-sell';
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3">
-      <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
-      <div className={`text-xl font-bold tabular-nums mt-1 ${color}`}>{value}</div>
-      {note && <div className="text-[10px] text-slate-500 mt-1 leading-tight">{note}</div>}
+    <div className="rounded-2xl bg-panel border border-line px-4 py-3">
+      <div className="section-label">{label}</div>
+      <div className={`text-xl font-bold font-mono tabular mt-1 ${color}`}>{value}</div>
+      {note && <div className="text-[10px] text-lo mt-1 leading-tight">{note}</div>}
     </div>
   );
 }
