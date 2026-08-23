@@ -2,7 +2,7 @@
 
 Status: ACTIVE (2026-04-17).
 Doctrine owner: `services/picks_universe_service.py`.
-Consumers: `generate_secv3.py` (email report) and `api/routers/insight.py`
+Consumers: `generate_report.py` (email report) and `api/routers/insight.py`
 (Daily Insight API).
 
 ## 1. Purpose & non-goals
@@ -83,7 +83,7 @@ Every indicator is computed in memory from fresh OHLCV; nothing persists.
 
 ## 7. Composite score
 
-Lifted from `generate_secv3.score_symbol` into
+Lifted from the then-current report generator's `score_symbol` into
 `services.picks_scoring.score_ticker(row) -> int`. Same rules both surfaces.
 Sectors rank candidates desc by `(score, dv_20d)`.
 
@@ -91,7 +91,7 @@ Sectors rank candidates desc by `(score, dv_20d)`.
 
 `services.picks_scoring.compute_stop_target_rr(row, profile)`:
 - `PickProfile.SWING` — 2.5× ATR target, 1.8× ATR stop. Used by the email
-  report (`generate_secv3.py`).
+  report (`generate_report.py`).
 - `PickProfile.TPLUS`  — 2.0× ATR target, 1.0× ATR stop. Used by Daily
   Insight (`api/routers/insight.py`).
 

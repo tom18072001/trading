@@ -14,8 +14,15 @@ Pivot the VN Trading system from per-symbol prediction to **sector-level money-f
 - REPLACE: primary key `symbol` → `sector_code` everywhere.
 - **Per-ticker picks (2026-04-17 onward):** `generate_report.py` and `api/routers/insight.py` read per-ticker BUY/ACCUMULATE picks exclusively from `services.picks_universe_service.PicksUniverseService` (dynamic HOSE universe from vnstock Listing). They no longer read `_legacy_stocks`, `_legacy_stock_prices`, or `_legacy_stock_features`. These three tables stay in the DB during a 2-week shadow window then drop in migration 10.
 - **Email report (2026-04-23 onward):** `generate_report.py` is the **sole** daily email generator. It unifies the picks surfaced in the Daily Insight page (`snapshot.top_buys`/`top_sells` — no ranker gate) with the ranker-gated BUY/ACCUMULATE picks into a single de-duped list, each entry tagged with its source (`BOTH` / `DAILY_INSIGHT` / `RANKER`). The HTML/PDF gains an Expert Trader Memo section at the top; the email body is plain text (buy symbols + reasons + Dashboard + news links). Default recipients: `tka2001@gmail.com, anhchitruong18@gmail.com, hill.nguyen.1373@gmail.com`. `scripts/jobs/job_sector_signal_publish.bat` calls `generate_report.py`.
-- **SecV3/SecV4 deleted (2026-06-18):** `generate_secv3.py` and `generate_secv4.py` removed from the repo — they were carried only as manual rollback paths and had drifted from secv5 (duplicate-but-divergent helpers). secv5 is now the single source of truth for the daily report. If a stale Task Scheduler entry still invokes secv3/secv4, run `scripts/pause_legacy_email_task.ps1` (elevated PowerShell) to evict it.
-- **SecV2 retired (2026-04-20):** `generate_secv2.py` + `run_secv2_daily.bat` deleted from the repo. The Windows 17:00 scheduled task that invoked them is obsolete — run `scripts/cleanup_scheduled_tasks.ps1` (elevated PowerShell) to unregister it and dedupe the SecV4 task.
+- **One report generator, no versioned copies.** `generate_report.py` is the only
+  daily-report generator in the repo. Every earlier numbered copy is gone:
+  SecV2 on 2026-04-20, SecV3 + SecV4 on 2026-06-18 (they were kept only as
+  manual rollback paths and had drifted into duplicate-but-divergent helpers),
+  and SecV5 was renamed to `generate_report.py` on 2026-08-22 (§21 — version
+  numbers do not belong in names). If a stale Task Scheduler entry still points
+  at one of them, run `scripts/pause_legacy_email_task.ps1` (elevated
+  PowerShell) to evict it, then `scripts/cleanup_scheduled_tasks.ps1` to
+  re-register the 8 canonical jobs.
 
 ## 3. The 15 Sectors (inherited from legacy SECTOR_MAP)
 Ngân hàng, Chứng khoán, Bất động sản, Thép & VLXD, Bán lẻ, Thực phẩm, Dầu khí, Điện & NL, Công nghệ, Hàng không & Logistics, Bảo hiểm, Hóa chất & Phân bón, Dệt may, Cao su & Nhựa, Thủy sản.
@@ -95,7 +102,7 @@ Replace 9 symbol pages with 5 sector pages: Flow Dashboard, Rotation Ranking, Re
 6. Retrofit backtest + risk services.
 7. Rewrite briefing + Gmail template. **[2026-04-18 SUPERSEDED]** OpenClaw removed; replaced by in-process `services.trader_agent.TraderAgent` via `claude_agent_sdk` (see `specs/trader_agent.md`).
 8. Replace frontend pages.
-8.5. **Introduce `PicksUniverseService`** — consolidate per-ticker picks under one dynamic HOSE universe; retire `_legacy_stock_*` reads from `generate_secv3.py` and `api/routers/insight.py` (see `specs/picks_universe.md`, 2026-04-17).
+8.5. **Introduce `PicksUniverseService`** — consolidate per-ticker picks under one dynamic HOSE universe; retire `_legacy_stock_*` reads from the report generator (then SecV3, now `generate_report.py`) and `api/routers/insight.py` (see `specs/picks_universe.md`, 2026-04-17).
 9. Shadow-run 2 weeks.
 10. Drop `_legacy_` tables + delete symbol code.
 
@@ -124,7 +131,7 @@ Every code or schema change must:
 > and drops condition 2 entirely whenever `foreign_net` is all-zero — which it
 > is across the whole history (see §20, P0-5). The gate can therefore run on 3
 > conditions, not 5. This was never logged per §15. **Decide which numbers are
-> real and make both places agree** — see `CODE_REVIEW_2026-08-22.md` P1-1.
+> real and make both places agree** — see `docs/reviews/CODE_REVIEW_2026-08-22.md` P1-1.
 
 A sector is in **stealth accumulation** when ALL of these hold simultaneously for ≥ N sessions (default N=5):
 1. **Rolling 20d net dollar flow z-score > +1.0** (flow regime shift vs own history)
@@ -163,7 +170,7 @@ Extend `SectorSignal.action` enum:
 |---|---|---|
 | stealth_scanner | 0 17 * * 1-5 | Evaluate §16.1 conditions per sector, emit `ACCUMULATE` signals when they flip. |
 | lead_time_audit | 0 3 * * 1 | Weekly: for each past breakout, measure how many days earlier `flow_z20` crossed +1; store in `flow_leadtime_proxy`. Use as model diagnostic. |
-| flow_regime_report | 30 17 * * 5 | Friday EOD: export a "sector flow heatmap" (z20 grid) to Gmail via `trader_agent` + `generate_secv4`. |
+| flow_regime_report | 30 17 * * 5 | Friday EOD: export a "sector flow heatmap" (z20 grid) to Gmail via `trader_agent` + `generate_report.py`. |
 
 ### 16.6 Backtest extension
 Add an **entry-timing attribution** report to `SectorBacktestService`:
@@ -263,12 +270,18 @@ As of 2026-04-23:
 
 | Suite | Count | Command |
 |---|---|---|
-| Backend (pytest) | 138 | `python -m pytest tests/` |
+| Backend (pytest) | 156 | `python -m pytest tests/` |
 | Frontend (vitest) | 13 | `cd frontend && npm test` |
-| **Total** | **151** | — |
+| **Total** | **169** | — |
+
+> 2026-08-23: +6 in `tests/test_picks_universe_service.py` — the disk-snapshot
+> round-trip (identity between `by_sector` and `tickers` preserved), cold-cache
+> load from disk, the stale-vs-latest-signal-date flag, and the two degrade
+> paths (corrupt file, missing file) that must return `None` rather than raise.
+> An empty build is not persisted.
 
 > 2026-08-22: +28 in `tests/test_review_20260822.py`, one guard per finding in
-> `CODE_REVIEW_2026-08-22.md`. The 105 figure above also counted ~9 one-line
+> `docs/reviews/CODE_REVIEW_2026-08-22.md`. The 105 figure above also counted ~9 one-line
 > placeholder files under `tests/test_api/`, `tests/test_services/` and
 > `tests/test_database/` that contain only "Legacy test removed in sector
 > redesign" — real backend coverage before this review was ~101.
@@ -295,7 +308,7 @@ Live integration (not in pytest): `POST /api/insight/refresh` — exercises vnst
 
 ## 20. Code Review — 2026-08-22
 
-Full findings: **`CODE_REVIEW_2026-08-22.md`** (22 findings: 6 P0, 6 P1, 4 P2, 6 P3).
+Full findings: **`docs/reviews/CODE_REVIEW_2026-08-22.md`** (22 findings: 6 P0, 6 P1, 4 P2, 6 P3).
 
 ### 20.1 The central defect
 
@@ -348,7 +361,7 @@ DO change behaviour — they implement §16.9, which was never enforced.
 
 ### 20.4 Doctrine drift to close
 
-`CODE_REVIEW_2026-08-22.md` carries a "plan vs. code" table of ten places where
+`docs/reviews/CODE_REVIEW_2026-08-22.md` carries a "plan vs. code" table of ten places where
 this document describes a system different from the one running. Per §18.8,
 each needs either a code change or a doctrine amendment — not silence.
 
@@ -372,7 +385,7 @@ it does, and it forces a rename every time it changes.
 | env `SECV3_DB_PATH` | `REPORT_DB_PATH` (old name still honoured) |
 
 Dates are NOT versions and were left alone: `MODIFICATION_LOG.md`,
-`CODE_REVIEW_2026-08-22.md` and the dated post-mortems keep their names,
+`docs/reviews/CODE_REVIEW_2026-08-22.md` and the dated post-mortems keep their names,
 because a dated record is supposed to say when it was written.
 
 **Consequence to know about:** renaming `model_name` orphans the 74 existing
@@ -393,10 +406,24 @@ state. They are not broken code — they are correct code with no data:
 | surface | endpoint | why it is empty |
 |---|---|---|
 | Stealth Watch | `/api/stealth/active`, `/api/stealth/history` | `accumulation_age` is 0 on all 13k rows; §16 has never fired |
-| Rotation Map | `/api/rotation/pairs` | no pair clears the 1.5 threshold on the current panel |
-| Flow Pulse | `/api/pulse/exposure` | no positions are tracked |
+| Rotation Map | `/api/rotation/pairs` | ~~no pair clears the 1.5 threshold~~ — **wrong, corrected below** |
+| Flow Pulse | `/api/pulse/exposure` | ~~no positions are tracked~~ — **wrong, corrected below** |
 
-Fixing these means fixing §16 (see §20.3), not the UI.
+Fixing Stealth Watch means fixing §16 (see §20.3), not the UI. The other two
+rows were **misdiagnosed**; both were fixed on 2026-08-23:
+
+- **Rotation Map** was not threshold-limited, it was structurally empty.
+  `rotation.py` builds `pairs` as the cartesian product of
+  `delta < -threshold*sigma` × `delta > +threshold*sigma`, and a live probe
+  returned 10 nodes **all on the target side**. The product is therefore empty
+  at *every* threshold — lowering it widens both sets from the same one-sided
+  `delta`. The page now reads `/api/sectors/handoff`, which computes the same
+  thing correctly (`max(0, -Δz_A) * max(0, +Δz_B)`; the independent clip per
+  side is what keeps both sides non-empty) and had 270 rows and no consumer.
+  `/api/rotation/*` stays mounted, unread.
+- **Flow Pulse** exposure was not "no positions" — `api/routers/pulse.py`
+  returns a hardcoded `{"rows": []}` while the real implementation sits in
+  `sectors_risk.py`. The client now calls `/api/sectors/risk/exposure`.
 
 ### 22.2 Client code pointing at deleted routes
 `agentApi.briefing()` and `agentApi.stoplossAlerts()` called `/api/agent/*`,
@@ -408,6 +435,12 @@ which was removed from the backend on 2026-04-18 when OpenClaw was replaced by
 - `flowApi.series` and `flowApi.sector` hard-coded `lookback = 400` in the
   **client**, so lowering the backend default to 120 changed nothing until the
   client changed too. Now 120 both ends: **2.8 s / 1.0 MB → 1.3 s / 303 KB**.
+  > **2026-08-23: this was only two-thirds true.** The client *default* and
+  > `SectorDetailPage` were changed, but `FlowMonitorPage.tsx` passed an
+  > explicit `400` that overrode the default, so the route users actually open
+  > still shipped 1.0 MB. Fixed now — measured 1,000,870 B / 2.72 s →
+  > 304,682 B / 1.61 s. The lesson: changing a default proves nothing until you
+  > grep the call sites.
 - Wiring the four pages eagerly took the main bundle from 372 kB to 732 kB,
   because `BacktestPage` imports recharts. They are `React.lazy` now: main
   bundle 376 kB, recharts in a 346 kB chunk that only loads when you open
@@ -428,3 +461,32 @@ React 19.2 ships `act` only in its development build, and Vitest runs with
 `@testing-library/react` fell back to the removed `react-dom/test-utils.act`.
 Fixed in `vitest.config.ts` by asking the resolver for the `development`
 condition. **13/13 pass now** — the count in §19 is finally true.
+
+### 22.6 The homepage was empty after every restart — 2026-08-23
+The defect the audit above missed, because it only shows up on a cold process.
+`PicksUniverseService` kept its snapshot **only in memory**, so a backend
+restart blanked Daily Insight until a human clicked Refresh. `/api/insight/daily`
+deliberately does a cache-only `.peek()` (a cold `get_snapshot()` would hang the
+endpoint for 2–10 minutes behind the 18 req/min KBS throttle), so the endpoint
+was correct and the cache was the gap — it was the only stage of the daily
+pipeline with no durable store. It now persists to
+`data/snapshots/picks_universe.json` and reloads on a cold cache. The file is a
+cache, not a source of truth: corrupt, missing or stale degrades to the existing
+empty-state banner and never raises; a stale one is loaded anyway and flagged
+through `freshness.errors`. See `MODIFICATION_LOG.md` 2026-08-23 (evening) A1.
+
+### 22.7 Docs layout — 2026-08-23
+Seven outdated documents were **deleted**, not archived (Tom's call: an archived
+wrong doc is still a wrong doc someone will read). `README.md`'s email command
+had been running a file deleted on 2026-06-18. What survives:
+
+```
+README.md · CLAUDE.md · ARCHITECTURE.md · MODIFICATION_LOG.md · AGENTS.md   ← root, entry points
+specs/                  ← one topic per file, referenced from 5 .py docstrings; untouched
+docs/reference/         ← ALGORITHM.md, GLOSSARY_VI.md
+docs/reviews/           ← the dated reviews (§21: dated records keep their names)
+```
+
+**No Python file moved.** `scripts/jobs/*.bat` invoke `main.py` from the repo
+root under Task Scheduler, and `MODIFICATION_LOG.md` 2026-07-19 already records
+one path move that left shortcuts pointing at a dead directory.

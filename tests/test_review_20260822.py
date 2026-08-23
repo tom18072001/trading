@@ -1,6 +1,6 @@
 """Regression guards for the 2026-08-22 code review.
 
-Each test pins one finding from CODE_REVIEW_2026-08-22.md so it cannot come
+Each test pins one finding from docs/reviews/CODE_REVIEW_2026-08-22.md so it cannot come
 back. Names carry the finding id.
 
 Pure/in-memory: no vnstock, no network, no LLM.

@@ -25,18 +25,21 @@ Freshness contract — is_valid == True iff:
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any, Callable, Iterable
 
 import pandas as pd
 
 from config import (
+    DATA_DIR,
     DATA_SOURCE,
     ICB_TO_SECTOR,
     MIN_DV_20D_VND,
@@ -212,6 +215,61 @@ class UniverseSnapshot:
     # when no sector has a BUY/SELL signal from the ranker.
     top_buys: list[PickEntry] = field(default_factory=list)
     top_sells: list[PickEntry] = field(default_factory=list)
+
+
+# =====================================================================
+#  Disk persistence (2026-08-23, review A1)
+# =====================================================================
+# The in-memory cache was the ONLY part of the daily pipeline with no durable
+# store, so every backend restart emptied the homepage until someone clicked
+# Refresh and waited out the 18 req/min KBS throttle. /api/insight/daily's
+# cache-only read is correct; the cache was what was missing.
+#
+# This file is a CACHE, not a source of truth: a missing, unreadable or
+# malformed file must degrade to the old behaviour (empty snapshot + the
+# existing freshness banner) and never raise into a request.
+
+SNAPSHOT_PATH = Path(DATA_DIR) / "snapshots" / "picks_universe.json"
+
+
+def _snapshot_to_json(snap: UniverseSnapshot) -> dict[str, Any]:
+    # by_sector holds the same TickerRow objects as `tickers`; store symbols
+    # only and re-point them on load, so the file does not double every row.
+    return {
+        "schema": 1,
+        "as_of": snap.as_of.isoformat() if snap.as_of else None,
+        "built_at": snap.built_at.isoformat() if snap.built_at else None,
+        "is_valid": snap.is_valid,
+        "tickers": {s: asdict(t) for s, t in snap.tickers.items()},
+        "by_sector": {c: [t.symbol for t in rows] for c, rows in snap.by_sector.items()},
+        "freshness": {**asdict(snap.freshness),
+                      "as_of": snap.freshness.as_of.isoformat() if snap.freshness.as_of else None,
+                      "built_at": snap.freshness.built_at.isoformat() if snap.freshness.built_at else None,
+                      "sectors_with_picks": sorted(snap.freshness.sectors_with_picks)},
+        "top_buys": [asdict(p) for p in snap.top_buys],
+        "top_sells": [asdict(p) for p in snap.top_sells],
+    }
+
+
+def _snapshot_from_json(d: dict[str, Any]) -> UniverseSnapshot:
+    """Rebuild a snapshot from `_snapshot_to_json` output. Raises on anything
+    unexpected — the caller treats any exception as "no snapshot on disk"."""
+    tickers = {s: TickerRow(**t) for s, t in d["tickers"].items()}
+    fr_raw = dict(d["freshness"])
+    fr_raw["as_of"] = date.fromisoformat(fr_raw["as_of"])
+    fr_raw["built_at"] = datetime.fromisoformat(fr_raw["built_at"])
+    fr_raw["sectors_with_picks"] = set(fr_raw.get("sectors_with_picks") or [])
+    return UniverseSnapshot(
+        as_of=date.fromisoformat(d["as_of"]),
+        built_at=datetime.fromisoformat(d["built_at"]),
+        tickers=tickers,
+        by_sector={c: [tickers[s] for s in syms if s in tickers]
+                   for c, syms in d["by_sector"].items()},
+        freshness=FreshnessReport(**fr_raw),
+        is_valid=bool(d.get("is_valid")),
+        top_buys=[PickEntry(**p) for p in d.get("top_buys") or []],
+        top_sells=[PickEntry(**p) for p in d.get("top_sells") or []],
+    )
 
 
 # =====================================================================
@@ -549,9 +607,58 @@ class PicksUniverseService:
         fan-out synchronously inside the request, hanging the page for
         2-10 min (observed 2026-07-19). Cold cache -> caller serves a
         stale/empty payload and the async /refresh runner does the build.
+
+        2026-08-23 (A1): on a cold cache this now falls back to the snapshot
+        persisted on disk, so a backend restart no longer empties the homepage.
+        Still non-blocking — a file read, never a KBS call.
         """
         with self._lock:
+            if self._cache is None:
+                self._cache = self._load_from_disk()
             return self._cache
+
+    # ---------- disk cache ----------
+
+    def _load_from_disk(self) -> UniverseSnapshot | None:
+        """Read SNAPSHOT_PATH, or None if it is absent/unreadable/malformed.
+
+        Never raises: the file is a cache. If it is stale relative to the
+        latest published signal date it is still returned, but flagged so the
+        UI's existing degraded-data banner explains why the picks are old.
+        """
+        if not SNAPSHOT_PATH.exists():
+            return None
+        try:
+            snap = _snapshot_from_json(json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8")))
+        except Exception as e:
+            log.warning("[picks-universe] ignoring unreadable snapshot %s: %s", SNAPSHOT_PATH, e)
+            return None
+        try:
+            latest = _latest_signal_date()
+        except Exception:
+            latest = None
+        if latest is not None and snap.as_of != latest:
+            snap.is_valid = False
+            snap.freshness.errors.append(
+                f"snapshot trên đĩa cũ (as_of {snap.as_of}, phiên mới nhất {latest}) "
+                "— bấm Refresh để build lại"
+            )
+        log.info("[picks-universe] loaded snapshot from disk: %d tickers, as_of=%s, valid=%s",
+                 len(snap.tickers), snap.as_of, snap.is_valid)
+        return snap
+
+    def _save_to_disk(self, snap: UniverseSnapshot) -> None:
+        """Best-effort persist. Write to a temp file and replace, so a crash
+        mid-write cannot leave a half-written file for the next boot to read."""
+        try:
+            SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
+            tmp = SNAPSHOT_PATH.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(_snapshot_to_json(snap), ensure_ascii=False), encoding="utf-8")
+            tmp.replace(SNAPSHOT_PATH)
+            log.info("[picks-universe] persisted snapshot (%d tickers) to %s",
+                     len(snap.tickers), SNAPSHOT_PATH)
+        except Exception as e:
+            log.warning("[picks-universe] could not persist snapshot: %s", e)
 
     def get_snapshot(self, force: bool = False,
                      on_progress: "Callable[[int, int, str], None] | None" = None
@@ -567,6 +674,11 @@ class PicksUniverseService:
         """
         with self._lock:
             latest = _latest_signal_date()
+            if not force and self._cache is None:
+                # Cold process, warm disk (2026-08-23, A1) — a snapshot built
+                # for the current session is worth exactly as much as one held
+                # in memory, and costs a file read instead of a KBS fan-out.
+                self._cache = self._load_from_disk()
             if (
                 not force
                 and self._cache is not None
@@ -599,6 +711,8 @@ class PicksUniverseService:
                     )
                     return self._cache
                 self._cache = snap
+                if snap.tickers:
+                    self._save_to_disk(snap)
                 return snap
             except BaseException as e:
                 log.exception("[picks-universe] build failed: %s", e)

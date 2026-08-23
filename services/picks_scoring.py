@@ -1,8 +1,8 @@
 """Shared ticker scoring + stop/target/validity helpers.
 
-Lifted from the two divergent call sites (generate_secv3.py::score_symbol,
-generate_secv3.py::compute_stop_target/is_valid_buy, and
-api/routers/insight.py::_is_valid_long_pick) into one module consumed by
+Lifted from the two divergent call sites (the report generator's score_symbol
+and compute_stop_target/is_valid_buy — then SecV3, now generate_report.py —
+and api/routers/insight.py::_is_valid_long_pick) into one module consumed by
 PicksUniverseService + both renderers (email report + Daily Insight).
 
 Invariants enforced:
@@ -39,7 +39,7 @@ MIN_RR          = 1.5     # reward/risk floor for a BUY
 
 
 def score_ticker(row: dict[str, Any]) -> int:
-    """Composite technical score (lifted from generate_secv3.score_symbol).
+    """Composite technical score (lifted from the report generator's score_symbol).
 
     Reads from a dict shaped like a TickerRow (price_to_sma_20, price_to_sma_50,
     macd_hist, adx_14, rsi_14, volume_ratio_20). Missing fields are treated as
@@ -98,7 +98,7 @@ def compute_stop_target_rr(
         return None, None, None, "no close"
 
     atr_pct = row.get("atr_pct") or 0     # already a percent (0..100) or a fraction?
-    # Normalize: generate_secv3 used atr_pct as percent (e.g. 2.5 for 2.5%); we
+    # Normalize: the report generator used atr_pct as percent (e.g. 2.5 for 2.5%); we
     # keep that convention here too. If callers pass a fraction (0.025), detect
     # and coerce.
     if 0 < atr_pct < 0.5:

@@ -178,7 +178,7 @@ export default function FlowMonitorPage() {
     Promise.all([
       flowApi.ranking(interval, flowZHot),
       flowApi.heat(interval, 60),
-      flowApi.series(interval, 400),
+      flowApi.series(interval),
       flowApi.freshness(),
     ])
       .then(([r, h, s, f]) => { setRanking(r.data); setHeat(h.data); setSeries(s.data); setFreshness(f.data); })

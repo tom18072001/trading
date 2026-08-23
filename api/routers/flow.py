@@ -32,10 +32,22 @@ def _load_daily(
 ) -> pd.DataFrame:
     sess = SessionLocal()
     try:
-        q = sess.query(SectorFlowDaily)
+        # `days` counts SESSIONS, not rows. This used to be `.limit(days * 20)`,
+        # a row cap that always exceeded the table (15 sectors x ~900 sessions),
+        # so every lookback value returned the identical 1319 points and the
+        # UI's lookback buttons did nothing (review 2026-08-23, A5). Bound the
+        # distinct dates first, then take every row on or after the oldest one.
+        dq = sess.query(SectorFlowDaily.date).distinct()
+        if sector:
+            dq = dq.filter(SectorFlowDaily.sector_code == sector)
+        dates = [d[0] for d in dq.order_by(SectorFlowDaily.date.desc()).limit(days).all()]
+        if not dates:
+            return pd.DataFrame()
+
+        q = sess.query(SectorFlowDaily).filter(SectorFlowDaily.date >= min(dates))
         if sector:
             q = q.filter(SectorFlowDaily.sector_code == sector)
-        rows = q.order_by(SectorFlowDaily.date.desc()).limit(days * 20).all()
+        rows = q.order_by(SectorFlowDaily.date.desc()).all()
     finally:
         sess.close()
 

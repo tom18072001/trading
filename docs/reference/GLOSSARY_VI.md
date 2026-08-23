@@ -1,9 +1,10 @@
-# Giải thích đầy đủ thuật ngữ trong báo cáo SecV4 (và SecV3 rollback)
+# Từ điển thuật ngữ — Báo cáo dòng tiền ngành (tiếng Việt)
 
 > **Nguồn:** VN Market — Sector Money-Flow & Rotation Briefing.
-> Báo cáo active là **SecV4** (`generate_secv4.py`, từ 2026-04-18). SecV3 giữ
-> làm rollback path (`CLAUDE.md` §2). Hai report dùng chung thuật ngữ bên dưới.
-> **Mục đích:** Từ điển tra cứu thuật ngữ cho báo cáo dòng tiền ngành thị trường VN.
+> **Mục đích:** Tra cứu thuật ngữ dùng trong báo cáo hằng ngày và trên web app.
+> Báo cáo do `generate_report.py` sinh ra (`report/daily_report_<ngày>.html`).
+> Định nghĩa mang tính giải thích; hợp đồng chính thức nằm ở `CLAUDE.md`
+> (§16 stealth, §18 các mục review) — khi hai bên lệch nhau, `CLAUDE.md` đúng.
 
 ---
 

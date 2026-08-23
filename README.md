@@ -49,13 +49,15 @@ python main.py --all                # init + ingest + regime + train + publish
 python main.py --backfill --years 5 # one-shot history backfill
 ```
 
-Email report (chỉ SecV4 là active, SecV3 giữ làm rollback):
+Email report (`generate_report.py` là generator duy nhất — SecV2/3/4/5 đã xóa):
 
 ```bash
-python generate_secv4.py                    # today, email + attachments
-python generate_secv4.py 2026-04-21          # specific date
-python generate_secv4.py --no-email          # chỉ render HTML/PDF
+python generate_report.py                    # today, email + attachments
+python generate_report.py 2026-08-21         # specific date
+python generate_report.py --no-email         # chỉ render HTML/PDF
 ```
+
+Output: `report/daily_report_<ngày>.html` + `.pdf`.
 
 API server + frontend dev:
 
@@ -81,11 +83,11 @@ Dry-run: thêm `-WhatIf`. Giữ legacy: `-KeepLegacy`.
 ## Testing
 
 ```bash
-python -m pytest tests/      # 78 tests — backend
+python -m pytest tests/      # 156 tests — backend
 cd frontend && npm test       # 13 tests — frontend (vitest)
 ```
 
-Xem `CLAUDE.md` §19 cho module coverage. Live integration (`POST /api/insight/refresh` — gọi vnstock + Claude Agent SDK thật) **không nằm trong pytest**, chạy tay sau khi đụng chạm các path đó.
+Xem `CLAUDE.md` §19 cho module coverage. Live integration (`POST /api/insight/refresh` — gọi vnstock KBS + LLM provider thật) **không nằm trong pytest**, chạy tay sau khi đụng chạm các path đó.
 
 ## Tài liệu
 
@@ -93,7 +95,8 @@ Xem `CLAUDE.md` §19 cho module coverage. Live integration (`POST /api/insight/r
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — layer / pipeline / dir tree
 - [`MODIFICATION_LOG.md`](./MODIFICATION_LOG.md) — append-only change log (mọi sửa đổi **phải** log ở đây)
 - [`specs/`](./specs/) — feature specs theo Phase 15 + cross-cutting (picks_universe, trader_agent, …)
-- [`docs/`](./docs/) — changelog, thuật toán chi tiết, notes nội bộ
+- [`docs/reference/`](./docs/reference/) — [thuật toán chi tiết](./docs/reference/ALGORITHM.md), [từ điển thuật ngữ VI](./docs/reference/GLOSSARY_VI.md)
+- [`docs/reviews/`](./docs/reviews/) — các bản review có ngày tháng (code review, optimization review)
 
 ## Nhóm ngành (15 sectors)
 

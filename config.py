@@ -158,7 +158,7 @@ TRADING_HALT = os.environ.get("TRADING_HALT", "0").lower() in ("1", "true", "yes
 # §18.2/12 — the VN cash market cannot short; shorts belong in a VN30F1M hedge.
 #   Defaults to TRUE so this review does not silently change the daily email.
 #   Set ALLOW_SHORT_SIGNALS=0 to stop publishing SELL, which is what §18.2/12
-#   actually calls for. See CODE_REVIEW_2026-08-22.md P1-5.
+#   actually calls for. See docs/reviews/CODE_REVIEW_2026-08-22.md P1-5.
 ALLOW_SHORT_SIGNALS = os.environ.get("ALLOW_SHORT_SIGNALS", "1").lower() in ("1", "true", "yes")
 
 # Regime states for HMM

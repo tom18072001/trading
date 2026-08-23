@@ -93,7 +93,7 @@ def test_ranker_persists_and_reloads(tmp_path, monkeypatch):
     # Per-day ranking panel. Lengthened from 40 to 150 dates on 2026-08-22:
     # fit() now purges a (horizon + 2) embargo between train and test, and 40
     # dates does not leave enough training history for a 20-day target to be
-    # honestly validated. See CODE_REVIEW_2026-08-22.md P0-6.
+    # honestly validated. See docs/reviews/CODE_REVIEW_2026-08-22.md P0-6.
     from datetime import date as _date, timedelta as _timedelta
     rows = []
     base = _date(2025, 1, 1)

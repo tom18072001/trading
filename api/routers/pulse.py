@@ -76,5 +76,12 @@ def pulse_alerts(alert_z: float = Query(1.5)):
 
 @router.get("/exposure")
 def pulse_exposure():
-    # No live portfolio feed yet — return empty; page renders empty-state.
+    """DEPRECATED (review 2026-08-23, A4) — a stub that has always returned [].
+
+    Flow Pulse called this instead of GET /api/sectors/risk/exposure, which is
+    backed by SectorRiskService.current_exposure() and returns real rows. The
+    page's exposure panel was blank for that reason alone. The frontend now
+    calls sectors_risk; this stays mounted only so nothing probing it 404s.
+    Delete it deliberately, not by accident.
+    """
     return {"rows": []}

@@ -5,6 +5,21 @@
 > change must be logged in `MODIFICATION_LOG.md`.
 
 ## CHANGELOG
+- **2026-08-23 — Frontend defect pass + docs purge + repo reorg.** Seven measured
+  frontend defects fixed (A1–A7 in `MODIFICATION_LOG.md` 2026-08-23). The one
+  that mattered: `PicksUniverseService` was the only stage of the daily pipeline
+  with **no durable store**, so every backend restart emptied the homepage until
+  someone clicked Refresh. It now persists to `data/snapshots/picks_universe.json`
+  and reloads on a cold cache; a corrupt file degrades to the existing empty-state
+  banner and never raises. Rotation Map repointed from `/api/rotation/*` (whose
+  pair detection is structurally empty, not threshold-limited) to the correct
+  `/api/sectors/handoff`. Flow Pulse exposure repointed from the `pulse.py` stub
+  to `sectors_risk.py`. Docs: 7 outdated files hard-deleted (two `.docx`
+  describing the retired 170-symbol system, `docs/DAILY_REPORT_AUTOMATION.md`,
+  `docs/CHANGELOG.md`, `report/template.html`, 5 orphan snapshots, a one-off
+  notifier), two rewritten and moved into `docs/reference/`, dated reviews moved
+  into `docs/reviews/`. 179 MB of untracked scratch removed. **No Python file
+  moved** — `scripts/jobs/*.bat` run from the repo root under Task Scheduler.
 - **2026-04-22 — Phase 16: legacy sweep + scheduler sync.** (a) Second recipient
   `hill.nguyen.1373@gmail.com` added to `REPORT_EMAIL_TO`. (b) Scheduled jobs
   rewritten from scratch: `main.py` now has one CLI flag per §8 job, matching
@@ -29,17 +44,21 @@
   news links). Default recipients grown to 3: `tka2001@gmail.com,
   anhchitruong18@gmail.com, hill.nguyen.1373@gmail.com`. Scheduler contract
   unchanged (same 17:00 slot in `scripts/jobs/job_sector_signal_publish.bat`;
-  bat now calls secv5). `generate_secv4.py` and `generate_secv3.py` stay on
-  disk as manual rollback paths (no scheduler hook). Helper:
-  `scripts/pause_secv3_secv4_email.ps1` evicts stale Task Scheduler entries
-  still invoking secv3/secv4. See `MODIFICATION_LOG.md` entry 2026-04-23.
+  bat now calls the new generator). The two older generators were left on disk
+  as manual rollback paths at the time — **both deleted 2026-06-18**, and the
+  generator itself was renamed `generate_report.py` on 2026-08-22 (`CLAUDE.md`
+  §21). To evict a stale Task Scheduler entry still pointing at a deleted
+  generator: `scripts/pause_legacy_email_task.ps1`. See `MODIFICATION_LOG.md`
+  entry 2026-04-23.
 - **2026-04-18 — Phase 12: OpenClaw retired, TraderAgent "Minh" in.** In-process
-  agent via `claude_agent_sdk` replaces the external OpenClaw worker for both the
-  Gmail briefing (via `generate_secv4.py`, now `generate_report.py`) and the
-  `/api/insight/refresh` endpoint. See `specs/trader_agent.md`.
+  agent replaces the external OpenClaw worker for both the Gmail briefing (the
+  report generator, today `generate_report.py`) and the `/api/insight/refresh`
+  endpoint. See `specs/trader_agent.md`. (The transport was `claude_agent_sdk`
+  then; it is plain HTTP to 9Router since 2026-07-20 — `CLAUDE.md` §14.)
 - **2026-04-17 — PicksUniverseService introduced.** One dynamic HOSE universe
   (from vnstock Listing) replaces the per-script reads of `_legacy_stock_*` in
-  `generate_secv3.py`, `generate_secv4.py`, and `api/routers/insight.py`.
+  the report generators of the day (SecV3/SecV4, both deleted 2026-06-18) and
+  `api/routers/insight.py`.
 - **2026-04-09 — Phase 15: Trader-First View Redesign (doc-first, intent only).**
   7 views → 5. Delete `/backtest` and `/regime`, merge `/ranking` into `/flow`. New
   `/rotation` (Sankey + pair table), `/stealth` (5-cond gate + Gantt), `/pulse`
@@ -55,7 +74,7 @@
   rewritten end-to-end. Legacy symbol-prediction stack archived (`_legacy_`
   prefix on tables, retained until 2-week shadow run completes). New primary key
   is `sector_code`, not `symbol`. See `CLAUDE.md` for the strategy spec.
-- Phase 1–7 history retained in `docs/CHANGELOG.md`.
+- Phase 1–7 history: `docs/CHANGELOG.md` was deleted 2026-08-23 (it had been frozen and self-declared LEGACY since 2026-04-08). `MODIFICATION_LOG.md` is the only change log.
 
 ---
 
@@ -72,8 +91,8 @@ vnstock (proxy basket OHLCV + foreign flow)
   → rotation_model_service (HMM regime + LightGBM ranker)
   → sector_signal_service → sector_signals
   → picks_universe_service (per-ticker BUY/ACCUMULATE from sector signals)
-  → trader_agent "Minh" (claude_agent_sdk, in-process)
-  → generate_report.py → Gmail briefing (was secv4 until 2026-04-23)
+  → trader_agent "Minh" (in-process; HTTP to 9Router, CLAUDE.md §14)
+  → generate_report.py → Gmail briefing (sole generator)
   → FastAPI /api/* → React feature-sliced frontend
 ```
 
@@ -90,7 +109,7 @@ vnstock (proxy basket OHLCV + foreign flow)
 | Backtest (retrofit) | Long/short sector basket simulation | `services/backtest_service.py` |
 | Risk (retrofit) | Sector VaR/exposure/drawdown + stop-loss sentinel | `services/risk_service.py` |
 | Trader Agent | In-process Claude agent ("Minh") authoring the daily narrative | `services/trader_agent.py`, `services/insight_refresh.py` |
-| Email Report | Daily unified-picks HTML + PDF → Gmail | `generate_report.py` (active; +`generate_secv4.py`, `generate_secv3.py` as rollback) |
+| Email Report | Daily unified-picks HTML + PDF → Gmail | `generate_report.py` (sole generator since 2026-06-18) |
 | API | FastAPI, 12 routers | `api/main.py`, `api/routers/*` |
 | Frontend | React 19 feature-sliced pages (Phase 15) | `frontend/src/features/*` |
 
@@ -110,9 +129,7 @@ Trading/
 ├── README.md                         # Quickstart
 ├── config.py                         # SECTORS, PROXY_BASKETS, MACRO_TICKERS, RISK_CONFIG
 ├── main.py                           # CLI entry (one flag per §8 job)
-├── generate_report.py                 # Daily SecV5 unified-picks email generator (active)
-├── generate_secv4.py                 # Rollback path (pre-union merge) — do not remove
-├── generate_secv3.py                 # Rollback path (§2) — do not remove
+├── generate_report.py                # Daily unified-picks email generator (the only one)
 │
 ├── data/                             # vnstock wrappers + macro fetchers
 ├── analysis/
@@ -121,7 +138,7 @@ Trading/
 │   ├── feature_engineering.py        # shared TA helpers
 │   ├── regime.py                     # Gaussian HMM regime classifier
 │   ├── stealth.py                    # §16.1 five-condition gate
-│   └── charts/                       # matplotlib renderers used by secv4/secv5
+│   └── charts/                       # matplotlib renderers used by generate_report.py
 │
 ├── models/
 │   ├── rotation_ranker.py            # LightGBM lambdarank
@@ -190,10 +207,12 @@ Trading/
 │       └── job_sector_risk_sentinel.bat
 │
 ├── specs/                            # one .md per Phase-15 feature + cross-cutting
-├── docs/                             # architecture docs, algorithm notes, changelog
+├── docs/
+│   ├── reference/                    # ALGORITHM.md, GLOSSARY_VI.md
+│   └── reviews/                      # dated code / optimization reviews
+├── utils/                            # clock.py (market-local today), vnstock_gate
 ├── report/                           # rendered HTML / PDF / templates; `jobs/` sub-logs
-├── tests/                            # 78 pytest cases (§19)
-└── _trash_20260422/                  # quarantined legacy files — safe to `rmdir /s`
+└── tests/                            # 156 pytest cases (§19)
 ```
 
 ---
@@ -371,7 +390,7 @@ the email report) and for backward-compat.
 | `pulse.py` | `GET /api/pulse/tape` (live 15m flow) |
 | `insight.py` | `GET /api/insight/daily`, `POST /api/insight/refresh` (async, returns `run_id`), `GET /api/insight/refresh/status` |
 
-**Sector APIs** (used by scheduler, `generate_report.py` / `generate_secv4.py`, legacy integrations):
+**Sector APIs** (used by scheduler, `generate_report.py`, legacy integrations):
 | Router | Key endpoints |
 |---|---|
 | `sectors_flow.py` | `GET /api/sectors/flow`, `GET /api/sectors/{code}/flow` |
@@ -418,7 +437,7 @@ New backend routers for Phase 15: `routers/flow.py`, `routers/rotation.py`,
 4. ✅ Backfill 5y `sector_flow_daily`.
 5. ✅ Features + v0 ranker + HMM.
 6. ✅ Backtest + risk retrofit.
-7. ✅ **OpenClaw retired (2026-04-18)** — replaced by in-process `services/trader_agent.py` via `claude_agent_sdk`. Gmail template = `generate_report.py` (active since 2026-04-23; union-merge of Daily Insight + ranker picks). `generate_secv4.py` and `generate_secv3.py` retained as rollback paths.
+7. ✅ **OpenClaw retired (2026-04-18)** — replaced by in-process `services/trader_agent.py` (HTTP to 9Router since 2026-07-20, see `CLAUDE.md` §14). Gmail template = `generate_report.py` (sole generator; secv3/secv4 deleted 2026-06-18, secv5 renamed 2026-08-22).
 8. ✅ **Phase 15 frontend** — feature-sliced pages shipped. Old `/backtest` and `/regime` scheduled for deletion after Phase-15 features prove out.
 8.5. ✅ **PicksUniverseService (2026-04-17)** — single dynamic HOSE universe; retired `_legacy_stock_*` reads.
 9. ⏳ **Shadow-run window** — still active until the 2-week comparison completes.

@@ -71,6 +71,8 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Report scripts are procedural top-to-bottom: imports land after the DB is
 # opened, and broad excepts keep a scheduled job from dying mid-render.
-"generate_secv5.py" = ["E402", "S110", "S603", "S607"]
+# Renamed from generate_secv5.py on 2026-08-22 (CLAUDE.md §21); this key kept
+# the old name, so the block had been inert ever since.
+"generate_report.py" = ["E402", "S110", "S603", "S607"]
 "scripts/*" = ["S101", "S603", "S607"]
 "tests/*" = ["S105", "S106", "ARG"]

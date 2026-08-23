@@ -1,16 +1,16 @@
 ﻿# ============================================================
-# register_secv5_task.ps1 -- register (or refresh) the single
-# Windows Task Scheduler task that runs the SecV5 daily email job.
+# register_report_task.ps1 -- register (or refresh) the single
+# Windows Task Scheduler task that runs the daily email job.
 #
 # Task: \SectorFlow\SectorFlow_sector_signal_publish
 # Runs: Mon-Fri at 17:00 local (Asia/Ho_Chi_Minh)
 # Calls: scripts\jobs\job_sector_signal_publish.bat
 #        -> main.py --publish  (signals)
-#        -> generate_secv5.py  (unified-picks email)
+#        -> generate_report.py (unified-picks email)
 #
 # Why a separate script? cleanup_scheduled_tasks.ps1 re-registers
 # ALL 8 canonical Section-8 jobs in one pass -- useful after a big
-# sync, but too blunt if you only want to confirm the SecV5 job is
+# sync, but too blunt if you only want to confirm the report job is
 # live. This helper touches ONE task, is idempotent, and prints the
 # task's next run time so you can see it scheduled.
 #
@@ -20,8 +20,8 @@
 # ASCII.
 #
 # Usage (elevated PowerShell):
-#     powershell -ExecutionPolicy Bypass -File scripts\register_secv5_task.ps1
-#     powershell -ExecutionPolicy Bypass -File scripts\register_secv5_task.ps1 -WhatIf
+#     powershell -ExecutionPolicy Bypass -File scripts\register_report_task.ps1
+#     powershell -ExecutionPolicy Bypass -File scripts\register_report_task.ps1 -WhatIf
 #
 # After running: open Task Scheduler -> Task Scheduler Library ->
 # SectorFlow -> you should see SectorFlow_sector_signal_publish.
@@ -39,7 +39,7 @@ $TaskFolder = "\SectorFlow\"
 $TaskName   = "SectorFlow_sector_signal_publish"
 $BatPath    = Join-Path $TradingRoot "scripts\jobs\job_sector_signal_publish.bat"
 
-Write-Host "=== SecV5 daily job registration ===" -ForegroundColor Cyan
+Write-Host "=== Daily report job registration ===" -ForegroundColor Cyan
 Write-Host "Trading root : $TradingRoot"
 Write-Host "Task path    : $TaskFolder$TaskName"
 Write-Host "Bat file     : $BatPath"
@@ -53,17 +53,20 @@ if (-not (Test-Path $BatPath)) {
     exit 1
 }
 
-# Verify the bat actually calls generate_secv5.py -- guards against
-# a stale bat being registered by mistake.
+# Verify the bat actually calls generate_report.py -- guards against
+# a stale bat being registered by mistake. (This guard tested for
+# 'generate_secv5.py' until 2026-08-23; that file was renamed on
+# 2026-08-22, so the script had been exiting 1 on every run since.
+# See CLAUDE.md Section 21.)
 $batText = Get-Content $BatPath -Raw
-if ($batText -notmatch 'generate_secv5\.py') {
-    Write-Host "FATAL: job_sector_signal_publish.bat does NOT reference generate_secv5.py." -ForegroundColor Red
-    Write-Host "The bat must contain a line invoking generate_secv5.py." -ForegroundColor Red
+if ($batText -notmatch 'generate_report\.py') {
+    Write-Host "FATAL: job_sector_signal_publish.bat does NOT reference generate_report.py." -ForegroundColor Red
+    Write-Host "The bat must contain a line invoking generate_report.py." -ForegroundColor Red
     Write-Host "Current contents:" -ForegroundColor Red
     Write-Host $batText -ForegroundColor DarkGray
     exit 1
 }
-Write-Host "[check] bat references generate_secv5.py -- OK" -ForegroundColor Green
+Write-Host "[check] bat references generate_report.py -- OK" -ForegroundColor Green
 
 # Unregister any existing task at the same path so -Force (below)
 # gives a clean re-register regardless of prior state.
@@ -107,7 +110,7 @@ if ($PSCmdlet.ShouldProcess("$TaskFolder$TaskName", "Register")) {
         -Trigger $trigger `
         -Principal $principal `
         -Settings $settings `
-        -Description ("SecV5 daily unified-picks email. Runs at {0} Mon-Fri via job_sector_signal_publish.bat -> generate_secv5.py. See CLAUDE.md Section 8." -f $TaskTime) `
+        -Description ("Daily unified-picks email. Runs at {0} Mon-Fri via job_sector_signal_publish.bat -> generate_report.py. See CLAUDE.md Section 8." -f $TaskTime) `
         -Force | Out-Null
 }
 
@@ -140,5 +143,5 @@ Write-Host "  Start-ScheduledTask -TaskPath '$TaskFolder' -TaskName '$TaskName'"
 Write-Host ""
 Write-Host "To preview without sending email, run by hand instead:" -ForegroundColor DarkYellow
 Write-Host "  cd $TradingRoot"
-Write-Host "  python generate_secv5.py --no-email"
+Write-Host "  python generate_report.py --no-email"
 Write-Host ""

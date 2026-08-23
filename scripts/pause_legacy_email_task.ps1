@@ -1,13 +1,19 @@
 ﻿# ============================================================
-# pause_secv3_secv4_email.ps1 -- retire any scheduled task that
-# still sends the SecV3 / SecV4 daily briefing email.
+# pause_legacy_email_task.ps1 -- retire any scheduled task that
+# still sends the daily briefing email from a DELETED generator.
+#
+# The generators this hunts for are gone from the repo (SecV2
+# 2026-04-20, SecV3 + SecV4 2026-06-18) and the survivor was renamed
+# generate_report.py on 2026-08-22. The patterns below stay because
+# Task Scheduler entries outlive the files they point at -- that is
+# exactly what this script exists to clean up.
 #
 # Context (2026-04-23): Tom flipped the 17:00 sector_signal_publish
-# job over to generate_secv5.py. The canonical Section-8 task
+# job over to the current generator. The canonical Section-8 task
 # (SectorFlow_sector_signal_publish) is already updated by
 # scripts/cleanup_scheduled_tasks.ps1 because it points at the bat
-# file, which now calls secv5. This helper handles the *other*
-# historical tasks that may still be lurking:
+# file. This helper handles the *other* historical tasks that may
+# still be lurking:
 #
 #   * any scheduled task whose Action invokes generate_secv3.py
 #   * any scheduled task whose Action invokes generate_secv4.py
@@ -23,8 +29,8 @@
 # were causing parser errors. Keep it ASCII.
 #
 # Usage (elevated PowerShell):
-#     powershell -ExecutionPolicy Bypass -File scripts\pause_secv3_secv4_email.ps1
-#     powershell -ExecutionPolicy Bypass -File scripts\pause_secv3_secv4_email.ps1 -WhatIf
+#     powershell -ExecutionPolicy Bypass -File scripts\pause_legacy_email_task.ps1
+#     powershell -ExecutionPolicy Bypass -File scripts\pause_legacy_email_task.ps1 -WhatIf
 # ============================================================
 
 [CmdletBinding(SupportsShouldProcess = $true)]

@@ -1,6 +1,6 @@
 # Algorithm Documentation — VN Sector Money-Flow & Rotation
 
-Last updated: 2026-04-22 (Phase 16 cleanup).
+Last updated: 2026-08-23 (doc reorg + agent transport correction).
 
 > Authoritative spec: `CLAUDE.md` (APPROVED 2026-04-08). When this document
 > and `CLAUDE.md` disagree, `CLAUDE.md` wins. This file is a walkthrough
@@ -18,8 +18,8 @@ The system tracks **money flow across 15 VN sectors** and predicts the next
 flow for each sector, rolls up 12 flow features, classifies the macro regime
 (Gaussian HMM), ranks sectors with a LightGBM lambdarank on the 20-day
 forward return, and publishes signals (`ACCUMULATE / BUY / HOLD / TRIM /
-SELL`) plus a Gmail briefing written by the in-process TraderAgent "Minh"
-(`claude_agent_sdk`). Per-ticker BUY/SELL cards in the briefing come from
+SELL`) plus a Gmail briefing written by the in-process TraderAgent "Minh".
+Per-ticker BUY/SELL cards in the briefing come from
 `services.picks_universe_service` (dynamic HOSE universe). The edge thesis is
 **stealth accumulation** — buy at the root, ~2-4 weeks before public news
 catches up (`CLAUDE.md` §16).
@@ -53,10 +53,10 @@ catches up (`CLAUDE.md` §16).
    sector_signals  +  picks_universe_service
                       │
                       ▼
-             trader_agent (Minh, claude_agent_sdk)
+             trader_agent (Minh, HTTP -> 9Router)
                       │
                       ▼
-        generate_secv4.py → Gmail (HTML + PDF)
+        generate_report.py → Gmail (HTML + PDF)
 ```
 
 Each arrow is a boundary between two services — `CLAUDE.md` §6/§8 owns the
@@ -200,8 +200,7 @@ HOLD / TRIM / SELL continue.
 
 ## 8. Per-ticker picks (2026-04-17 onward)
 
-`generate_secv4.py` (and the rollback `generate_secv3.py`) surface
-**per-ticker BUY / ACCUMULATE** cards in the briefing. These come exclusively
+`generate_report.py` surfaces **per-ticker BUY / ACCUMULATE** cards in the briefing. These come exclusively
 from `services.picks_universe_service.PicksUniverseService` — a dynamic HOSE
 universe sourced from vnstock Listing, scored by `services.picks_scoring`.
 
@@ -211,31 +210,38 @@ the 2-week shadow window and drop in migration 10.
 
 ## 9. TraderAgent "Minh"
 
-`services.trader_agent.TraderAgent` runs **in-process** via `claude_agent_sdk`
-(uses Tom's Claude Code subscription, no separate API key). Invoked from
+`services.trader_agent.TraderAgent` runs **in-process**. Since 2026-07-20 the
+default provider is `local` — plain HTTP to an OpenAI-compatible
+`/chat/completions` endpoint, no `claude_agent_sdk`. "Local" names the
+transport, not where the model runs: it points at 9Router
+(`LOCAL_BASE_URL`, default `http://localhost:20128/v1`), a local router
+fronting hosted Claude models, with `LOCAL_MODEL` default `claude-opus-5`.
+Alternatives via `AGENT_PROVIDER`: `glm` or `claude`. See `CLAUDE.md` §14.
+Invoked from
 `POST /api/insight/refresh`. Inputs: today's sector rankings, stealth
 events, regime label, macro snapshot, picks universe. Output: a
 Vietnamese-language briefing rendered inline on the Daily Insight page and
 embedded at the top of the email.
 
-When the Claude CLI is unavailable (e.g., sandbox, offline), the generator
-falls back to the algorithmic narrative and logs `[trader-agent] query
-failed`. This is not a production regression — the sector tables, cards, and
-PDF are unaffected (`CLAUDE.md` §19 and `docs/DAILY_REPORT_AUTOMATION.md`).
+When the configured provider is unreachable, the generator falls back to the
+algorithmic narrative and logs `[trader-agent] query failed`. This is not a
+production regression — the sector tables, cards and PDF are unaffected
+(`CLAUDE.md` §19).
 
 ## 10. Email delivery
 
-`generate_secv4.py` renders:
+`generate_report.py` renders:
 
-- `report/secv4_<DATE>.html` — inline-styled HTML with embedded charts.
-- `report/secv4_<DATE>.pdf` — WeasyPrint render of the same HTML.
+- `report/daily_report_<DATE>.html` — inline-styled HTML with embedded charts.
+- `report/daily_report_<DATE>.pdf` — WeasyPrint render of the same HTML.
 
 SMTP: Gmail App Password over SSL:465. `REPORT_EMAIL_TO` is comma-separated;
 current production value = `anhchitruong18@gmail.com,hill.nguyen.1373@gmail.com`.
 Both addresses appear in the `To:` header (not BCC).
 
-See `docs/DAILY_REPORT_AUTOMATION.md` for the scheduled-task wrapper,
-log paths, and manual re-send procedure.
+The scheduled-task wrapper is `scripts/jobs/job_sector_signal_publish.bat`;
+register it with `scripts/register_report_task.ps1`. Job logs land in
+`report/jobs/`.
 
 ## 11. Backtest contract
 

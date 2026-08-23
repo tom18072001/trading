@@ -1,8 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
-import { rotationApi } from '../api/client';
-import type { Interval } from '../api/client';
+import { sectorsApi } from '../api/client';
+import type { HandoffRow } from '../api/client';
 
-const INTERVALS: Interval[] = ['1d', '1w', '2w', '1m', '1q'];
+// 2026-08-23: this page used to call /api/rotation/{pairs,sankey}, which
+// returned an empty pair list at every threshold — see the module docstring in
+// api/routers/rotation.py for why that is structural, not a tuning problem.
+// It now reads /api/sectors/handoff, which computes the same rotation from
+// flow_z20 with each side clipped at zero independently.
+//
+// The controls change with the data source: the old "interval" + "min Δz"
+// meant nothing to the handoff endpoint. `window` is the Δ lookback in
+// sessions; `lookback_days` is how much history to scan.
+const WINDOWS = [3, 5, 10, 20];
+const LOOKBACKS = [30, 60, 120];
 
 const SECTOR_COLORS: Record<string, string> = {
   CHEM: '#33D49A', REAL: '#46C9E6', OIL: '#7FB2FF', POWER: '#B98BFF', INSUR: '#F5B13D',
@@ -17,9 +27,37 @@ const STATUS_CHIP: Record<string, string> = {
 
 type Pair = {
   rank: number; from: string; to: string;
-  delta_share_source: number; delta_share_target: number;
-  corr: number | null; weight: number; action: string;
+  weight: number;       // summed handoff_score over the window
+  sessions: number;     // how many sessions this pair showed up in
+  lastDate: string;     // most recent session it appeared
+  action: string;
 };
+
+// The endpoint returns one row per (date, from, to). A pair that appears on
+// many sessions is a persistent rotation; one that appears once is noise. Sum
+// the score and count the sessions, then label:
+//   CONFIRMED = seen on >=3 sessions   EMERGING = 2   FADING = 1
+function aggregate(rows: HandoffRow[]): Pair[] {
+  const acc = new Map<string, { from: string; to: string; weight: number; sessions: number; lastDate: string }>();
+  for (const r of rows) {
+    const k = `${r.from_sector}->${r.to_sector}`;
+    const cur = acc.get(k);
+    if (cur) {
+      cur.weight += r.handoff_score;
+      cur.sessions += 1;
+      if (r.date > cur.lastDate) cur.lastDate = r.date;
+    } else {
+      acc.set(k, { from: r.from_sector, to: r.to_sector, weight: r.handoff_score, sessions: 1, lastDate: r.date });
+    }
+  }
+  return [...acc.values()]
+    .sort((a, b) => b.weight - a.weight)
+    .map((p, i) => ({
+      ...p,
+      rank: i + 1,
+      action: p.sessions >= 3 ? 'CONFIRMED' : p.sessions === 2 ? 'EMERGING' : 'FADING',
+    }));
+}
 
 // ---- SVG Sankey built from pair weights ----
 function Sankey({ pairs, selected, onSelect }: {
@@ -69,11 +107,13 @@ function Sankey({ pairs, selected, onSelect }: {
   }, [pairs]);
 
   if (!model) {
-    return <div className="rounded-2xl bg-panel border border-line p-6 text-center text-lo text-sm">Chưa có pair nào vượt ngưỡng.</div>;
+    return <div className="rounded-2xl bg-panel border border-line p-6 text-center text-lo text-sm">Chưa có cặp luân chuyển nào trong khoảng này.</div>;
   }
-  const deltaShare = (code: string, pairsArr: Pair[], side: 'src' | 'tgt') => {
-    const row = pairsArr.find((p) => (side === 'src' ? p.from : p.to) === code);
-    return side === 'src' ? row?.delta_share_source : row?.delta_share_target;
+  // Node label = that sector's share of total handoff weight on its side.
+  const share = (code: string, side: 'src' | 'tgt') => {
+    const wmap = side === 'src' ? model.srcW : model.tgtW;
+    const total = [...wmap.values()].reduce((a, b) => a + b, 0) || 1;
+    return (wmap.get(code) || 0) / total;
   };
 
   return (
@@ -90,25 +130,25 @@ function Sankey({ pairs, selected, onSelect }: {
           );
         })}
         {model.sources.map((s) => {
-          const p = model.sPos.get(s)!; const ds = deltaShare(s, pairs, 'src');
+          const p = model.sPos.get(s)!;
           return (
             <g key={`s-${s}`}>
               <rect x={SX} y={p.y0} width={NODE_W} height={p.y1 - p.y0} rx="3" fill={colorFor(s)} />
               <text x={SX - 8} y={(p.y0 + p.y1) / 2} textAnchor="end" dominantBaseline="middle"
                 fontSize="12" fontFamily="JetBrains Mono" fill="#EAF0F7">
-                {s} <tspan fill="#FF5D73">{ds != null ? `${(ds * 100).toFixed(1)}%` : ''}</tspan>
+                {s} <tspan fill="#FF5D73">{`${(share(s, 'src') * 100).toFixed(0)}%`}</tspan>
               </text>
             </g>
           );
         })}
         {model.targets.map((t) => {
-          const p = model.tPos.get(t)!; const ds = deltaShare(t, pairs, 'tgt');
+          const p = model.tPos.get(t)!;
           return (
             <g key={`t-${t}`}>
               <rect x={TX} y={p.y0} width={NODE_W} height={p.y1 - p.y0} rx="3" fill={colorFor(t)} />
               <text x={TX + NODE_W + 8} y={(p.y0 + p.y1) / 2} dominantBaseline="middle"
                 fontSize="12" fontFamily="JetBrains Mono" fill="#EAF0F7">
-                {t} <tspan fill="#33D49A">{ds != null ? `+${(ds * 100).toFixed(1)}%` : ''}</tspan>
+                {t} <tspan fill="#33D49A">{`${(share(t, 'tgt') * 100).toFixed(0)}%`}</tspan>
               </text>
             </g>
           );
@@ -123,21 +163,25 @@ function Sankey({ pairs, selected, onSelect }: {
 }
 
 export default function RotationMapPage() {
-  const [interval, setInterval] = useState<Interval>('1w');
-  const [threshold, setThreshold] = useState(1.5);
-  const [pairs, setPairs] = useState<any>(null);
-  const [sankey, setSankey] = useState<any>(null);
+  const [window_, setWindow] = useState(5);
+  const [lookback, setLookback] = useState(60);
+  const [raw, setRaw] = useState<HandoffRow[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     setErr(null);
-    Promise.all([rotationApi.pairs(interval, threshold), rotationApi.sankey(interval, threshold)])
-      .then(([p, s]) => { setPairs(p.data); setSankey(s.data); })
+    sectorsApi.handoff(lookback, window_, 5)
+      .then((r) => setRaw(r.data.handoffs ?? []))
       .catch((e) => setErr(String(e?.message || e)));
-  }, [interval, threshold]);
+  }, [lookback, window_]);
 
-  const rows: Pair[] = pairs?.rows ?? [];
+  const rows: Pair[] = useMemo(() => aggregate(raw), [raw]);
+  const span = useMemo(() => {
+    if (!raw.length) return { start: '—', end: '—' };
+    const ds = raw.map((r) => r.date).sort();
+    return { start: ds[0], end: ds[ds.length - 1] };
+  }, [raw]);
 
   return (
     <div className="px-8 py-8 max-w-[1240px] mx-auto space-y-[22px]">
@@ -147,24 +191,30 @@ export default function RotationMapPage() {
           <p className="text-[13px] text-mid mt-0.5">Tiền dịch chuyển TỪ ngành nào SANG ngành nào</p>
         </div>
         <div className="text-[11px] text-lo font-mono self-center">
-          {sankey?.window?.start || '—'} → {sankey?.window?.end || '—'}
+          {span.start} → {span.end}
         </div>
       </header>
 
       <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-panel border border-line p-3">
-        <span className="section-label">Interval</span>
+        <span className="section-label">Cửa sổ Δ</span>
         <div className="flex rounded-lg bg-panel2 border border-line p-0.5">
-          {INTERVALS.map((i) => (
-            <button key={i} onClick={() => setInterval(i)}
-              className={`px-3 py-1 rounded-md text-[12px] font-medium transition ${interval === i ? 'bg-raise text-hi shadow-sm' : 'text-mid hover:text-hi'}`}>
-              {i.toUpperCase()}
+          {WINDOWS.map((w) => (
+            <button key={w} onClick={() => setWindow(w)}
+              className={`px-3 py-1 rounded-md text-[12px] font-medium transition ${window_ === w ? 'bg-raise text-hi shadow-sm' : 'text-mid hover:text-hi'}`}>
+              {w}p
             </button>
           ))}
         </div>
-        <label className="ml-2 text-[12px] text-mid flex items-center gap-2">min Δz
-          <input type="number" step={0.1} value={threshold} onChange={(e) => setThreshold(parseFloat(e.target.value) || 0)}
-            className="bg-panel2 border border-line rounded-md px-2 py-1 w-16 text-[12px] text-hi font-mono" />
-        </label>
+        <span className="section-label ml-2">Lịch sử</span>
+        <div className="flex rounded-lg bg-panel2 border border-line p-0.5">
+          {LOOKBACKS.map((l) => (
+            <button key={l} onClick={() => setLookback(l)}
+              className={`px-3 py-1 rounded-md text-[12px] font-medium transition ${lookback === l ? 'bg-raise text-hi shadow-sm' : 'text-mid hover:text-hi'}`}>
+              {l}p
+            </button>
+          ))}
+        </div>
+        <span className="ml-auto text-[11px] text-lo font-mono">{rows.length} cặp · {raw.length} dòng</span>
       </div>
 
       {err && <div className="p-3 bg-sell/[0.12] border border-sell/40 text-sell rounded-xl text-sm">{err}</div>}
@@ -178,10 +228,9 @@ export default function RotationMapPage() {
             <tr>
               <th className="p-2.5 text-left">#</th>
               <th className="p-2.5 text-left">From → To</th>
-              <th className="p-2.5 text-right">Δz nguồn</th>
-              <th className="p-2.5 text-right">Δz đích</th>
-              <th className="p-2.5 text-right">Corr</th>
-              <th className="p-2.5 text-right">Weight</th>
+              <th className="p-2.5 text-right">Số phiên</th>
+              <th className="p-2.5 text-right">Phiên gần nhất</th>
+              <th className="p-2.5 text-right">Handoff score</th>
               <th className="p-2.5 text-left">Trạng thái</th>
             </tr>
           </thead>
@@ -200,15 +249,14 @@ export default function RotationMapPage() {
                     <span className="inline-block w-2 h-2 rounded-full mr-1.5 align-middle" style={{ background: colorFor(r.to) }} />
                     <span className="font-semibold text-hi">{r.to}</span>
                   </td>
-                  <td className="p-2.5 text-right font-mono text-sell">{r.delta_share_source.toFixed(3)}</td>
-                  <td className="p-2.5 text-right font-mono text-buy">+{r.delta_share_target.toFixed(3)}</td>
-                  <td className="p-2.5 text-right font-mono text-mid">{r.corr != null ? r.corr.toFixed(2) : '—'}</td>
-                  <td className="p-2.5 text-right font-mono text-hi">{r.weight.toFixed(3)}</td>
+                  <td className="p-2.5 text-right font-mono text-mid">{r.sessions}</td>
+                  <td className="p-2.5 text-right font-mono text-lo">{r.lastDate}</td>
+                  <td className="p-2.5 text-right font-mono text-hi">{r.weight.toFixed(2)}</td>
                   <td className="p-2.5"><span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold ${STATUS_CHIP[r.action] || 'bg-raise text-mid'}`}>{r.action}</span></td>
                 </tr>
               );
             }) : (
-              <tr><td colSpan={7} className="p-6 text-center text-lo">Chưa có pair nào vượt ngưỡng.</td></tr>
+              <tr><td colSpan={6} className="p-6 text-center text-lo">Chưa có cặp luân chuyển nào trong khoảng này.</td></tr>
             )}
           </tbody>
         </table>

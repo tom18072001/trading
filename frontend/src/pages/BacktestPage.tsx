@@ -87,7 +87,17 @@ export default function BacktestPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Metric label="Total return" value={`${result.total_return_pct.toFixed(2)}%`} positive={result.total_return_pct >= 0} />
             <Metric label="Benchmark" value={`${result.benchmark_return_pct.toFixed(2)}%`} />
-            <Metric label="Sharpe" value={result.sharpe_ratio.toFixed(2)} positive={result.sharpe_ratio >= 1} />
+            {/* 2026-08-23 (review A7): Sharpe was rendered bare. CLAUDE.md
+                §18.2/7-10 lists T+2 settlement, broker fees, the 0.1% sell tax
+                and the ±7% price band as open [BLOCKER]s — none is modelled, so
+                this number is gross, not net. |Sharpe| > 5 is not a great
+                strategy, it is a data problem; say so rather than print it. */}
+            <Metric
+              label="Sharpe (gộp)"
+              value={Math.abs(result.sharpe_ratio) > 5 ? 'n/a' : result.sharpe_ratio.toFixed(2)}
+              positive={Math.abs(result.sharpe_ratio) > 5 ? undefined : result.sharpe_ratio >= 1}
+              note={Math.abs(result.sharpe_ratio) > 5 ? 'kiểm tra dữ liệu' : 'chưa gồm T+2, phí, thuế, price-band'}
+            />
             <Metric label="Max DD" value={`${result.max_drawdown_pct.toFixed(2)}%`} positive={result.max_drawdown_pct > -15} />
             <Metric label="Trades" value={String(result.total_trades)} />
             <Metric label="Win rate" value={`${(result.win_rate * 100).toFixed(0)}%`} positive={result.win_rate >= 0.5} />
@@ -115,7 +125,7 @@ export default function BacktestPage() {
   );
 }
 
-function Metric({ label, value, positive }: { label: string; value: string; positive?: boolean }) {
+function Metric({ label, value, positive, note }: { label: string; value: string; positive?: boolean; note?: string }) {
   const color =
     positive === undefined
       ? 'text-slate-200'
@@ -126,6 +136,7 @@ function Metric({ label, value, positive }: { label: string; value: string; posi
     <div className="rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3">
       <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
       <div className={`text-xl font-bold tabular-nums mt-1 ${color}`}>{value}</div>
+      {note && <div className="text-[10px] text-slate-500 mt-1 leading-tight">{note}</div>}
     </div>
   );
 }

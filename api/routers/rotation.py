@@ -3,10 +3,23 @@
 Minimal first-cut implementing specs/rotation-map.md §4. Pair detection
 lives inline here until the codebase grows large enough to warrant a
 services/rotation/ package.
+
+!! DEFECT — no longer consumed by the frontend (review 2026-08-23, A3) !!
+`_detect_pairs` returns the cartesian product of `sources` x `targets`, but on
+the live panel `delta` comes out one-sided: 10 nodes, all side='target', zero
+sources. The product is therefore empty at EVERY threshold — lowering it cannot
+help, because it widens both sets from the same one-sided `delta`. `_shares()`
+divides a signed numerator by `abs().sum()`, which is what lands it one-sided.
+
+The Rotation Map page now reads GET /api/sectors/handoff, which computes the
+same thing correctly via analysis.flow_handoff.compute_handoff():
+    handoff[A->B] = max(0, -dz_A) * max(0, +dz_B)
+The clip-at-zero on each side independently is what keeps both sides non-empty.
+
+Left mounted so nothing that probes it breaks. Fix or delete deliberately.
 """
 from __future__ import annotations
 
-from typing import Optional
 import math
 
 import pandas as pd

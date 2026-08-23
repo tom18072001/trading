@@ -14,6 +14,184 @@
 
 ---
 
+## 2026-08-23 (evening) — Frontend defect pass (A1–A8), outdated docs deleted, repo reorganised by topic
+- Author: Claude Code on behalf of Tom
+- Reason: a business-sponsor review of the running web app produced seven
+  defects that are **measurable against the live server**, not opinions. Tom
+  approved fixing them, deleting the outdated docs outright ("an archived wrong
+  doc is still a wrong doc someone will read") and regrouping files by topic —
+  **docs and scratch only, no Python file moves**, because `scripts/jobs/*.bat`
+  invoke `main.py` from the repo root under Windows Task Scheduler and
+  `MODIFICATION_LOG.md` 2026-07-19 already records one path move that left
+  shortcuts dangling.
+
+### A1. The homepage was empty after every backend restart — the real one
+`PicksUniverseService` held its snapshot **only in memory**
+(`self._cache: UniverseSnapshot | None = None`); nothing in that module wrote to
+disk. `api/routers/insight.py` calls `.peek()`, which is a deliberate cache-only
+read — a cold-cache `get_snapshot()` would hang `/daily` for 2–10 minutes behind
+the 18 req/min KBS throttle. So the endpoint was right and the cache was wrong:
+it was the only stage of the daily pipeline with no durable store, and every
+restart blanked the page until a human clicked Refresh.
+
+- `services/picks_universe_service.py` now persists each non-empty build to
+  `data/snapshots/picks_universe.json` (atomic `tmp.replace(target)`) and
+  reloads it when the cache is cold, in both `peek()` and `get_snapshot()`.
+- `by_sector` stores symbols and re-points them at the `tickers` dict on load,
+  so identity is preserved and the file does not double every row.
+- A snapshot older than the newest `sector_flow_daily` date is **loaded anyway**
+  and flagged through the existing `freshness.errors` banner — not dropped.
+- The file is a cache, not a source of truth: missing, unreadable or malformed
+  degrades to today's behaviour (empty + banner) and **never raises**.
+- Proven cold: build → kill the process → restart → `/api/insight/daily`
+  returned `picks: 10, is_valid: True, errors: []` with no KBS call. Corrupted
+  the file → HTTP 200, `picks: 0`, banner, one warning line in the log.
+  Restored → `picks: 10`.
+
+### A2. `lookback=400` regression that §22.3 claimed was already fixed
+`CLAUDE.md` §22.3 recorded lowering the client lookback to 120. It was applied
+to the `api/client.ts` default and to `SectorDetailPage`, but
+`FlowMonitorPage.tsx` passed an explicit `400` that overrode it, so the route
+still shipped the old payload. Measured 1,000,870 B / 2.72 s → 304,682 B / 1.61 s.
+`SectorDetailPage`'s `useState(400)` → `120` to match.
+
+### A3. Rotation Map was structurally incapable of showing data
+`api/routers/rotation.py` builds `pairs` as the cartesian product of
+`delta < -threshold*sigma` (sources) and `delta > +threshold*sigma` (targets).
+A live probe returned 10 nodes, **all `side='target'`, zero sources** — so the
+product is empty at *every* threshold, and lowering it widens both sets from the
+same one-sided `delta`. §22.1's explanation ("no pair clears 1.5") was wrong.
+Rather than repair it, `RotationMapPage` was repointed at
+`GET /api/sectors/handoff`, which computes the same thing correctly via
+`analysis/flow_handoff.compute_handoff()` — `max(0, -Δz_A) * max(0, +Δz_B)`,
+where the independent clip-at-zero per side is what keeps both sides non-empty.
+It had **270 usable rows and no consumer**. `/api/rotation/*` stays mounted,
+unread, with a docstring naming the defect. Verified: 150 pairs / 270 rows, the
+Sankey and pair table both populated (`REAL→FISH 22.93`, `FISH→REAL 18.53`).
+
+### A4. Two `/exposure` endpoints, one of them a stub
+`api/routers/pulse.py` returned a hardcoded `{"rows": []}` while the real
+implementation sat one router away in `sectors_risk.py`. Flow Pulse called the
+stub, so the exposure panel was permanently blank. Client repointed to
+`sectorsApi.exposure()`; the stub is kept, mounted, and marked DEPRECATED in a
+docstring. Verified: `INSUR BUY 100% rank 3` now renders.
+
+### A5. Lookback buttons on Sector Detail did nothing
+`_load_daily()` used `.limit(days * 20)` — with 15 sectors × ~900 sessions the
+multiplier always exceeded the real row count, so every value returned the same
+1319 points and the `[120, 250, 400, 800]` buttons were decorative. Replaced
+with an explicit distinct-date bound in `api/routers/flow.py`; the same
+`days * 20` arithmetic in `sectors_handoff.py` (two call sites) fixed in the
+same pass, since A3 now depends on it. Verified: `lookback=120` → 172 points,
+`lookback=800` → 1171.
+
+### A6. A pinging LIVE badge over end-of-day data
+`FlowPulsePage` rendered a LIVE dot next to a clock ticking every second, over
+`sector_flow_daily` — one row per sector per **day**. The clock advanced; the
+data did not. Badge replaced with `Dữ liệu EOD · <as_of>`, the 1 s interval
+deleted, the 30 s poll kept (it picks up the 16:00 rollup without a reload).
+
+### A7. Raw Sharpe with no realism disclosure — §18.2/7-10
+`CLAUDE.md` §18.2 items 7–10 (T+2 settlement, broker fees, the 0.1 % sell tax,
+the ±7 % price band) are all still open **[BLOCKER]**s, so every Sharpe the
+backtest prints is gross, not net. The tile now carries
+"chưa gồm T+2, phí, thuế, price-band", and `|Sharpe| > 5` renders as
+`n/a — kiểm tra dữ liệu` instead of a number a trader might act on. This
+**discloses** §18.2/7-10; it does not close them.
+
+### A8. Housekeeping
+Six dead exports removed from `frontend/src/api/client.ts` (`listFlow`,
+`sectorFlow`, `heatmap`, `varOne`, `listBacktests`, `stealth` — 0 call sites
+each), plus `rotationApi` and `pulseApi.exposure`. `.claude/launch.json`
+reverted to its committed state. `pyproject.toml`'s ruff `per-file-ignores` key
+was still `"generate_secv5.py"`, renamed on 2026-08-22 — the block had been
+inert since; now `"generate_report.py"`.
+
+### Docs deleted (hard, per Tom)
+`Trading_Project_Documentation.docx`, `Trading_System_Guide.docx` (both describe
+the retired 170-symbol system), `docs/DAILY_REPORT_AUTOMATION.md` (names three
+deleted files; every instruction in it fails), `docs/CHANGELOG.md`
+(self-declared LEGACY, frozen 2026-04-08 — its redirect now lives in
+`ARCHITECTURE.md`), `report/template.html` (orphan; the live one is
+`report/report_template.html`), `data/snapshots/*.json` (5 orphans from the
+deleted `snapshot_service`), `report/jobs/_secv5_fail_notify_20260426.{py,err,out}`.
+
+### Docs kept and rewritten
+`docs/SecV3_Glossary_Vietnamese.md` → `docs/reference/GLOSSARY_VI.md` (the
+SecV3/SecV4 framing was dead, the Vietnamese glossary body is the best asset in
+`docs/`); `docs/ALGORITHM_DOCUMENTATION.md` → `docs/reference/ALGORITHM.md`
+(re-stamped, `claude_agent_sdk` claims replaced with the 9Router HTTP transport
+per §14, `generate_secv4.py` paths repointed at `generate_report.py`).
+`README.md`'s email block ran a file deleted on 2026-06-18 — replaced, test
+count corrected to 156 + 13, docs links repointed.
+
+### Reorg
+`docs/reviews/` (three dated reviews moved from the root) and `docs/reference/`
+(two rewritten files). `CLAUDE.md`, `ARCHITECTURE.md`, `MODIFICATION_LOG.md`,
+`README.md` and `AGENTS.md` stay at the root — tooling and humans open them
+first. `specs/` untouched: it is already one topic per file and is referenced
+from five `.py` docstrings. 179 MB of untracked, gitignored scratch deleted
+(`_trash_2026-08-22/` 158 MB, `backup/` 21 MB, empty `notebooks/`,
+`output/sector_correlation.png`) after `PRAGMA integrity_check` on the live DB
+returned `ok` (13,470 `sector_flow_daily` rows, 585 signals, latest 2026-08-23).
+
+- Files: `services/picks_universe_service.py`, `api/routers/flow.py`,
+  `api/routers/pulse.py`, `api/routers/rotation.py`,
+  `api/routers/sectors_handoff.py`, `config.py`, `pyproject.toml`,
+  `frontend/src/api/client.ts`, `frontend/src/pages/{BacktestPage,
+  FlowMonitorPage,FlowPulsePage,RotationMapPage,SectorDetailPage}.tsx`,
+  `tests/test_picks_universe_service.py` (+6), `tests/test_fixes_20260618.py`,
+  `tests/test_review_20260822.py`, `README.md`, `ARCHITECTURE.md`, `CLAUDE.md`,
+  `AGENTS.md`, plus the deletions and moves listed above.
+- Verification: backend **156 passed** (was 150), frontend **13/13**,
+  `tsc --noEmit` exit 0, `npm run build` clean (main 375.65 kB, BacktestPage in
+  a 346.17 kB chunk — code-splitting intact), `ruff check .` **78 → 66**
+  findings, `python generate_report.py 2026-08-21 --no-email` exit 0 rendering
+  HTML + PDF. A1/A3/A4/A5/A6/A7 each confirmed against the running server.
+- Follow-ups: A7 **discloses** §18.2/7-10; the engine work to close them is a
+  separate, larger job. `/api/rotation/*` is left mounted but unread — deleting
+  a router is a backend decision outside this pass. `CLAUDE.md` §22.1 and §22.3
+  corrected in the same commit (both stated things that were not true).
+
+### A9. secv3/secv4 residue — and one script that had been broken for a day
+Tom: "secv3/secv4 should be deleted, we already have a newer version." The
+**files** were already gone (SecV2 2026-04-20, SecV3 + SecV4 2026-06-18, SecV5
+renamed `generate_report.py` 2026-08-22). What was left was *text* — and some
+of it was written in the present tense, which is worse than a dead file,
+because it reads as an instruction:
+
+- **`scripts/register_report_task.ps1` was broken.** Its safety guard read
+  `if ($batText -notmatch 'generate_secv5\.py') { ... exit 1 }`. The file it
+  tests for was renamed on 2026-08-22, so the script had been exiting 1 on
+  every invocation since — the rename pass caught the script's own filename but
+  not the string inside it. Guard now tests `generate_report\.py`, which the
+  bat contains twice; the rest of the script (header, task Description, the
+  printed dry-run command) repointed too. Both `.ps1` files re-verified to
+  still parse under `[Parser]::ParseFile` and to still carry their UTF-8 BOM —
+  their own headers record that PowerShell 5.1 misreads them without it.
+- `scripts/pause_legacy_email_task.ps1` header renamed off its own old
+  filename. Its `generate_secv3\.py` / `generate_secv4\.py` **match patterns
+  stay** — hunting stale Task Scheduler entries that point at deleted files is
+  the entire purpose of the script, and scheduler entries outlive files.
+- `CLAUDE.md` §2's two SecV2/SecV3/SecV4 bullets collapsed into one
+  present-tense statement ("one report generator, no versioned copies") with
+  the retirement dates as history; §8's `flow_regime_report` row and §13's
+  step 8.5 repointed at `generate_report.py`.
+- `ARCHITECTURE.md`: the pipeline diagram, the 2026-04-17/18/23 CHANGELOG
+  entries. Rewritten so the historical entries stay accurate *as history*
+  without naming a deleted file as something that currently exists.
+- `specs/picks_universe.md` listed `generate_secv3.py` as a live **consumer** —
+  now `generate_report.py`. Same for the docstrings in
+  `services/picks_scoring.py`, `tests/test_picks_scoring.py` and the assertion
+  message in `tests/test_picks_universe_service.py`.
+
+Remaining `secv` matches are confined to dated records (`MODIFICATION_LOG.md`,
+`docs/reviews/*`), the two scripts' match patterns and history notes, and one
+`pyproject.toml` comment explaining a rename — all correct per §21, which says
+dated records keep their names.
+
+---
+
 ## 2026-08-23 (afternoon) -- Seven-item work order: the -1.00 was the data, not the signal
 - Author: Claude (Cowork) on behalf of Tom
 - Files: `services/foreign_flow.py` (new), `utils/vn_api.py` (new),

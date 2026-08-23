@@ -14,10 +14,13 @@ import pytest
 
 from services.picks_universe_service import (
     FreshnessReport,
+    PickEntry,
     PicksUniverseService,
     TickerRow,
     UniverseSnapshot,
     _classify_sector,
+    _snapshot_from_json,
+    _snapshot_to_json,
     _technical_bits,
     get_picks_universe,
 )
@@ -27,7 +30,7 @@ from services.picks_universe_service import (
 
 
 def test_ticker_row_as_picks_dict_shape():
-    """The adapter dict is consumed by generate_secv5 — its keys must stay stable."""
+    """The adapter dict is consumed by generate_report.py — its keys must stay stable."""
     r = TickerRow(
         symbol="HPG", sector_code="STEEL", close=28.0, ret_5d=2.5, ret_20d=10.0,
         atr_pct=2.5, rsi_14=55, macd_hist=0.1, bb_upper=30.0, bb_lower=26.0,
@@ -39,7 +42,7 @@ def test_ticker_row_as_picks_dict_shape():
     d = r.as_picks_dict()
     for key in ("sym", "sector", "close", "ret_5d", "score", "rsi", "macd_h",
                 "adx", "vr20", "atr_pct", "bb_upper", "bb_lower"):
-        assert key in d, f"missing key {key} (generate_secv5 depends on it)"
+        assert key in d, f"missing key {key} (generate_report.py depends on it)"
     assert d["sym"] == "HPG"
 
 
@@ -213,3 +216,94 @@ def test_get_snapshot_synthesizes_empty_snapshot_when_no_prior_cache():
     # all 15 sector buckets present with empty lists
     assert len(snap.by_sector) == 15
     assert all(v == [] for v in snap.by_sector.values())
+
+# -------------------- disk persistence (2026-08-23, review A1) --------------------
+# The in-memory cache was the only part of the daily pipeline with no durable
+# store, so every backend restart emptied the homepage until someone clicked
+# Refresh and sat through the 18 req/min KBS throttle.
+
+@pytest.fixture(autouse=True)
+def _isolate_snapshot_file(tmp_path, monkeypatch):
+    """Never touch the real data/snapshots/picks_universe.json from tests."""
+    monkeypatch.setattr(
+        "services.picks_universe_service.SNAPSHOT_PATH",
+        tmp_path / "picks_universe.json",
+    )
+
+def _sample_snapshot(as_of=date(2026, 8, 23)) -> UniverseSnapshot:
+    tr = TickerRow(symbol="HPG", sector_code="STEEL", close=27.5, score=71, dv_20d=4e10)
+    pick = PickEntry(
+        symbol="HPG", sector_code="STEEL", sector_name="Thép & VLXD", action="BUY",
+        close=27.5, stop=25.0, target=32.0, rr=2.0, score=71, atr_pct=2.1,
+        upside_pct=16.0, downside_pct=-9.0, foreign_room_pct=12.0, dv_20d=4e10,
+        technical_bits=["RSI 58"], thesis="test",
+    )
+    return UniverseSnapshot(
+        as_of=as_of, built_at=datetime(2026, 8, 23, 16, 5),
+        tickers={"HPG": tr}, by_sector={"STEEL": [tr]},
+        freshness=FreshnessReport(as_of=as_of, built_at=datetime.now(),
+                                  universe_size=1, sectors_with_picks={"STEEL"}),
+        is_valid=True, top_buys=[pick],
+    )
+
+def test_snapshot_json_roundtrip_preserves_rows_and_identity():
+    import json as _json
+    snap = _sample_snapshot()
+    back = _snapshot_from_json(_json.loads(_json.dumps(_snapshot_to_json(snap))))
+    assert back.as_of == snap.as_of and back.is_valid
+    assert back.tickers["HPG"].score == 71
+    # by_sector stores symbols and re-points at the same TickerRow objects, so
+    # the file does not carry every row twice.
+    assert back.by_sector["STEEL"][0] is back.tickers["HPG"]
+    assert back.top_buys[0].symbol == "HPG"
+    assert back.freshness.sectors_with_picks == {"STEEL"}
+
+def test_peek_serves_snapshot_from_disk_on_cold_cache():
+    """The A1 regression guard: a restarted process must not show an empty page."""
+    svc = PicksUniverseService()
+    svc._save_to_disk(_sample_snapshot())
+
+    cold = PicksUniverseService()          # fresh process, empty memory
+    assert cold._cache is None
+    with patch("services.picks_universe_service._latest_signal_date",
+               return_value=date(2026, 8, 23)):
+        snap = cold.peek()
+    assert snap is not None
+    assert snap.is_valid, "as_of matches the latest signal date — still valid"
+    assert list(snap.tickers) == ["HPG"]
+
+def test_disk_snapshot_older_than_latest_signal_is_flagged_not_dropped():
+    svc = PicksUniverseService()
+    svc._save_to_disk(_sample_snapshot(as_of=date(2026, 8, 20)))
+
+    cold = PicksUniverseService()
+    with patch("services.picks_universe_service._latest_signal_date",
+               return_value=date(2026, 8, 23)):
+        snap = cold.peek()
+    assert snap is not None and snap.tickers, "stale picks beat no picks"
+    assert snap.is_valid is False
+    assert any("cũ" in e for e in snap.freshness.errors)
+
+def test_corrupt_snapshot_file_degrades_to_none_and_never_raises():
+    from services.picks_universe_service import SNAPSHOT_PATH
+    SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SNAPSHOT_PATH.write_text("{not json at all", encoding="utf-8")
+    assert PicksUniverseService().peek() is None
+
+def test_missing_snapshot_file_returns_none():
+    assert PicksUniverseService().peek() is None
+
+def test_empty_build_is_not_persisted():
+    """A source outage must not overwrite a good file with zero tickers."""
+    svc = PicksUniverseService()
+    svc._save_to_disk(_sample_snapshot())
+    empty = UniverseSnapshot(
+        as_of=date(2026, 8, 24), built_at=datetime.now(),
+        tickers={}, by_sector={},
+        freshness=FreshnessReport(as_of=date(2026, 8, 24), built_at=datetime.now()),
+    )
+    with patch("services.picks_universe_service._latest_signal_date",
+               return_value=date(2026, 8, 24)), \
+         patch.object(svc, "_build", return_value=empty):
+        svc.get_snapshot(force=True)
+    assert PicksUniverseService()._load_from_disk().tickers, "good file must survive"
