@@ -44,3 +44,33 @@ packages = ["data", "analysis", "models", "database", "services", "api", "api.ro
 # prefers site-packages — the server then executes stale code while the
 # files on disk look correct (bug hunted 2026-07-19).
 package = false
+
+
+# ============================================================================
+# ruff — added 2026-08-22 (review P3-5)
+# ============================================================================
+# Before this, `ruff check .` reported ~666 findings on default settings and
+# nobody could tell signal from noise, so nobody ran it. The rules below are
+# the ones that catch real defects in this codebase; cosmetic ones are off on
+# purpose. Run `ruff check .` before committing — a clean run should mean
+# something.
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+exclude = [".venv", ".venv-lin", "backup", "_trash_*", "frontend", "notebooks"]
+
+[tool.ruff.lint]
+select = ["F", "E4", "E7", "E9", "W", "B", "C4", "PIE", "RET501", "PERF", "S"]
+ignore = [
+    "E701", "E702",   # this codebase uses one-line if/semicolons deliberately
+    "S101",           # asserts are how the tests are written
+    "S311",           # non-crypto randomness is fine for synthetic panels
+    "B008",           # FastAPI Depends() in defaults is the framework idiom
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Report scripts are procedural top-to-bottom: imports land after the DB is
+# opened, and broad excepts keep a scheduled job from dying mid-render.
+"generate_secv5.py" = ["E402", "S110", "S603", "S607"]
+"scripts/*" = ["S101", "S603", "S607"]
+"tests/*" = ["S105", "S106", "ARG"]

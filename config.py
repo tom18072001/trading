@@ -43,6 +43,28 @@ FRONTEND_URLS = os.environ.get(
     "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173",
 ).split(",")
 
+# --- API exposure (review 2026-08-22, P2-1) ---
+# api/auth.py has defined require_api_key since March and NO router ever used
+# it; api/rate_limit.py defined a limiter that was never attached to the app.
+# So every POST -- /insight/refresh, /sectors/ranking/publish,
+# /sectors/regime/classify, /sectors/backtest/run, /flow/ingest -- was open,
+# on an app bound to 0.0.0.0 and historically exposed through a cloudflared
+# tunnel. Anyone with the tunnel URL could loop a universe rebuild and burn
+# the KBS quota and the LLM budget.
+#
+# Defaults keep the current behaviour so the local dashboard is not broken by
+# this review. Turn API_REQUIRE_KEY on whenever the API leaves localhost.
+API_REQUIRE_KEY = os.environ.get("API_REQUIRE_KEY", "0").lower() in ("1", "true", "yes")
+# Tunnel origins are opt-in now. The old code listed "https://*.ngrok-free.app"
+# in allow_origins, where a "*" is a literal character and matches nothing --
+# only the regex below ever worked, and it admitted every tunnel on those two
+# shared domains.
+API_ALLOW_TUNNEL_ORIGINS = os.environ.get(
+    "API_ALLOW_TUNNEL_ORIGINS", "1").lower() in ("1", "true", "yes")
+# Per-IP ceiling on the expensive POST endpoints (universe rebuild, retrain,
+# backtest). Generous by default -- this stops a loop, not a person.
+API_WRITE_RATE_LIMIT = os.environ.get("API_WRITE_RATE_LIMIT", "20/minute")
+
 # ===== 15 VN Sectors — sector_code → display name =====
 # sector_code is the canonical key used everywhere in the system.
 SECTORS: dict[str, str] = {
@@ -121,6 +143,24 @@ PERSISTENCE_FILTER_SESSIONS = 3
 MAX_LONG_SECTORS = 3
 MAX_SHORT_SECTORS = 2
 
+# --- Live-signal safety rails (review 2026-08-22, P1-5) ---
+# All three were promised by the approved plan and existed nowhere in code.
+#
+# §16.9 — at most this many concurrent ACCUMULATE positions. Stealth used to
+#   be able to tag all 15 sectors at once, which is not a portfolio.
+MAX_ACCUMULATE_SECTORS = int(os.environ.get("MAX_ACCUMULATE_SECTORS", "4"))
+# §16.9 — a stealth event that has not broken out after this many sessions is
+#   dead money; release it instead of holding the slot forever.
+ACCUMULATE_MAX_AGE_SESSIONS = int(os.environ.get("ACCUMULATE_MAX_AGE_SESSIONS", "30"))
+# §18.4/20 — global kill-switch. Read at the top of SectorSignalService.publish();
+#   when true, no new ACCUMULATE or BUY is emitted (everything becomes HOLD).
+TRADING_HALT = os.environ.get("TRADING_HALT", "0").lower() in ("1", "true", "yes")
+# §18.2/12 — the VN cash market cannot short; shorts belong in a VN30F1M hedge.
+#   Defaults to TRUE so this review does not silently change the daily email.
+#   Set ALLOW_SHORT_SIGNALS=0 to stop publishing SELL, which is what §18.2/12
+#   actually calls for. See CODE_REVIEW_2026-08-22.md P1-5.
+ALLOW_SHORT_SIGNALS = os.environ.get("ALLOW_SHORT_SIGNALS", "1").lower() in ("1", "true", "yes")
+
 # Regime states for HMM
 REGIME_STATES = ["risk_on", "risk_off", "rotation", "chop"]
 
@@ -159,8 +199,32 @@ BACKTEST_LONG_ONLY       = True   # VN cash market cannot short — §18.2/12
 # stalls, the /insight/refresh background run hangs in the trader_agent stage
 # until the frontend's 20-min ceiling, surfacing as "time exceed". These knobs
 # bound it. Tune via env without editing source.
-AGENT_MODEL        = os.environ.get("AGENT_MODEL", "haiku")   # haiku = fast + cheap for structured JSON
-AGENT_TIMEOUT_SEC  = float(os.environ.get("AGENT_TIMEOUT_SEC", "120"))  # hard wall on the SDK call
+# 2026-07-20: provider switch. Three transports, selected by AGENT_PROVIDER:
+#   "local" (default) — plain HTTP to an OpenAI-compatible server on this box
+#       (Ollama / LM Studio / llama.cpp). No API key, no cost, no internet, and
+#       no claude_agent_sdk subprocess. Best fit for a 1-call/day agent.
+#   "glm"   — claude_agent_sdk transport pointed at Z.ai's Anthropic-compatible
+#       endpoint (GLM models). Needs GLM_API_KEY in .env.
+#   "claude"— native Claude Code subscription path via claude_agent_sdk (no key).
+AGENT_PROVIDER     = os.environ.get("AGENT_PROVIDER", "local").lower()
+
+# --- local (Ollama-style OpenAI-compatible endpoint) ---
+# LOCAL_MODEL must match a tag you have actually pulled — check `ollama list`.
+# Sized for a 6GB-VRAM card: an 8B at Q4 sits ~5GB and stays fully on the GPU.
+LOCAL_BASE_URL     = os.environ.get("LOCAL_BASE_URL", "http://localhost:11434/v1")
+LOCAL_API_KEY      = os.environ.get("LOCAL_API_KEY", "ollama")  # Ollama ignores it; LM Studio wants something
+LOCAL_MODEL        = os.environ.get("LOCAL_MODEL", "qwen3:8b")
+
+# --- glm (Z.ai) ---
+GLM_BASE_URL       = os.environ.get("GLM_BASE_URL", "https://api.z.ai/api/anthropic")
+GLM_API_KEY        = os.environ.get("GLM_API_KEY", "")
+
+_DEFAULT_MODEL_BY_PROVIDER = {"local": LOCAL_MODEL, "glm": "glm-5.2", "claude": "haiku"}
+AGENT_MODEL        = os.environ.get(
+    "AGENT_MODEL", _DEFAULT_MODEL_BY_PROVIDER.get(AGENT_PROVIDER, "haiku"))
+# Local models on a 6GB card are slower than a hosted frontier API — a 500-token
+# VN JSON reply runs ~20-40s on an 8B. 120s stays adequate; raise for MoE offload.
+AGENT_TIMEOUT_SEC  = float(os.environ.get("AGENT_TIMEOUT_SEC", "120"))  # hard wall on the agent call
 AGENT_MAX_BUYS     = int(os.environ.get("AGENT_MAX_BUYS", "3"))   # cap output size → faster
 AGENT_MAX_AVOID    = int(os.environ.get("AGENT_MAX_AVOID", "2"))
 # 2026-06-18: candidate caps lowered (10→6 / 6→4) and news-per-candidate cut

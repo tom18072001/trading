@@ -10,7 +10,7 @@ different tickers because they read from different pipelines:
 * SecV4 email filtered picks through ``SectorSignal.action ∈ {BUY,
   ACCUMULATE}`` and dropped everything when the ranker stayed silent.
 
-SecV5's ``generate_secv5.py`` unifies both sources via :func:`merge_pick_sources`
+SecV5's ``generate_report.py`` unifies both sources via :func:`merge_pick_sources`
 in this module so the email and dashboard always agree. Each merged entry is
 tagged with its origin:
 
@@ -62,7 +62,6 @@ def merge_pick_sources(
     daily_list: list[dict[str, Any]] = [dict(p) for p in daily_side]
     ranker_list: list[dict[str, Any]] = [dict(p) for p in ranker_side]
 
-    daily_syms = {p["symbol"] for p in daily_list}
     ranker_syms = {p["symbol"] for p in ranker_list}
 
     merged: list[dict[str, Any]] = []

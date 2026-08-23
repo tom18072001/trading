@@ -4,14 +4,20 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from config import ROTATION_TARGET_HORIZON_DAYS
 from services.flow_feature_service import FEATURE_COLS
 from services.rotation_model_service import TARGET_COL
+from services import foreign_flow
 from services.sector_ingest_service import SectorIngestService
 
 
-# ---- Fix 1: foreign volume → value -------------------------------------
+# ---- Fix 1: foreign volume -> value -------------------------------------
+# 2026-08-23: the parser moved from SectorIngestService._parse_foreign_board to
+# services.foreign_flow.from_price_board, and it no longer returns a silent
+# zero when it cannot do the conversion -- that silence is what hid the fact
+# that sector_flow_ts held 0 non-zero foreign rows out of 12,175.
 def test_foreign_parser_converts_volume_to_value():
     """KBS price_board exposes *_volume not *_value. The parser must convert
     via price so net != 0 (the bug that blocked every ACCUMULATE signal)."""
@@ -20,7 +26,7 @@ def test_foreign_parser_converts_volume_to_value():
         "foreign_sell_volume": 40_000,
         "match_price": 25_000,
     }])
-    buy, sell, net = SectorIngestService._parse_foreign_board(board)
+    buy, sell, net = foreign_flow.from_price_board(board)
     assert buy == 100_000 * 25_000
     assert sell == 40_000 * 25_000
     assert net == (100_000 - 40_000) * 25_000
@@ -32,12 +38,37 @@ def test_foreign_parser_prefers_value_columns():
         "foreign_buy_value": 2.5e9,
         "foreign_sell_value": 1.0e9,
     }])
-    buy, sell, net = SectorIngestService._parse_foreign_board(board)
+    buy, sell, net = foreign_flow.from_price_board(board)
     assert (buy, sell, net) == (2.5e9, 1.0e9, 1.5e9)
 
 
-def test_foreign_parser_empty_board():
-    assert SectorIngestService._parse_foreign_board(pd.DataFrame()) == (0.0, 0.0, 0.0)
+def test_foreign_parser_empty_board_raises_instead_of_returning_zero():
+    with pytest.raises(foreign_flow.ForeignFlowUnavailable):
+        foreign_flow.from_price_board(pd.DataFrame())
+
+
+def test_foreign_parser_says_so_when_it_cannot_find_a_price():
+    """The live failure: KBS gives volumes, the old price lookup matched none
+    of its column names, and the result was reported as 0.0 for months."""
+    board = pd.DataFrame([{
+        "foreign_buy_volume": 100_000,
+        "foreign_sell_volume": 40_000,
+        "some_unrelated_column": "x",
+    }])
+    with pytest.raises(foreign_flow.ForeignFlowUnavailable, match="price"):
+        foreign_flow.from_price_board(board)
+
+
+def test_foreign_parser_finds_a_price_under_other_names():
+    """The price lookup is deliberately broad now."""
+    for price_col in ("last_price", "close", "ref_price", "price"):
+        board = pd.DataFrame([{
+            "foreign_buy_volume": 10,
+            "foreign_sell_volume": 4,
+            price_col: 1_000,
+        }])
+        buy, sell, net = foreign_flow.from_price_board(board)
+        assert net == 6 * 1_000, f"failed to find price column {price_col!r}"
 
 
 # ---- Fix 2: vnstock duplicate-trailing-row dedup -----------------------
@@ -59,11 +90,17 @@ def test_dedup_restores_nonzero_flow():
 def test_ranker_persists_and_reloads(tmp_path, monkeypatch):
     import models.rotation_ranker as rr
     monkeypatch.setattr(rr, "SAVED_MODELS_DIR", str(tmp_path))
-    # Build a tiny per-day ranking panel
+    # Per-day ranking panel. Lengthened from 40 to 150 dates on 2026-08-22:
+    # fit() now purges a (horizon + 2) embargo between train and test, and 40
+    # dates does not leave enough training history for a 20-day target to be
+    # honestly validated. See CODE_REVIEW_2026-08-22.md P0-6.
+    from datetime import date as _date, timedelta as _timedelta
     rows = []
-    for d in range(40):
+    base = _date(2025, 1, 1)
+    for d in range(150):
+        day = (base + _timedelta(days=d)).isoformat()
         for i, code in enumerate(["A", "B", "C"]):
-            rows.append({"date": f"2025-01-{d+1:02d}", "sector_code": code,
+            rows.append({"date": day, "sector_code": code,
                          "f1": i + d * 0.1, "f2": -i, "target": i + (d % 3)})
     df = pd.DataFrame(rows)
     r1 = rr.RotationRanker()
