@@ -5,6 +5,24 @@
 > change must be logged in `MODIFICATION_LOG.md`.
 
 ## CHANGELOG
+- **2026-08-23 (late, 6) — §16.1 stealth gate: AND → score.** Behaviour change,
+  no schema change. `analysis/stealth.py` stops requiring all five §16.1
+  conditions and emits a `conditions_met` score (0-5); stealth fires at
+  ≥ `STEALTH_MIN_CONDITIONS` (default 4) held ≥ `STEALTH_MIN_SESSIONS`
+  (default 3). A condition that cannot be evaluated is dropped from **both**
+  numerator and denominator, so missing data cannot silently raise the bar —
+  the failure mode that let an all-zero `foreign_net` ship a 3-condition gate.
+  Measured cause: the conjunction was unreachable (longest all-five run across
+  15 sectors in 3.5 years = 2 sessions), so `accumulation_age` had been 0 on
+  every row ever written. Contract change on `GET /api/stealth/active`: new
+  `min_conditions` query param, new `atr_rank` field per sector, and
+  `min_sessions`/`min_conditions` defaults now **imported from
+  `analysis.stealth`** rather than retyped — the endpoint and the offline
+  scanner had been gated differently. Its cond4 also stops comparing a raw
+  `atr_pct` (~0.006) to a threshold named `atr_rank_max` (0.5), which had been
+  passing for free on all 15 sectors. Closes §20.3 P0-5 and P1-1; the gate
+  fires but does **not** meet §16.11 (median lead 3 days vs ≥10 target) — see
+  `CLAUDE.md` §16.11.
 - **2026-08-23 (late, 5) — Global filter, stealth presets, CSV, send-report.**
   Contract change: `/api/state/*` gains `POST /state/report/send` and
   `GET /state/report/status`, backed by the new `services/report_runner.py`.

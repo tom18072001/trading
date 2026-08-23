@@ -14,6 +14,74 @@
 
 ---
 
+## 2026-08-23 (late, 6) — §16.1 stealth gate: AND → score; §20.3 P0-5 and P1-1 closed
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `analysis/stealth.py` (the gate; `STEALTH_MIN_CONDITIONS`; `RETURN_BOTTOM_FRAC` 0.60 → 0.40)
+  - `api/routers/stealth.py` (classification, `min_conditions`, cond4 percentile)
+  - `frontend/src/lib/stealthPresets.ts` (rewritten), `lib/glossary.tsx`,
+    `pages/StealthWatchPage.tsx`
+  - new `tests/test_stealth_gate.py` (14)
+  - `CLAUDE.md` §16.1, §16.2, §16.11, §19, §20.3, §22.1, §24.2, §24.4
+- Reason: closes **§20.3 P1-1** (§18.8 requires evidence, not just code) and
+  **§20.3 P0-5**. Found by *exercising* the Chặt/Vừa/Rộng presets shipped in the
+  previous entry, whose stated purpose was to price P1-1 in sectors. They
+  returned `active: []` at every setting including maximally-wide — so the
+  disagreement they were built to price was worth zero sectors on either side.
+- Summary:
+  - **The §16.1 conjunction was arithmetically unreachable.** Measured on the
+    full 13,470-row panel: pass rates c1 17.5% · c2 20.4% · c3 34.7% ·
+    c4 52.1% · c5 47.7%; all five at once on 0.3% of rows; **longest
+    consecutive all-five run across 15 sectors in 3.5 years = 2 sessions**
+    against a requirement of 3. `accumulation_age` was 0 on every row ever
+    written — not because §16 was untested, because it could not fire. §22.1
+    had the symptom right and the cause wrong.
+  - **Gate is now a score.** ≥ `STEALTH_MIN_CONDITIONS` of 5 (default 4) held
+    ≥ `STEALTH_MIN_SESSIONS` (default 3). Conditions deliberately unweighted —
+    §16 gives no basis to rank them. A condition that cannot be evaluated is
+    dropped from **both** numerator and denominator, so missing data never
+    silently raises the bar (`need = min(MIN_CONDITIONS, len(conds))`).
+  - **Result:** 23 events / 11 sectors; 53 rows with `accumulation_age > 0`
+    (max 7) after backfilling via `_rebuild_leading_features_fast`. First
+    non-zero values in the system's history.
+  - **It fails §16.11, and that is now written into §16.11 rather than glossed.**
+    74% breakout within 40d, but **median lead 3 days, only 24% at ≥10 days**
+    (target ≥60%) and **root capture 0.910** (target ≤0.85). Tightening to N=5
+    gives 12 events / 92% / 36% / 0.913; loosening to ≥3/5 gives 130 / 79% /
+    17% / 0.944. Read plainly: this is a momentum confirmation signal — §16.3's
+    `BUY`, "cành cao" — wearing the `ACCUMULATE` label. The "gốc" claim is not
+    yet earned and §16.9's 1.5× sizing should not be trusted on it. Suspect is
+    c1: `flow_z20 > 1` is contemporaneous. The §16.2 features that would buy
+    lead time (`flow_price_divergence`, `foreign_streak`, `flow_leadtime_proxy`)
+    are computed and stored but are in no condition. Next experiment.
+  - **P0-5 closed.** `foreign_net` non-zero on **12,616 / 13,470** rows,
+    2023-03-13 → 2026-08-21, backfilled by `b4d1d90`; `foreign_hit_20d` spans
+    0.0→1.0 with 2,742 rows clearing 0.6. Consequence nobody logged at the
+    time: the backfill flipped `foreign_available` to True, silently taking the
+    stealth gate from 3 evaluable conditions to 5 — a behaviour change arriving
+    as a side effect of a data change. Now explicit and pinned by a test.
+  - **Endpoint reconciled with the scanner.** `/api/stealth/active` classified
+    `active` only at `passes == 5` with its own `min_sessions=5`, a *third* set
+    of thresholds. Both knobs are imported from `analysis.stealth` now.
+  - **cond4 was passing for free.** The endpoint compared a raw `atr_pct`
+    (~0.006) to a threshold named `atr_rank_max` (0.5), so the "five-condition"
+    gate was really four on all 15 sectors. It takes a 0..1 percentile within
+    the sector's own window now.
+  - **Presets rewritten** around `min_conditions`, page opens on **Vừa** (what
+    runs) not Chặt (what returns 0). Chặt is kept precisely so the doctrine
+    number can be seen returning nothing. The `foreign_hit_20d` tooltip warning
+    was already false the morning it shipped; corrected.
+- Follow-ups:
+  - **Buy back the lead time.** Add `flow_price_divergence` / `foreign_streak`
+    to the condition set and re-measure §16.11. Until then ACCUMULATE ≈ BUY.
+  - `/api/stealth/history` is still `{"rows": []}` — the Gantt and the
+    HIT / FALSE POSITIVE chips on Stealth Watch have no source. The 23 events
+    now exist and could populate it (§16.7's `sector_accumulation_events`).
+  - §18.1/15 still open: the cuts are global, not sector-specific quantiles.
+    With foreign data live, that is now the sharpest remaining §16.1 lever.
+
+---
+
 ## 2026-08-23 (late, 5) — Global filter, stealth presets, CSV, send-report, tooltips
 - Author: Claude Code on behalf of Tom
 - Files:

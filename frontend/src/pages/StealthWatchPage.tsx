@@ -161,15 +161,16 @@ export default function StealthWatchPage() {
           {ctrl('atr_rank', 'atr_rank_max', 0.05, 'atr_pct')}
           {ctrl('close_pct', 'close_pct_60d_max', 0.05, 'close_pct_60d')}
           {ctrl('min_sessions', 'min_sessions', 1, 'min_sessions')}
+          {ctrl('min_conditions', 'min_conditions', 1, 'conditions_met')}
         </div>
 
-        {/* §20.3 P1-1, made visible instead of documented. Chặt and Vừa differ
-            only in min_sessions and close_pct — the two numbers doctrine and
-            analysis/stealth.py disagree on. */}
-        {activePreset === 'code' && (
+        {/* Chặt is kept so the doctrine number can be seen returning nothing —
+            that measurement is what retired the AND gate. */}
+        {activePreset === 'strict' && (
           <p className="text-[11px] text-warn leading-snug">
-            Đây là ngưỡng <b>code đang chạy</b> (3 phiên, đáy 60%), không phải doctrine §16.1
-            (5 phiên, đáy 40%). Hai nơi chưa thống nhất — xem CLAUDE.md §20.3 P1-1.
+            Đủ cả 5 điều kiện là <b>bất khả thi</b> trên dữ liệu thật: chuỗi 5/5 dài nhất
+            trong 3,5 năm chỉ 2 phiên, nên cổng này luôn trả 0 ngành. Đây là lý do §16.1
+            đổi sang chấm điểm ngày 2026-08-23 — xem CLAUDE.md §16.1.
           </p>
         )}
       </div>

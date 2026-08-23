@@ -126,21 +126,45 @@ Every code or schema change must:
 > **Thesis:** In the VN market, public news/analyst coverage lags real money movement by **~1 month**. By the time a sector is "on the news", smart money has already accumulated. The system's job is therefore **not** to predict next-day return — it is to **detect stealth accumulation 2-4 weeks before the breakout**, so Tom can buy "at the root" (gốc) or at worst "high on the branch" (cành cao), never at the canopy (ngọn).
 
 ### 16.1 What "early" means, formally
-> **⚠ Doctrine vs. code (2026-08-22).** The thresholds below are the approved
-> doctrine. `analysis/stealth.py` currently ships **N=3** and **bottom 60%**,
-> and drops condition 2 entirely whenever `foreign_net` is all-zero — which it
-> is across the whole history (see §20, P0-5). The gate can therefore run on 3
-> conditions, not 5. This was never logged per §15. **Decide which numbers are
-> real and make both places agree** — see `docs/reviews/CODE_REVIEW_2026-08-22.md` P1-1.
 
-A sector is in **stealth accumulation** when ALL of these hold simultaneously for ≥ N sessions (default N=5):
+> **AMENDED 2026-08-23 — the gate is a score, not a conjunction.** The five
+> conditions below stand; requiring *all five at once* does not, because it was
+> measured to be arithmetically unreachable.
+>
+> Over the full 13,470-row panel (2023-03 → 2026-08), individual pass rates are
+> c1 17.5% · c2 20.4% · c3 34.7% · c4 52.1% · c5 47.7%. All five held
+> simultaneously on **0.3%** of rows (42), and the **longest consecutive
+> all-five run across 15 sectors in 3.5 years was 2 sessions** — against a
+> requirement of 3 in code and 5 in this document. So `accumulation_age` was 0
+> on every row ever written, and §22.1's "§16 has never fired" was right about
+> the symptom and wrong about the cause: the gate was over-specified, not
+> data-starved.
+>
+> **The rule now:** a sector is in stealth accumulation when it meets
+> **≥ `STEALTH_MIN_CONDITIONS` of the 5** (default **4**) for ≥
+> `STEALTH_MIN_SESSIONS` sessions (default **3**). The conditions are
+> deliberately **unweighted** — §16 gives no basis to rank them, and an invented
+> weight vector is a number nobody could defend. A condition that *cannot be
+> evaluated* is dropped from **both** the numerator and the denominator, so
+> missing data never silently raises the bar.
+>
+> Result on the live panel: **23 events across 11 sectors**, 53 rows with
+> `accumulation_age > 0` (max 7) — the first non-zero values in the system's
+> history. **It does not yet meet §16.11** — see the honest numbers there.
+>
+> This retires the doctrine-vs-code conflict logged as §20.3 P1-1, in the
+> direction of neither number: both gave zero. `analysis/stealth.py`,
+> `api/routers/stealth.py` and `frontend/src/lib/stealthPresets.ts` now read the
+> same two knobs. `RETURN_BOTTOM_FRAC` is back to the doctrine **0.40**.
+
+A sector is in **stealth accumulation** when ≥ 4 of these hold for ≥ 3 sessions (was: ALL, for ≥ N=5):
 1. **Rolling 20d net dollar flow z-score > +1.0** (flow regime shift vs own history)
 2. **Foreign net buy positive on ≥ 60% of sessions in the last 20d** (smart-money persistence)
 3. **Breadth SMA20 rising** (diffusion — more constituents joining, not one whale)
 4. **ATR% below 20d median** (quiet tape — no euphoria yet)
 5. **Price return (close_idx) in bottom 40% of its 60d range** (still cheap, not extended)
 
-When all five flip, emit a new `ACCUMULATE` action — this is the "gốc" (root) buy. The existing `BUY` action stays but is downgraded to "cành cao" (late-cycle) confirmation.
+When the score clears the bar, emit a new `ACCUMULATE` action — this is the "gốc" (root) buy. The existing `BUY` action stays but is downgraded to "cành cao" (late-cycle) confirmation.
 
 ### 16.2 New leading features (add to FEATURE_COLS)
 - `flow_z20` — 20d rolling z-score of `net_dollar_flow` per sector
@@ -150,7 +174,8 @@ When all five flip, emit a new `ACCUMULATE` action — this is the "gốc" (root
 - `stealth_score` — composite: `(flow_z20) × (breadth_sma20 rising) × (1 / (1 + atr_rank_20d))`
 - `flow_price_divergence` — `flow_z20 − return_20d_zscore` (positive = flow leading price)
 - `flow_leadtime_proxy` — lag (in days) between flow z crossing +1 and price return turning positive; stored per crossing event
-- `accumulation_age` — days since the 5 conditions in §16.1 first flipped on (0 if not active)
+- `conditions_met` — how many of the 5 §16.1 conditions hold today (0-5)
+- `accumulation_age` — consecutive sessions the §16.1 score has cleared the bar (0 if not active)
 
 ### 16.3 New signal actions
 Extend `SectorSignal.action` enum:
@@ -210,6 +235,35 @@ The system is considered successful on this axis if, in out-of-sample backtest a
 - **False-positive rate ≤ 30%** (stealth signals that dissolve without a breakout).
 
 Anything worse than this means the thesis is still lagging — go back to features.
+
+> **First actual measurement — 2026-08-23. The gate fires and FAILS this
+> section.** Now that §16.1 can fire at all, the 23 events it produces over the
+> full panel were scored against the three criteria above:
+>
+> | criterion | target | measured (≥4/5, N=3) |
+> |---|---|---|
+> | breakout within 40d | — | 74% (17/23) |
+> | lead time ≥ 10 trading days | ≥ 60% | **24%** — median lead **3 days** |
+> | median root-capture ratio | ≤ 0.85 | **0.910** |
+> | false positives | ≤ 30% | 26% |
+>
+> Tightening does not rescue it: ≥4/5 with N=5 gives 12 events, 92% breakout,
+> 36% at ≥10d lead, root capture 0.913. Loosening is worse: ≥3/5 N=5 gives 130
+> events, 79% breakout, 17% at ≥10d, 0.944.
+>
+> Read plainly: the gate now identifies sectors that **are about to move**
+> (74-92% breakout is a real hit rate) but it identifies them **~3 days early,
+> not ~2 weeks**, and it enters at 91% of the eventual peak. That is a momentum
+> confirmation signal — §16.3's `BUY`, "cành cao" — wearing the `ACCUMULATE`
+> label. **The "gốc" claim is not yet earned**, and no ACCUMULATE sizing rule
+> (§16.9: 1.5× vol target, 2.5×ATR stop) should be trusted on it until the lead
+> time is fixed.
+>
+> The conditions are the suspects, not the aggregation: c1 (`flow_z20 > 1`) is
+> a *contemporaneous* flow spike, so it tends to fire with the move rather than
+> ahead of it. The leading candidates in §16.2 that would actually buy lead time
+> — `flow_price_divergence`, `foreign_streak`, `flow_leadtime_proxy` — are
+> computed and stored but are in **no** condition. That is the next experiment.
 
 ## 18. Trader-Lens System Review — APPROVED 2026-04-09
 
@@ -274,9 +328,25 @@ As of 2026-04-23:
 
 | Suite | Count | Command |
 |---|---|---|
-| Backend (pytest) | 193 | `python -m pytest tests/` |
+| Backend (pytest) | 207 | `python -m pytest tests/` |
 | Frontend (vitest) | 13 | `cd frontend && npm test` |
-| **Total** | **206** | — |
+| **Total** | **220** | — |
+
+> 2026-08-23 (late, 6): +14 in `tests/test_stealth_gate.py` — §16.1 after it
+> stopped being a conjunction. The load-bearing one is
+> `test_four_of_five_fires_where_all_five_cannot`: a panel that clears four
+> conditions and never the fifth must produce an event, which the old gate
+> could not. `test_unevaluable_condition_does_not_raise_the_bar` guards the
+> numerator/denominator symmetry — the bug that let an all-zero `foreign_net`
+> column silently ship a 3-condition gate while the doctrine said 5. Two more
+> pin the endpoint to the scanner: that `/api/stealth/active`'s Query defaults
+> come from `analysis.stealth`'s constants rather than being retyped, and that
+> its cond4 ranks ATR instead of comparing a raw 0.006 fraction to 0.5.
+>
+> The fixture is deterministic on purpose: flat flow gives sd=0 → z is NaN → c1
+> is reliably False, and a *ramp* (not a step) is what holds z above +1, since
+> a step's z decays to 0 once the 20d mean catches up. An earlier `rng.normal`
+> version produced random z-spikes that made the cold case fire intermittently.
 
 > 2026-08-23 (late, 5): +11 in `tests/test_report_runner.py` — the "Gửi báo cáo
 > ngay" button. One test carries the feature:
@@ -383,8 +453,8 @@ DO change behaviour — they implement §16.9, which was never enforced.
 
 | Id | Question |
 |---|---|
-| P0-5 | `foreign_net` is **zero across the entire history** — `backfill_sector` passes an empty map and `price_board` only exposes today. The "killer VN signal" (§4) has never contributed anything, and three `FEATURE_COLS` entries are constant. Source a historical series (§18.4/17 proposes CafeF/SSI), or drop the features and amend the doctrine. |
-| P1-1 | Reconcile §16.1's thresholds with what `analysis/stealth.py` ships. |
+| ~~P0-5~~ | **CLOSED 2026-08-23** — `foreign_net` was backfilled by commit `b4d1d90`. Measured: **12,616 / 13,470 rows non-zero**, spanning 2023-03-13 → 2026-08-21; `foreign_hit_20d` spans 0.0 → 1.0 with 2,742 rows clearing the §16.1 0.6 threshold. The three `FEATURE_COLS` entries are no longer constant. **Consequence nobody logged at the time:** `analysis/stealth.py` drops cond2 whenever `foreign_net` is all-zero, so the backfill silently took the stealth gate from 3 evaluable conditions to 5 — a behaviour change that arrived as a side effect of a data change. That asymmetry is now explicit in the code (numerator *and* denominator) and pinned by `test_unevaluable_condition_does_not_raise_the_bar`. |
+| ~~P1-1~~ | **CLOSED 2026-08-23**, in the direction of neither number. Doctrine said N=5 / bottom 40%, `analysis/stealth.py` shipped N=3 / bottom 60% — but under a five-way AND **both give zero sectors over 3.5 years**, so the disagreement was never worth what it cost to argue about. §16.1 is a score now; the scanner, `api/routers/stealth.py` and the UI presets read the same two knobs. |
 | P1-3 | Breadth over 5 names takes 6 discrete values (§18.1/6, still open). |
 | P1-4 | Regime labels are back-painted — Viterbi re-decodes the whole history each run, so yesterday's label can change. Use the filtered posterior for the last bar. |
 | P2-2 | Two rate-limit buckets in one process: `utils/vnstock_gate` and `picks_universe_service._kbs_throttle`. `/insight/refresh` takes no `job_lock` at all, so a UI refresh overlapping the intraday job runs at 2× the KBS ceiling. |
@@ -437,11 +507,12 @@ state. They are not broken code — they are correct code with no data:
 
 | surface | endpoint | why it is empty |
 |---|---|---|
-| Stealth Watch | `/api/stealth/active`, `/api/stealth/history` | `accumulation_age` is 0 on all 13k rows; §16 has never fired |
+| Stealth Watch | `/api/stealth/active`, `/api/stealth/history` | `accumulation_age` is 0 on all 13k rows; §16 has never fired — **cause corrected 2026-08-23**: not missing data, an unreachable AND gate (§16.1). 53 rows are non-zero now. |
 | Rotation Map | `/api/rotation/pairs` | ~~no pair clears the 1.5 threshold~~ — **wrong, corrected below** |
 | Flow Pulse | `/api/pulse/exposure` | ~~no positions are tracked~~ — **wrong, corrected below** |
 
-Fixing Stealth Watch means fixing §16 (see §20.3), not the UI. The other two
+Fixing Stealth Watch means fixing §16 (see §20.3), not the UI — which is what
+§16.1's 2026-08-23 amendment did. The other two
 rows were **misdiagnosed**; both were fixed on 2026-08-23:
 
 - **Rotation Map** was not threshold-limited, it was structurally empty.
@@ -703,23 +774,38 @@ Two details that are load-bearing rather than incidental:
 already knew the book, no page had ever asked it a question.
 
 ### 24.2 The stealth presets are an argument, not a convenience
-**Chặt / Vừa / Rộng**, not tight/loose:
+**Chặt / Vừa / Rộng**, not tight/loose. The presets were shipped to price the
+§20.3 P1-1 doctrine-vs-code disagreement **in sectors** — the only unit in which
+anyone would care enough to close it.
+
+**They did their job on the day they shipped, and the answer killed the
+question.** Running all three returned `active: []` at *every* setting,
+including maximally-wide. Both sides of P1-1 were worth zero sectors, because
+the AND gate underneath them was unreachable (§16.1). The conflict was
+three-way, not two — `api/routers/stealth.py` had its own third set of defaults
+— so the page could show a sector the scanner would never record.
+
+Rewritten 2026-08-23 around the knob that now matters, `min_conditions`:
 
 | preset | numbers | what it is |
 |---|---|---|
-| Chặt | N=5, đáy 40% | doctrine §16.1 |
-| Vừa | N=3, đáy 60% | what `analysis/stealth.py` actually ships |
-| Rộng | N=1, mọi ngưỡng hạ | a probe — "ngành nào gần đạt", not a buy list |
+| Chặt | 5/5, N=5 | the original doctrine, **kept so you can watch it return 0** |
+| Vừa | ≥4/5, N=3 | what runs now — 23 events / 11 sectors in 3.5 years |
+| Rộng | ≥3/5, N=1, mọi ngưỡng hạ | a probe — "ngành nào gần đạt", not a buy list |
 
-Switching between the first two prices the §20.3 P1-1 disagreement **in
-sectors**, which is the only unit in which anyone will care enough to close it.
-Selecting "Vừa" raises a warning naming both numbers and the section.
+The page **opens on Vừa**, not Chặt: a default that shows a gate nobody is
+running is a default that misleads. Selecting Chặt raises the warning now,
+naming the 2-session measurement that retired it.
 
-The conflict turns out to be **three-way**, not two: `api/routers/stealth.py`'s
-own Query defaults (`min_sessions=5`, `close_pct_60d_max=0.4`) already match
-doctrine. So the offline scanner that writes `accumulation_age` and the
-endpoint this page reads are gated differently — the page can show a sector
-that the scanner will never record.
+Two other things this pass reconciled:
+- `api/routers/stealth.py` classified `active` only at `passes == 5`. Both
+  knobs are now imported from `analysis/stealth.py`, so the page and the
+  scanner cannot drift apart again without a test failing.
+- The endpoint's cond4 compared a **raw** `atr_pct` (~0.006) against a
+  threshold literally named `atr_rank_max` (0.5) — it passed for free on all 15
+  sectors, so the endpoint's "five-condition" gate was really four. It takes a
+  0..1 percentile within the sector's own window now, which is what §16.1
+  condition 4 means.
 
 ### 24.3 Send the report without a terminal
 `POST /api/state/report/send` runs `generate_report.py` as a **subprocess**.
@@ -739,9 +825,11 @@ disabled button. A disabled button is a hint; two emails is a fact.
 definitions existed only in `CLAUDE.md` §16.2 and `docs/reference/GLOSSARY_VI.md`
 — neither of which is open while you are reading the table.
 
-`foreign_hit_20d`'s entry says out loud that `foreign_net` is zero across the
-whole history (§20.3 P0-5). A tooltip that explains a column doing nothing,
-without saying so, is worse than no tooltip.
+`foreign_hit_20d`'s entry said out loud that `foreign_net` was zero across the
+whole history (§20.3 P0-5) — a tooltip that explains a column doing nothing,
+without saying so, is worse than no tooltip. **That warning was already false
+when it shipped**: the backfill had landed the same morning. Corrected the same
+day, along with a new `conditions_met` entry for the §16.1 score.
 
 ### 24.5 Not done
 - `Th` / `FilterBar` are on two tables. Risk, Stealth and Regime still have
