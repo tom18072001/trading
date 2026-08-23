@@ -155,10 +155,11 @@ export type HeatmapCell = {
 };
 export type HeatmapResponse = { count: number; cells: HeatmapCell[] };
 
-export const agentApi = {
-  briefing: () => api.get('/agent/briefing'),
-  stoplossAlerts: () => api.get('/agent/stoploss-alerts'),
-};
+// agentApi (briefing / stoploss-alerts) removed 2026-08-23.
+// Both endpoints returned 404: the /api/agent/* router was deleted from the
+// backend on 2026-04-18 when OpenClaw was replaced by services.trader_agent,
+// which is invoked from POST /api/insight/refresh and rendered inline on the
+// Daily Insight page. The client kept calling the dead routes for four months.
 
 // ===== Phase 15 — Feature A Money Flow Monitor =====
 export type Interval = '1d' | '1w' | '2w' | '1m' | '1q';
@@ -204,14 +205,19 @@ export type FlowHeatResponse = {
   cells: FlowHeatCell[];
 };
 
+// 2026-08-23: `lookback` defaulted to 400 sessions here, which is what made
+// /api/flow/series the slowest route in the system -- 2.8 s and 1.0 MB for a
+// chart that shows months. The backend default was lowered to 120 the same
+// day, but the client always sent an explicit 400, so the change did nothing
+// until this line changed too. Pass a bigger number when you actually want it.
 export const flowApi = {
-  series: (interval: Interval = '1d', lookback = 400) =>
+  series: (interval: Interval = '1d', lookback = 120) =>
     api.get<FlowSeriesResponse>('/flow/series', { params: { interval, lookback } }),
   ranking: (interval: Interval = '1d', flow_z_hot = 1.0) =>
     api.get<FlowRankingResponse>('/flow/ranking', { params: { interval, flow_z_hot } }),
   heat: (interval: Interval = '1d', lookback = 60) =>
     api.get<FlowHeatResponse>('/flow/heat', { params: { interval, lookback } }),
-  sector: (code: string, interval: Interval = '1d', lookback = 400) =>
+  sector: (code: string, interval: Interval = '1d', lookback = 120) =>
     api.get('/flow/sector/' + code, { params: { interval, lookback } }),
   refresh: () => api.post('/flow/refresh'),
   refreshStatus: () => api.get('/flow/refresh/status'),

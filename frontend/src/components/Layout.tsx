@@ -36,15 +36,43 @@ const ICONS: Record<string, ReactNode> = {
   pulse: ic(<>
     <path d="M3 12h3l2 6 4-14 2 8h2l2-3h3" />
   </>),
+  ranking: ic(<>
+    <path d="M4 20V10M10 20V4M16 20v-8M22 20h-20" />
+  </>),
+  regime: ic(<>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v5l3.5 2" />
+  </>),
+  risk: ic(<>
+    <path d="M12 3l8 4v6c0 4.5-3.4 7.6-8 8-4.6-.4-8-3.5-8-8V7z" />
+    <path d="M12 9v4M12 16h.01" />
+  </>),
+  backtest: ic(<>
+    <path d="M3 3v18h18" />
+    <path d="M7 15l4-5 3 3 5-7" />
+  </>),
 };
 
+// Two groups, because they answer different questions. "Theo dõi" is what is
+// happening in the market right now; "Ra quyết định" is what the system thinks
+// you should do about it and what that would have cost you.
+//
+// The second group was wired on 2026-08-23. All four pages existed and worked;
+// none had a route. CLAUDE.md section 12 lists Rotation Ranking, Regime
+// Monitor, Sector Backtest and Risk as deliverables of this redesign.
 const nav = [
-  { to: '/insight', label: 'Daily Insight', icon: 'insight', end: false },
-  { to: '/flow', label: 'Money Flow Monitor', icon: 'flow', end: true },
-  { to: '/rotation', label: 'Rotation Map', icon: 'rotation', end: false },
-  { to: '/stealth', label: 'Stealth Watch', icon: 'stealth', end: false },
-  { to: '/pulse', label: 'Flow Pulse', icon: 'pulse', end: false },
+  { to: '/insight', label: 'Daily Insight', icon: 'insight', end: false, group: 'Theo dõi' },
+  { to: '/flow', label: 'Money Flow Monitor', icon: 'flow', end: true, group: 'Theo dõi' },
+  { to: '/rotation', label: 'Rotation Map', icon: 'rotation', end: false, group: 'Theo dõi' },
+  { to: '/stealth', label: 'Stealth Watch', icon: 'stealth', end: false, group: 'Theo dõi' },
+  { to: '/pulse', label: 'Flow Pulse', icon: 'pulse', end: false, group: 'Theo dõi' },
+  { to: '/ranking', label: 'Xếp hạng ngành', icon: 'ranking', end: false, group: 'Ra quyết định' },
+  { to: '/regime', label: 'Trạng thái thị trường', icon: 'regime', end: false, group: 'Ra quyết định' },
+  { to: '/risk', label: 'Rủi ro & Vị thế', icon: 'risk', end: false, group: 'Ra quyết định' },
+  { to: '/backtest', label: 'Backtest', icon: 'backtest', end: false, group: 'Ra quyết định' },
 ];
+
+const navGroups = ['Theo dõi', 'Ra quyết định'] as const;
 
 export default function Layout() {
   return (
@@ -73,9 +101,12 @@ export default function Layout() {
 
         {/* Nav */}
         <nav className="flex-1 px-3 py-4 overflow-y-auto">
-          <div className="section-label px-2 mb-2">Phân tích</div>
-          <div className="space-y-1">
-            {nav.map((item) => (
+          {navGroups.map((group) => (
+            <div key={group} className="mb-4 last:mb-0">
+              <div className="section-label px-2 mb-2">{group}</div>
+              <div className="space-y-1">
+                {nav.filter((item) => item.group === group).map((item) => (
+
               <NavLink
                 key={item.to}
                 to={item.to}
@@ -99,8 +130,10 @@ export default function Layout() {
                 <span className="w-[18px] flex items-center justify-center">{ICONS[item.icon]}</span>
                 <span>{item.label}</span>
               </NavLink>
-            ))}
-          </div>
+                ))}
+              </div>
+            </div>
+          ))}
         </nav>
 
         {/* Footer status */}
