@@ -60,3 +60,12 @@ weekly_flow.csv
 # Downloaded tooling binaries (63MB - not source)
 scripts/cloudflared.exe
 *.exe
+
+# Local backups taken by the audit scripts (2026-08-23). Never commit these:
+# the .env copy carries live API keys and the .db copy is 20 MB.
+.env.bak-*
+*.db.bak-*
+vnstock_market.db.bak-*
+
+# Audit tooling: keep the scripts, drop their output.
+_audit/*.log
