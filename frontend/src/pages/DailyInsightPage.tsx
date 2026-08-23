@@ -792,6 +792,25 @@ export default function DailyInsightPage() {
         </div>
       )}
 
+      {/* Jump bar — review §C. The buy/sell list is what people open this page
+          for, and it sits below the gauge, the spectrum and Minh's memo: on a
+          laptop that is two full screens of scrolling before the first ticker.
+          Native anchors + scroll-mt, no scroll listener. */}
+      <nav className="sticky top-0 z-20 -mx-8 px-8 py-2.5 bg-bg/95 backdrop-blur border-b border-line flex gap-2">
+        {[
+          { href: '#pho-dong-tien', label: 'Phổ dòng tiền' },
+          { href: '#danh-sach-hanh-dong', label: 'Danh sách hành động' },
+        ].map((a) => (
+          <a
+            key={a.href}
+            href={a.href}
+            className="px-3 py-1.5 rounded-lg bg-panel2 border border-line text-[12.5px] font-semibold text-mid hover:text-hi hover:border-line2 transition"
+          >
+            {a.label}
+          </a>
+        ))}
+      </nav>
+
       {/* Decision cockpit */}
       {mc && (
         <section className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-[22px]">
@@ -814,14 +833,16 @@ export default function DailyInsightPage() {
 
       {/* Sector flow spectrum */}
       {(buyPicks.length > 0 || sellPicks.length > 0 || (data?.deltas?.length ?? 0) > 0) && (
-        <FlowSpectrum picks={[...buyPicks, ...sellPicks]} deltas={data?.deltas || []} />
+        <div id="pho-dong-tien" className="scroll-mt-16">
+          <FlowSpectrum picks={[...buyPicks, ...sellPicks]} deltas={data?.deltas || []} />
+        </div>
       )}
 
       {/* Trader Agent — Minh */}
       <AgentReport report={data?.agent_report} />
 
       {/* Action list toolbar */}
-      <section className="space-y-4">
+      <section id="danh-sach-hanh-dong" className="space-y-4 scroll-mt-16">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="section-label">Danh sách hành động</div>
           <div className="flex items-center gap-4">

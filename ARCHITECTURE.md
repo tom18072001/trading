@@ -5,6 +5,16 @@
 > change must be logged in `MODIFICATION_LOG.md`.
 
 ## CHANGELOG
+- **2026-08-23 (late) — Nav merged 9 → 5, §10 rewritten against the running app.**
+  Nine nav doors became five, with the merged halves as URL-backed tabs
+  (`components/Tabs.tsx`, `?tab=`): Dòng tiền = Monitor + Sector Detail,
+  Luân chuyển = Stealth + Rotation, Rủi ro & Vị thế = Risk + Pulse, Nghiên cứu
+  = Xếp hạng + Regime + Backtest. All seven pre-merge paths redirect. §10 of
+  this document had described a `features/*` layout that was never built and
+  listed `/backtest` and `/regime` as deleted when both work — replaced with
+  what actually ships. Earlier the same day: the four decision pages moved onto
+  the `@theme` tokens and `lib/actions.tsx` became the single action vocabulary
+  (`CLAUDE.md` §22.8–22.9).
 - **2026-08-23 — Frontend defect pass + docs purge + repo reorg.** Seven measured
   frontend defects fixed (A1–A7 in `MODIFICATION_LOG.md` 2026-08-23). The one
   that mattered: `PicksUniverseService` was the only stage of the daily pipeline
@@ -404,29 +414,45 @@ the email report) and for backward-compat.
 
 ---
 
-## 10. FRONTEND PAGES (Phase 15 target — supersedes Phase 8 list)
-Feature-sliced layout under `frontend/src/features/*`. Each feature owns its
-components, hooks, and api slice; shared primitives live in `frontend/src/shared/*`.
+## 10. FRONTEND PAGES (as shipped — 2026-08-23)
 
-| Route | Feature folder | Question answered |
-|---|---|---|
-| `/flow` | `features/flow-monitor/` | "Dòng tiền vào/ra sector nào?" (merges old Flow Dashboard + Ranking) |
-| `/rotation` | `features/rotation-map/` | "Tiền dịch chuyển TỪ đâu SANG đâu?" (Sankey + pair table) |
-| `/stealth` | `features/stealth-watch/` | "Sector nào tích luỹ âm thầm?" (5-cond gate + Gantt) |
-| `/pulse` | `features/flow-pulse/` | "NGAY LÚC NÀY flow sector nào lên/xuống?" (live tape; VaR → secondary) |
-| `/insight` | `features/daily-insight/` | "Hôm nay có gì đáng chú ý, nên làm gì?" (LLM narrative + deltas) |
+> The previous version of this section described a feature-sliced layout under
+> `frontend/src/features/*`. That layout was never built: the app is flat
+> `frontend/src/pages/*.tsx` with shared bits in `components/`, `lib/` and
+> `api/client.ts`. It also listed `/backtest` and `/regime` as deleted; both
+> exist and work. Corrected here against the running app.
 
-**Deleted** in Phase 15: `/backtest` (rebuilt only after real `close_idx` lands),
-`/regime` (heuristic fallback, non-actionable), standalone `/ranking` (merged into
-`/flow`), and the legacy symbol pages from Phase 8. Matching backend routers
-`sectors_backtest`, `sectors_regime` and their services are scheduled for
-deletion as each replacement feature ships.
+Five nav items (`CLAUDE.md` §22.9). Four of them merge what used to be
+separate routes into URL-backed tabs (`components/Tabs.tsx`, `?tab=`).
 
-New backend routers for Phase 15: `routers/flow.py`, `routers/rotation.py`,
-`routers/stealth.py`, `routers/pulse.py`, `routers/insight.py`. New services:
-`services/flow/aggregation.py` (interval resampler), `services/rotation/pair_detector.py`,
-`services/stealth/detector.py` (wraps existing `analysis/stealth.py`),
-`services/insight/narrative.py`. Full contracts in `specs/REDESIGN_PHASE15.md`.
+| Nav | Route | Tabs → page component | Question answered |
+|---|---|---|---|
+| Daily Insight | `/insight` | — `DailyInsightPage` | "Hôm nay mua/bán mã nào?" |
+| Dòng tiền | `/flow` | `overview` → `FlowMonitorPage`, `detail` → `SectorDetailPage` | "Dòng tiền vào/ra ngành nào, mạnh đến đâu?" |
+| Luân chuyển | `/rotation` | `stealth` → `StealthWatchPage`, `handoff` → `RotationMapPage` | "Tiền đang đi đâu tiếp?" |
+| Rủi ro & Vị thế | `/positions` | `risk` → `RiskPage`, `pulse` → `FlowPulsePage` | "Đang nắm gì, rủi ro bao nhiêu?" |
+| Nghiên cứu | `/research` | `ranking` → `RankingPage`, `regime` → `RegimePage`, `backtest` → `BacktestPage` | "Chiến lược có dương không?" |
+
+`PositionsPage` and `ResearchPage` are `React.lazy`; recharts (346 kB) loads
+only on the Backtest tab. Main bundle 371 kB.
+
+Pre-merge paths still resolve as redirects, `/flow/:code` included:
+`/stealth`, `/pulse`, `/risk`, `/ranking`, `/regime`, `/backtest`.
+
+Shared frontend modules:
+
+| module | role |
+|---|---|
+| `api/client.ts` | every endpoint, one axios instance |
+| `lib/actions.tsx` | `ActionBadge` (§16.3 trade action) vs `FlowBadge` (tape state) — see `CLAUDE.md` §22.8 |
+| `components/Tabs.tsx` | tab state in the URL |
+| `components/Layout.tsx` | sidebar nav |
+| `index.css` | Tailwind v4 `@theme` tokens — `bg-panel`, `text-hi/mid/lo`, `border-line`, `text-buy/sell/warn/acc` |
+
+Backend routers behind these pages: `routers/flow.py`, `routers/stealth.py`,
+`routers/pulse.py`, `routers/insight.py`, `routers/sectors_*.py`.
+`routers/rotation.py` stays mounted but has no consumer — its pair detection
+returns an empty cartesian product at every threshold (`CLAUDE.md` §22.1).
 
 ---
 

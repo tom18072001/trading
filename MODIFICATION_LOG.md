@@ -14,6 +14,46 @@
 
 ---
 
+## 2026-08-23 (late, 2) — Nav merged 9 → 5
+- Author: Claude Code on behalf of Tom
+- Files:
+  - new `frontend/src/components/Tabs.tsx`
+  - new `frontend/src/pages/{FlowPage,RotationPage,PositionsPage,ResearchPage}.tsx`
+  - `frontend/src/App.tsx` (5 routes + 7 redirects), `frontend/src/components/Layout.tsx` (nav)
+  - `frontend/src/pages/SectorDetailPage.tsx` (route param → prop, tokenised)
+  - `frontend/src/pages/FlowMonitorPage.tsx` (sector link → tab link)
+  - `frontend/src/pages/DailyInsightPage.tsx` (sticky jump bar + 2 anchors)
+- Reason: sponsor review §C. Nine nav doors for 15 sectors was more navigation
+  than data, and clicking a sector in Money Flow Monitor navigated away — the
+  interval, the `flow_z_hot` you had typed and the selected chart line all
+  died on the way to `/flow/:code`.
+- Summary:
+  - Five nav items: Daily Insight · Dòng tiền · Luân chuyển · Rủi ro & Vị thế ·
+    Nghiên cứu. Each carries a one-line hint under the label; the two group
+    headers are gone, since five items do not need them.
+  - `Tabs.tsx` keeps the active tab in the URL (`?tab=`) with
+    `replace: true`, so merged pages keep the deep links the old routes had and
+    Back does not walk through every tab switch.
+  - Merges: Dòng tiền = Money Flow Monitor + Sector Detail; Luân chuyển =
+    Stealth Watch + Rotation Map; Rủi ro & Vị thế = Risk + Flow Pulse (which
+    also removes the last way for the two exposure panels of §A4 to disagree);
+    Nghiên cứu = Xếp hạng + Regime + Backtest.
+  - All seven pre-merge paths redirect, including `/flow/:code` →
+    `/flow?tab=detail&code=<code>`. Four months of bookmarks keep working.
+  - `SectorDetailPage` was the last page on raw Tailwind (37 `slate-*` hits).
+    Tokenised in the same pass, including the 20 hardcoded SVG hexes.
+  - Daily Insight gained a sticky jump bar over `#pho-dong-tien` /
+    `#danh-sach-hanh-dong` — the buy/sell list sat two screens below the fold.
+- Verification: `tsc --noEmit` clean · vitest 13/13 · pytest 156 · build 793
+  modules, main bundle **376.43 → 371.12 kB** (BacktestPage still its own
+  346 kB chunk, PositionsPage 12.7 kB, ResearchPage 1.05 kB — all lazy).
+  Live: all 7 redirects land on the right tab; `/flow?tab=detail&code=BROK`
+  renders on tokens (`main table` computed colour `rgb(234,240,247)` = `--color-hi`);
+  the jump bar scrolls the action list to 64 px, under the sticky bar; zero
+  console errors.
+- Follow-ups: kill-switch belongs on the merged Rủi ro & Vị thế page — that is
+  step 4, not this one.
+
 ## 2026-08-23 (late) — One design system, one action vocabulary
 - Author: Claude Code on behalf of Tom
 - Files:

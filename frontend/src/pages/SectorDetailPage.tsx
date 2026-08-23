@@ -1,5 +1,4 @@
 import { useEffect, useState, useMemo } from 'react';
-import { useParams, Link } from 'react-router-dom';
 import { flowApi } from '../api/client';
 import type { Interval } from '../api/client';
 
@@ -27,10 +26,10 @@ type Point = {
 
 function MiniStat({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="bg-slate-800/60 rounded-lg p-3">
-      <div className="text-[10px] text-slate-500 uppercase tracking-wider">{label}</div>
-      <div className="text-lg font-bold text-white">{value}</div>
-      {sub && <div className="text-xs text-slate-400">{sub}</div>}
+    <div className="rounded-2xl bg-panel border border-line p-3">
+      <div className="section-label">{label}</div>
+      <div className="font-display text-[18px] font-bold text-hi tabular">{value}</div>
+      {sub && <div className="text-[11px] text-mid font-mono">{sub}</div>}
     </div>
   );
 }
@@ -40,8 +39,8 @@ function Chart({
   points,
   getY,
   type = 'line',
-  color = '#34d399',
-  negColor = '#fb7185',
+  color = '#33D49A',
+  negColor = '#FF5D73',
   label,
   height = 160,
   formatY = (v: number) => v.toFixed(2),
@@ -78,8 +77,8 @@ function Chart({
   const [hover, setHover] = useState<number | null>(null);
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-lg p-3">
-      <div className="text-xs text-slate-400 mb-1 font-medium">{label}</div>
+    <div className="rounded-2xl bg-panel border border-line p-3">
+      <div className="section-label mb-1.5">{label}</div>
       <svg
         viewBox={`0 0 ${W} ${H}`}
         className="w-full"
@@ -92,9 +91,9 @@ function Chart({
             <line
               x1={PAD.left} x2={W - PAD.right}
               y1={scaleY(t)} y2={scaleY(t)}
-              stroke="#334155" strokeWidth="0.5"
+              stroke="rgba(255,255,255,.07)" strokeWidth="0.5"
             />
-            <text x={PAD.left - 4} y={scaleY(t) + 3} textAnchor="end" fill="#64748b" fontSize="9">
+            <text x={PAD.left - 4} y={scaleY(t) + 3} textAnchor="end" fill="#5A6573" fontSize="9">
               {formatY(t)}
             </text>
           </g>
@@ -105,7 +104,7 @@ function Chart({
           <line
             x1={PAD.left} x2={W - PAD.right}
             y1={zeroY} y2={zeroY}
-            stroke="#475569" strokeWidth="1" strokeDasharray="4,3"
+            stroke="#5A6573" strokeWidth="1" strokeDasharray="4,3"
           />
         )}
 
@@ -172,7 +171,7 @@ function Chart({
               x={PAD.left + i * xStep}
               y={H - 6}
               textAnchor="middle"
-              fill="#64748b"
+              fill="#5A6573"
               fontSize="8"
             >
               {p.date.slice(5)}
@@ -186,18 +185,18 @@ function Chart({
             <line
               x1={PAD.left + hover * xStep} x2={PAD.left + hover * xStep}
               y1={PAD.top} y2={H - PAD.bottom}
-              stroke="#94a3b8" strokeWidth="0.5" strokeDasharray="3,2"
+              stroke="#909DAF" strokeWidth="0.5" strokeDasharray="3,2"
             />
             <rect
               x={Math.min(PAD.left + hover * xStep + 8, W - 140)}
               y={PAD.top}
               width="130" height="36" rx="4"
-              fill="#1e293b" stroke="#475569" strokeWidth="0.5"
+              fill="#161B24" stroke="rgba(255,255,255,.13)" strokeWidth="0.5"
             />
             <text
               x={Math.min(PAD.left + hover * xStep + 14, W - 134)}
               y={PAD.top + 14}
-              fill="#e2e8f0" fontSize="10"
+              fill="#EAF0F7" fontSize="10"
             >
               {points[hover].date}
             </text>
@@ -242,8 +241,8 @@ function DistChart({ values, label, bins = 30 }: { values: number[]; label: stri
   const zeroIdx = min < 0 && max > 0 ? Math.floor((0 - min) / binW) : -1;
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-lg p-3">
-      <div className="text-xs text-slate-400 mb-1 font-medium">{label}</div>
+    <div className="rounded-2xl bg-panel border border-line p-3">
+      <div className="section-label mb-1.5">{label}</div>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: H }}>
         {counts.map((c, i) => {
           const x = PAD.left + i * barW;
@@ -256,7 +255,7 @@ function DistChart({ values, label, bins = 30 }: { values: number[]; label: stri
               y={H - PAD.bottom - h}
               width={Math.max(barW - 1, 1)}
               height={h}
-              fill={binCenter >= 0 ? '#34d399' : '#fb7185'}
+              fill={binCenter >= 0 ? '#33D49A' : '#FF5D73'}
               opacity={0.7}
             />
           );
@@ -266,16 +265,16 @@ function DistChart({ values, label, bins = 30 }: { values: number[]; label: stri
             x1={PAD.left + zeroIdx * barW}
             x2={PAD.left + zeroIdx * barW}
             y1={PAD.top} y2={H - PAD.bottom}
-            stroke="#fbbf24" strokeWidth="1" strokeDasharray="3,2"
+            stroke="#F5B13D" strokeWidth="1" strokeDasharray="3,2"
           />
         )}
-        <text x={PAD.left + 2} y={H - 4} fill="#64748b" fontSize="8">
+        <text x={PAD.left + 2} y={H - 4} fill="#5A6573" fontSize="8">
           {min.toFixed(2)}
         </text>
-        <text x={W - PAD.right - 2} y={H - 4} fill="#64748b" fontSize="8" textAnchor="end">
+        <text x={W - PAD.right - 2} y={H - 4} fill="#5A6573" fontSize="8" textAnchor="end">
           {max.toFixed(2)}
         </text>
-        <text x={W / 2} y={H - 4} fill="#64748b" fontSize="8" textAnchor="middle">
+        <text x={W / 2} y={H - 4} fill="#5A6573" fontSize="8" textAnchor="middle">
           n={values.length}
         </text>
       </svg>
@@ -283,8 +282,7 @@ function DistChart({ values, label, bins = 30 }: { values: number[]; label: stri
   );
 }
 
-export default function SectorDetailPage() {
-  const { code } = useParams<{ code: string }>();
+export default function SectorDetailPage({ code }: { code: string }) {
   const [interval, setInterval] = useState<Interval>('1d');
   const [lookback, setLookback] = useState(120);
   const [data, setData] = useState<{ sector: string; name: string; points: Point[]; stats: any } | null>(null);
@@ -310,46 +308,45 @@ export default function SectorDetailPage() {
   const latest = pts.length ? pts[pts.length - 1] : null;
 
   return (
-    <div className="p-6 space-y-4 text-slate-200">
+    <div className="px-8 py-8 max-w-[1240px] mx-auto space-y-[22px]">
       {/* Header */}
-      <header className="flex items-baseline gap-3">
-        <Link to="/flow" className="text-slate-500 hover:text-slate-300 text-sm">&larr; Back</Link>
-        <h1 className="text-2xl font-semibold text-white">
+      <header>
+        <h1 className="font-display text-[29px] font-bold text-hi tracking-tight">
           {data?.sector || code}
-          <span className="text-slate-400 text-lg ml-2 font-normal">{data?.name || ''}</span>
+          <span className="text-mid text-[18px] ml-2.5 font-normal">{data?.name || ''}</span>
         </h1>
       </header>
 
       {/* Controls */}
-      <div className="flex flex-wrap items-center gap-3 border border-slate-800 rounded-lg p-3 bg-slate-900">
-        <label className="text-sm text-slate-400">Interval:</label>
+      <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-panel border border-line p-3">
+        <label className="section-label">Interval</label>
         {INTERVALS.map(i => (
           <button
             key={i}
             className={`px-3 py-1 rounded text-xs font-medium transition ${
-              interval === i ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+              interval === i ? 'bg-raise text-hi shadow-sm' : 'text-mid hover:text-hi'
             }`}
             onClick={() => setInterval(i)}
           >
             {i.toUpperCase()}
           </button>
         ))}
-        <label className="ml-4 text-sm text-slate-400">Lookback:</label>
+        <label className="ml-4 section-label">Lookback</label>
         {[120, 250, 400, 800].map(lb => (
           <button
             key={lb}
             className={`px-3 py-1 rounded text-xs font-medium transition ${
-              lookback === lb ? 'bg-cyan-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+              lookback === lb ? 'bg-raise text-acc shadow-sm' : 'text-mid hover:text-hi'
             }`}
             onClick={() => setLookback(lb)}
           >
             {lb}d
           </button>
         ))}
-        <span className="ml-auto text-xs text-slate-500">{pts.length} data points</span>
+        <span className="ml-auto text-[11px] text-lo font-mono">{pts.length} phiên</span>
       </div>
 
-      {err && <div className="p-3 bg-red-900/40 border border-red-800 text-red-200 rounded text-sm">{err}</div>}
+      {err && <div className="p-3 bg-sell/[0.12] border border-sell/40 text-sell rounded-xl text-sm">{err}</div>}
 
       {/* KPI cards */}
       {latest && (
@@ -393,7 +390,7 @@ export default function SectorDetailPage() {
             points={pts}
             getY={p => p.close_idx}
             type="line"
-            color="#60a5fa"
+            color="#7FB2FF"
             label="Close Index (giá tổng hợp rổ proxy)"
             height={180}
             formatY={v => v.toFixed(0)}
@@ -404,8 +401,8 @@ export default function SectorDetailPage() {
               points={pts}
               getY={p => p.flow_z20}
               type="line"
-              color="#34d399"
-              negColor="#fb7185"
+              color="#33D49A"
+              negColor="#FF5D73"
               label="Flow Z20 (z-score 20 phiên net_dollar_flow)"
               height={150}
             />
@@ -413,7 +410,7 @@ export default function SectorDetailPage() {
               points={pts}
               getY={p => p.flow_z60}
               type="line"
-              color="#a78bfa"
+              color="#B98BFF"
               label="Flow Z60 (z-score 60 phiên — slow flow regime)"
               height={150}
             />
@@ -423,8 +420,8 @@ export default function SectorDetailPage() {
             points={pts}
             getY={p => p.net_dollar_flow / 1e9}
             type="bar"
-            color="#34d399"
-            negColor="#fb7185"
+            color="#33D49A"
+            negColor="#FF5D73"
             label="Net Dollar Flow (tỷ VND) — dương = tiền vào, âm = tiền ra"
             height={150}
             formatY={v => `${v.toFixed(1)}B`}
@@ -435,8 +432,8 @@ export default function SectorDetailPage() {
               points={pts}
               getY={p => p.foreign_net / 1e9}
               type="bar"
-              color="#38bdf8"
-              negColor="#f472b6"
+              color="#46C9E6"
+              negColor="#FF8FA0"
               label="Foreign Net (tỷ VND) — khối ngoại mua/bán ròng"
               height={150}
               formatY={v => `${v.toFixed(1)}B`}
@@ -445,7 +442,7 @@ export default function SectorDetailPage() {
               points={pts}
               getY={p => p.foreign_hit_20d}
               type="line"
-              color="#fbbf24"
+              color="#F5B13D"
               label="Foreign Hit 20d (% phiên ngoại mua ròng trong 20d gần nhất)"
               height={150}
               formatY={v => `${(v * 100).toFixed(0)}%`}
@@ -457,7 +454,7 @@ export default function SectorDetailPage() {
               points={pts}
               getY={p => p.breadth_sma20}
               type="line"
-              color="#a3e635"
+              color="#5CCFB8"
               label="Breadth SMA20 (tỷ lệ mã trên SMA20)"
               height={130}
               formatY={v => v.toFixed(2)}
@@ -466,7 +463,7 @@ export default function SectorDetailPage() {
               points={pts}
               getY={p => p.atr_pct ? p.atr_pct * 100 : null}
               type="line"
-              color="#f97316"
+              color="#E08A6B"
               label="ATR% (biến động trung bình 14 phiên)"
               height={130}
               formatY={v => `${v.toFixed(2)}%`}
@@ -477,7 +474,7 @@ export default function SectorDetailPage() {
             points={pts}
             getY={p => p.stealth_score}
             type="line"
-            color="#c084fc"
+            color="#9C8BFF"
             label="Stealth Score (composite: flow × breadth × 1/(1+atr))"
             height={130}
             formatY={v => v.toFixed(3)}
@@ -488,7 +485,7 @@ export default function SectorDetailPage() {
       {/* Distribution section */}
       {pts.length > 20 && (
         <div>
-          <h2 className="text-lg font-semibold text-white mb-3">Distribution</h2>
+          <h2 className="section-label mb-3">Distribution</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <DistChart values={netFlowDist} label="Net Dollar Flow (tỷ VND)" />
             <DistChart values={flowZ20Dist} label="Flow Z20" />
@@ -497,49 +494,49 @@ export default function SectorDetailPage() {
 
           {/* Stats table */}
           {stats && (
-            <div className="mt-3 bg-slate-900 border border-slate-800 rounded-lg p-4">
-              <div className="text-xs text-slate-400 mb-2 font-medium">Thống kê tổng hợp</div>
+            <div className="mt-3 rounded-2xl bg-panel border border-line p-4">
+              <div className="section-label mb-2">Thống kê tổng hợp</div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-sm">
                 <div>
-                  <span className="text-slate-500">Tổng phiên:</span>{' '}
-                  <span className="text-white font-mono">{stats.total_days}</span>
+                  <span className="text-lo">Tổng phiên:</span>{' '}
+                  <span className="text-hi font-mono tabular">{stats.total_days}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500">Phiên dương:</span>{' '}
-                  <span className="text-emerald-400 font-mono">{stats.positive_flow_days}</span>
-                  <span className="text-slate-600 text-xs ml-1">
+                  <span className="text-lo">Phiên dương:</span>{' '}
+                  <span className="text-buy font-mono tabular">{stats.positive_flow_days}</span>
+                  <span className="text-lo text-[11px] ml-1">
                     ({stats.total_days ? ((stats.positive_flow_days / stats.total_days) * 100).toFixed(0) : 0}%)
                   </span>
                 </div>
                 <div>
-                  <span className="text-slate-500">Phiên âm:</span>{' '}
-                  <span className="text-rose-400 font-mono">{stats.negative_flow_days}</span>
-                  <span className="text-slate-600 text-xs ml-1">
+                  <span className="text-lo">Phiên âm:</span>{' '}
+                  <span className="text-sell font-mono tabular">{stats.negative_flow_days}</span>
+                  <span className="text-lo text-[11px] ml-1">
                     ({stats.total_days ? ((stats.negative_flow_days / stats.total_days) * 100).toFixed(0) : 0}%)
                   </span>
                 </div>
                 <div>
-                  <span className="text-slate-500">Net flow trung bình:</span>{' '}
-                  <span className="text-white font-mono">{stats.net_flow_mean ? (stats.net_flow_mean / 1e9).toFixed(2) : '—'}B</span>
+                  <span className="text-lo">Net flow trung bình:</span>{' '}
+                  <span className="text-hi font-mono tabular">{stats.net_flow_mean ? (stats.net_flow_mean / 1e9).toFixed(2) : '—'}B</span>
                 </div>
                 <div>
-                  <span className="text-slate-500">Net flow median:</span>{' '}
-                  <span className="text-white font-mono">{stats.net_flow_median ? (stats.net_flow_median / 1e9).toFixed(2) : '—'}B</span>
+                  <span className="text-lo">Net flow median:</span>{' '}
+                  <span className="text-hi font-mono tabular">{stats.net_flow_median ? (stats.net_flow_median / 1e9).toFixed(2) : '—'}B</span>
                 </div>
                 <div>
-                  <span className="text-slate-500">Std dev:</span>{' '}
-                  <span className="text-white font-mono">{stats.net_flow_std ? (stats.net_flow_std / 1e9).toFixed(2) : '—'}B</span>
+                  <span className="text-lo">Std dev:</span>{' '}
+                  <span className="text-hi font-mono tabular">{stats.net_flow_std ? (stats.net_flow_std / 1e9).toFixed(2) : '—'}B</span>
                 </div>
                 <div>
-                  <span className="text-slate-500">Q25 / Q75:</span>{' '}
-                  <span className="text-white font-mono">
+                  <span className="text-lo">Q25 / Q75:</span>{' '}
+                  <span className="text-hi font-mono tabular">
                     {stats.net_flow_q25 ? (stats.net_flow_q25 / 1e9).toFixed(2) : '—'} / {stats.net_flow_q75 ? (stats.net_flow_q75 / 1e9).toFixed(2) : '—'}B
                   </span>
                 </div>
                 <div>
-                  <span className="text-slate-500">Flow Z20 avg:</span>{' '}
-                  <span className="text-white font-mono">{stats.flow_z20_mean?.toFixed(2) ?? '—'}</span>
-                  <span className="text-slate-600 text-xs ml-1">
+                  <span className="text-lo">Flow Z20 avg:</span>{' '}
+                  <span className="text-hi font-mono tabular">{stats.flow_z20_mean?.toFixed(2) ?? '—'}</span>
+                  <span className="text-lo text-[11px] ml-1">
                     (std: {stats.flow_z20_std?.toFixed(2) ?? '—'})
                   </span>
                 </div>
@@ -551,41 +548,41 @@ export default function SectorDetailPage() {
 
       {/* Raw data table (last 30 rows) */}
       {pts.length > 0 && (
-        <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden">
-          <div className="p-3 border-b border-slate-800 flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-400">Raw Data (30 phiên gần nhất)</span>
+        <div className="rounded-2xl bg-panel border border-line overflow-hidden">
+          <div className="p-3 border-b border-line flex items-center justify-between">
+            <span className="section-label">Raw Data (30 phiên gần nhất)</span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
-              <thead className="bg-slate-800/60">
+              <thead className="bg-panel2 border-b border-line">
                 <tr>
                   {['Date', 'Close', 'Net Flow (B)', 'Flow Z20', 'Foreign Net (B)', 'Foreign Hit', 'Breadth', 'ATR%', 'Stealth'].map(h => (
-                    <th key={h} className="p-2 text-left text-slate-500 font-medium whitespace-nowrap">{h}</th>
+                    <th key={h} className="p-2 text-left text-[10px] uppercase tracking-wider text-mid whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {pts.slice(-30).reverse().map(p => (
-                  <tr key={p.date} className="border-t border-slate-800/50 hover:bg-slate-800/30">
-                    <td className="p-2 text-slate-300 font-mono">{p.date}</td>
-                    <td className="p-2 text-slate-200 font-mono">{p.close_idx?.toFixed(1) ?? '—'}</td>
-                    <td className={`p-2 font-mono ${p.net_dollar_flow >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  <tr key={p.date} className="border-b border-line hover:bg-panel2/60">
+                    <td className="p-2 text-mid font-mono tabular">{p.date}</td>
+                    <td className="p-2 text-hi font-mono tabular">{p.close_idx?.toFixed(1) ?? '—'}</td>
+                    <td className={`p-2 font-mono ${p.net_dollar_flow >= 0 ? 'text-buy' : 'text-sell'}`}>
                       {(p.net_dollar_flow / 1e9).toFixed(2)}
                     </td>
-                    <td className={`p-2 font-mono ${(p.flow_z20 ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    <td className={`p-2 font-mono ${(p.flow_z20 ?? 0) >= 0 ? 'text-buy' : 'text-sell'}`}>
                       {p.flow_z20?.toFixed(2) ?? '—'}
                     </td>
-                    <td className={`p-2 font-mono ${p.foreign_net >= 0 ? 'text-cyan-400' : 'text-pink-400'}`}>
+                    <td className={`p-2 font-mono ${p.foreign_net >= 0 ? 'text-acc' : 'text-warn'}`}>
                       {(p.foreign_net / 1e9).toFixed(2)}
                     </td>
-                    <td className="p-2 font-mono text-yellow-400">
+                    <td className="p-2 font-mono text-warn">
                       {p.foreign_hit_20d !== null ? `${(p.foreign_hit_20d * 100).toFixed(0)}%` : '—'}
                     </td>
-                    <td className="p-2 font-mono text-lime-400">{p.breadth_sma20?.toFixed(2) ?? '—'}</td>
-                    <td className="p-2 font-mono text-orange-400">
+                    <td className="p-2 font-mono text-buy">{p.breadth_sma20?.toFixed(2) ?? '—'}</td>
+                    <td className="p-2 font-mono text-warn">
                       {p.atr_pct ? `${(p.atr_pct * 100).toFixed(2)}%` : '—'}
                     </td>
-                    <td className="p-2 font-mono text-purple-400">{p.stealth_score?.toFixed(3) ?? '—'}</td>
+                    <td className="p-2 font-mono text-acc">{p.stealth_score?.toFixed(3) ?? '—'}</td>
                   </tr>
                 ))}
               </tbody>

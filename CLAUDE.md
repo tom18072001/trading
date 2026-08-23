@@ -81,17 +81,17 @@ Replace 9 symbol pages with 5 sector pages: Flow Dashboard, Rotation Ranking, Re
 > pages above (Ranking, Regime, Backtest, Risk) had been *built and working*
 > for months but had no `<Route>`, so the only way to reach them was to edit
 > the source. They are wired now, lazily, under a second nav group
-> ("Ra quyết định"). The nav is:
->
-> | Theo dõi | Ra quyết định |
-> |---|---|
-> | Daily Insight · Money Flow Monitor · Rotation Map · Stealth Watch · Flow Pulse | Xếp hạng ngành · Trạng thái thị trường · Rủi ro & Vị thế · Backtest |
+> ("Ra quyết định"), giving nine nav items.
 >
 > Twelve page components were deleted rather than wired: nine were one-line
 > stubs, and `FlowPage`, `BriefingPage` and `AccumulationPage` were superseded
 > (by FlowMonitorPage, by the in-page trader agent, and by StealthWatchPage
 > respectively — and `/accumulation` would have rendered permanently empty
 > since `accumulation_age` is zero on every row).
+>
+> **Later the same day those nine merged back to five — see §22.9 for the
+> current nav.** The name `FlowPage.tsx` was reused for the merged
+> Money Flow Monitor + Sector Detail page; it is not the deleted one.
 
 ## 13. Migration Order (execution sequence)
 1. Freeze legacy tables with `_legacy_` prefix.
@@ -511,3 +511,32 @@ single source, and it separates two things that were being conflated:
 instruction, and it must never read like a BUY. **TRIM is rendered but never
 emitted** — the signal service has no path to it, so §16.3 is still four states
 in practice. That is a doctrine-vs-code gap of the same family as P1-1.
+
+### 22.9 Nav merged 9 → 5 — 2026-08-23
+Nine nav doors for 15 sectors was more navigation than data, and every merge
+below removes a context switch rather than a page. Nothing was deleted: every
+pre-merge path redirects, including `/flow/:code`.
+
+| nav | contains | why together |
+|---|---|---|
+| Daily Insight | (unchanged) | the screen you open every morning |
+| Dòng tiền | Money Flow Monitor + Sector Detail | clicking a sector used to leave the page and drop your interval, `flow_z_hot` and chart selection |
+| Luân chuyển | Stealth Watch + Rotation Map | one question, two phases — §16.1 accumulation (early) vs. the handoff that already happened |
+| Rủi ro & Vị thế | Risk + Flow Pulse | also removes the last way the two exposure panels of §22.1/A4 could disagree |
+| Nghiên cứu | Xếp hạng + Regime + Backtest | none of the three is a daily job |
+
+Tabs live in the URL (`?tab=`, `components/Tabs.tsx`) with `replace: true` —
+a merged page must keep the deep links its old routes had, and switching tabs
+must not stack history entries.
+
+`SectorDetailPage` was the last page still on raw Tailwind (37 `slate-*` hits
+plus 20 hardcoded SVG hexes); it was tokenised in the same pass, so §22.8's
+claim now holds for the whole app.
+
+Daily Insight also gained a sticky jump bar: the buy/sell list — the thing
+people open the page for — sat below the gauge, the spectrum and Minh's memo,
+about two laptop screens down.
+
+Bundle: main **376.43 → 371.12 kB**. `PositionsPage` (12.7 kB) and
+`ResearchPage` (1.05 kB) are lazy, and recharts stays in its own 346 kB chunk
+that only loads when you select the Backtest tab.

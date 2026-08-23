@@ -53,26 +53,23 @@ const ICONS: Record<string, ReactNode> = {
   </>),
 };
 
-// Two groups, because they answer different questions. "Theo dõi" is what is
-// happening in the market right now; "Ra quyết định" is what the system thinks
-// you should do about it and what that would have cost you.
+// 2026-08-23 (review §C): nav merged 9 → 5. Nine doors for 15 sectors was
+// more navigation than data. What merged into what:
 //
-// The second group was wired on 2026-08-23. All four pages existed and worked;
-// none had a route. CLAUDE.md section 12 lists Rotation Ranking, Regime
-// Monitor, Sector Backtest and Risk as deliverables of this redesign.
+//   Dòng tiền        = Money Flow Monitor + Sector Detail  (tab, same page)
+//   Luân chuyển      = Stealth Watch + Rotation Map        (early vs. already moved)
+//   Rủi ro & Vị thế  = Risk + Flow Pulse                   (also kills the §A4 double exposure)
+//   Nghiên cứu       = Xếp hạng + Regime + Backtest        (not a daily job)
+//
+// The groups are gone with them: five items do not need headers, and the
+// "Theo dõi / Ra quyết định" split was describing the old nine.
 const nav = [
-  { to: '/insight', label: 'Daily Insight', icon: 'insight', end: false, group: 'Theo dõi' },
-  { to: '/flow', label: 'Money Flow Monitor', icon: 'flow', end: true, group: 'Theo dõi' },
-  { to: '/rotation', label: 'Rotation Map', icon: 'rotation', end: false, group: 'Theo dõi' },
-  { to: '/stealth', label: 'Stealth Watch', icon: 'stealth', end: false, group: 'Theo dõi' },
-  { to: '/pulse', label: 'Flow Pulse', icon: 'pulse', end: false, group: 'Theo dõi' },
-  { to: '/ranking', label: 'Xếp hạng ngành', icon: 'ranking', end: false, group: 'Ra quyết định' },
-  { to: '/regime', label: 'Trạng thái thị trường', icon: 'regime', end: false, group: 'Ra quyết định' },
-  { to: '/risk', label: 'Rủi ro & Vị thế', icon: 'risk', end: false, group: 'Ra quyết định' },
-  { to: '/backtest', label: 'Backtest', icon: 'backtest', end: false, group: 'Ra quyết định' },
+  { to: '/insight', label: 'Daily Insight', icon: 'insight', hint: 'Mở mỗi sáng' },
+  { to: '/flow', label: 'Dòng tiền', icon: 'flow', hint: '15 ngành + chi tiết' },
+  { to: '/rotation', label: 'Luân chuyển', icon: 'rotation', hint: 'Tiền đi đâu tiếp' },
+  { to: '/positions', label: 'Rủi ro & Vị thế', icon: 'risk', hint: 'Đang nắm gì' },
+  { to: '/research', label: 'Nghiên cứu', icon: 'backtest', hint: 'Backtest · xếp hạng · regime' },
 ];
-
-const navGroups = ['Theo dõi', 'Ra quyết định'] as const;
 
 export default function Layout() {
   return (
@@ -100,39 +97,33 @@ export default function Layout() {
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 px-3 py-4 overflow-y-auto">
-          {navGroups.map((group) => (
-            <div key={group} className="mb-4 last:mb-0">
-              <div className="section-label px-2 mb-2">{group}</div>
-              <div className="space-y-1">
-                {nav.filter((item) => item.group === group).map((item) => (
-
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className={({ isActive }) =>
-                  `relative flex items-center gap-2.5 rounded-[9px] px-3 py-2.5 text-[13px] font-medium transition-all ${
-                    isActive
-                      ? 'text-acc border border-acc/[0.22]'
-                      : 'text-mid border border-transparent hover:bg-white/[0.04] hover:text-hi'
-                  }`
-                }
-                style={({ isActive }) =>
+        <nav className="flex-1 px-3 py-4 overflow-y-auto space-y-1">
+          {nav.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) =>
+                `relative flex items-center gap-2.5 rounded-[9px] px-3 py-2.5 text-[13px] font-medium transition-all ${
                   isActive
-                    ? {
-                        background: 'linear-gradient(90deg, rgba(70,201,230,.13), transparent)',
-                        boxShadow: 'inset 2.5px 0 0 0 #46C9E6',
-                      }
-                    : undefined
-                }
-              >
-                <span className="w-[18px] flex items-center justify-center">{ICONS[item.icon]}</span>
-                <span>{item.label}</span>
-              </NavLink>
-                ))}
-              </div>
-            </div>
+                    ? 'text-acc border border-acc/[0.22]'
+                    : 'text-mid border border-transparent hover:bg-white/[0.04] hover:text-hi'
+                }`
+              }
+              style={({ isActive }) =>
+                isActive
+                  ? {
+                      background: 'linear-gradient(90deg, rgba(70,201,230,.13), transparent)',
+                      boxShadow: 'inset 2.5px 0 0 0 #46C9E6',
+                    }
+                  : undefined
+              }
+            >
+              <span className="w-[18px] flex items-center justify-center shrink-0">{ICONS[item.icon]}</span>
+              <span className="leading-tight">
+                {item.label}
+                <span className="block text-[10px] text-lo font-normal">{item.hint}</span>
+              </span>
+            </NavLink>
           ))}
         </nav>
 

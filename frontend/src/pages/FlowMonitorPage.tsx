@@ -284,7 +284,9 @@ export default function FlowMonitorPage() {
                   <td className="p-2.5 text-lo font-mono">{r.rank}</td>
                   <td className="p-2.5">
                     <span className="inline-block w-2 h-2 rounded-full mr-2 align-middle" style={{ background: colorFor(r.sector) }} />
-                    <Link to={`/flow/${r.sector}`} onClick={(e) => e.stopPropagation()} className="font-semibold text-hi hover:text-acc transition">{r.sector}</Link>
+                    {/* Opens the Chi tiết tab of this same page, not a new
+                        route — the interval and flow_z_hot you set survive. */}
+                    <Link to={`/flow?tab=detail&code=${r.sector}`} onClick={(e) => e.stopPropagation()} className="font-semibold text-hi hover:text-acc transition">{r.sector}</Link>
                     <span className="text-lo text-xs ml-2">{r.name}</span>
                   </td>
                   <td className="p-2.5 text-right font-mono text-hi">{r.score.toFixed(2)}</td>
