@@ -16,7 +16,6 @@ def _heuristic_regime(macro: pd.DataFrame) -> tuple[str, float]:
     """Fallback if hmmlearn unavailable. Inputs assumed sorted ascending."""
     if macro.empty:
         return "chop", 0.0
-    last = macro.iloc[-1]
     vn_ret = macro["vnindex"].pct_change(20).iloc[-1] if "vnindex" in macro else 0.0
     vol = macro["vnindex"].pct_change().rolling(20).std().iloc[-1] if "vnindex" in macro else 0.0
     if pd.isna(vn_ret):

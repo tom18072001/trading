@@ -9,9 +9,7 @@ from __future__ import annotations
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import Optional
 
-import numpy as np
 import pandas as pd
 import requests
 from sqlalchemy.orm import Session
@@ -164,10 +162,21 @@ def incremental_ingest(session: Session, progress_cb=None) -> dict:
                     foreign_by_date[d]["net"] += float(row.get("netVal") or 0)
             time.sleep(0.05)
 
-        # 3) Find new dates not yet in DB
-        existing_dates = {
-            r.date for r in
-            session.query(SectorFlowDaily.date)
+        # 3) Which dates do we have constituent bars for?
+        #
+        # Review 2026-08-22, P0-2: this used to subtract `existing_dates` and
+        # skip anything already present. Combined with the 16:00 EOD job --
+        # which wrote a row with NO close_idx -- that meant the scheduler
+        # claimed each date first and this path, the only one that knows how to
+        # write close_idx, then skipped it FOREVER. close_idx stayed NULL
+        # permanently, which is what scripts/fix_close_idx.py,
+        # scripts/backfill_close_idx.py and the STEALTH_SYNTHETIC_CLOSE flag
+        # were all invented to paper over.
+        #
+        # It now upserts, so it can repair a date the scheduler left incomplete.
+        existing_rows = {
+            r.date: r for r in
+            session.query(SectorFlowDaily)
             .filter_by(sector_code=code)
             .filter(SectorFlowDaily.date > latest_date)
             .all()
@@ -181,7 +190,7 @@ def incremental_ingest(session: Session, progress_cb=None) -> dict:
                 if d > latest_date:
                     all_dates.add(d)
 
-        new_dates = sorted(all_dates - existing_dates)
+        new_dates = sorted(all_dates)
         if not new_dates:
             report["sectors"][code] = 0
             continue
@@ -217,19 +226,22 @@ def incremental_ingest(session: Session, progress_cb=None) -> dict:
 
             up_dn = (agg.up_vol / agg.down_vol) if (agg.down_vol and agg.down_vol > 0) else None
 
-            session.add(SectorFlowDaily(
-                sector_code=code,
-                date=date_str,
-                net_dollar_flow=agg.net_dollar_flow,
-                foreign_net=fg["net"],
-                foreign_buy_val=fg["buy"],
-                foreign_sell_val=fg["sell"],
-                up_down_vol_ratio=up_dn,
-                breadth_sma20=agg.breadth_sma20,
-                breadth_sma50=agg.breadth_sma50,
-                atr_pct=agg.atr_pct,
-                close_idx=agg.close_idx,
-            ))
+            row = existing_rows.get(date_str)
+            if row is None:
+                row = SectorFlowDaily(sector_code=code, date=date_str)
+                session.add(row)
+                existing_rows[date_str] = row
+
+            row.net_dollar_flow = agg.net_dollar_flow
+            row.foreign_net = fg["net"]
+            row.foreign_buy_val = fg["buy"]
+            row.foreign_sell_val = fg["sell"]
+            row.up_down_vol_ratio = up_dn
+            row.breadth_sma20 = agg.breadth_sma20
+            row.breadth_sma50 = agg.breadth_sma50
+            row.atr_pct = agg.atr_pct
+            row.close_idx = agg.close_idx
+            row.return_1d = agg.basket_return
             written += 1
 
         report["sectors"][code] = written

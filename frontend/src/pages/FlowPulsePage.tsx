@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { pulseApi } from '../api/client';
+import { pulseApi, sectorsApi } from '../api/client';
 
 export default function FlowPulsePage() {
   const [data, setData] = useState<any>(null);
@@ -7,26 +7,25 @@ export default function FlowPulsePage() {
   const [exposure, setExposure] = useState<any>(null);
   const [alertZ, setAlertZ] = useState(1.5);
   const [err, setErr] = useState<string | null>(null);
-  const [clock, setClock] = useState(() => new Date());
   const [varOpen, setVarOpen] = useState(false);
 
-  // Live tape + alerts: poll every 30s (production cadence).
+  // Poll every 30s. That is fast enough to pick up the 16:00 EOD rollup
+  // without a reload, and there is nothing faster to pick up: every source
+  // below reads sector_flow_daily, one row per sector per DAY.
   useEffect(() => {
     const load = () => {
       pulseApi.live(alertZ).then((r) => setData(r.data)).catch((e) => setErr(String(e?.message || e)));
       pulseApi.alerts(alertZ).then((r: any) => setAlerts(r.data?.alerts || r.data?.rows || [])).catch(() => {});
-      pulseApi.exposure().then((r: any) => setExposure(r.data)).catch(() => {});
+      // 2026-08-23 (review A4): was pulseApi.exposure(), which is a hardcoded
+      // `{"rows": []}` stub in api/routers/pulse.py — this panel had been
+      // permanently blank while the real implementation sat one router away
+      // in sectors_risk.py. sectorsApi.exposure() returns ExposureRow[].
+      sectorsApi.exposure().then((r: any) => setExposure(r.data)).catch(() => {});
     };
     load();
     const t = window.setInterval(load, 30000);
     return () => window.clearInterval(t);
   }, [alertZ]);
-
-  // Ticking clock (1s).
-  useEffect(() => {
-    const c = window.setInterval(() => setClock(new Date()), 1000);
-    return () => window.clearInterval(c);
-  }, []);
 
   const rows = (data?.rows ?? []).slice().sort((a: any, b: any) => (b.flow_z20 ?? 0) - (a.flow_z20 ?? 0));
   const expRows = exposure?.rows ?? (Array.isArray(exposure) ? exposure : []);
@@ -45,14 +44,16 @@ export default function FlowPulsePage() {
         <div>
           <h1 className="font-display text-[29px] font-bold text-hi tracking-tight flex items-center gap-3">
             Flow Pulse
-            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-buy/[0.13] text-buy text-[11px] font-semibold">
-              <span className="w-1.5 h-1.5 rounded-full bg-buy animate-live-ping" /> LIVE
+            {/* 2026-08-23 (review A6): this was a pinging "LIVE" badge next to a
+                1s ticking clock, over a table with one row per sector per DAY.
+                The clock advanced; the data did not. Show the session instead. */}
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-raise text-mid text-[11px] font-semibold font-mono">
+              Dữ liệu EOD · {data?.as_of || '—'}
             </span>
           </h1>
-          <p className="text-[13px] text-mid mt-0.5">Tape dòng tiền trong phiên + cảnh báo + exposure</p>
+          <p className="text-[13px] text-mid mt-0.5">Dòng tiền cuối phiên + cảnh báo + exposure</p>
         </div>
         <div className="flex items-center gap-3 self-center">
-          <span className="font-mono text-hi text-[15px] tabular">{clock.toLocaleTimeString('vi-VN', { hour12: false })}</span>
           <label className="text-[12px] text-mid flex items-center gap-2">alert_z
             <input type="number" step={0.1} value={alertZ} onChange={(e) => setAlertZ(parseFloat(e.target.value) || 0)}
               className="bg-panel2 border border-line rounded-md px-2 py-1 w-16 text-[12px] text-hi font-mono" />
@@ -83,7 +84,7 @@ export default function FlowPulsePage() {
       {/* Live tape */}
       <section className="rounded-2xl bg-panel border border-line overflow-hidden">
         <div className="p-3 border-b border-line flex items-center justify-between">
-          <span className="section-label">Live tape</span>
+          <span className="section-label">Dòng tiền theo ngành</span>
           <span className="text-[10px] text-lo font-mono">as of {data?.as_of || '—'} · auto 30s</span>
         </div>
         <table className="w-full text-sm">

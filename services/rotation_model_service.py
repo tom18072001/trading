@@ -35,7 +35,7 @@ class RotationModelService:
         model=None → lazy-train every predict)."""
         run = (
             self.session.query(ModelRun)
-            .filter(ModelRun.model_name == "rotation_ranker_v0",
+            .filter(ModelRun.model_name == "rotation_ranker",
                     ModelRun.is_active.is_(True),
                     ModelRun.status == "completed")
             .order_by(ModelRun.id.desc())
@@ -61,12 +61,12 @@ class RotationModelService:
         # Mark previous active runs inactive (any horizon — a 20d run supersedes
         # legacy 5d runs too, so deactivate by model_name not target_col).
         self.session.query(ModelRun).filter(
-            ModelRun.model_name == "rotation_ranker_v0",
+            ModelRun.model_name == "rotation_ranker",
             ModelRun.is_active.is_(True),
         ).update({"is_active": False})
 
         run = ModelRun(
-            model_name="rotation_ranker_v0",
+            model_name="rotation_ranker",
             target_col=TARGET_COL,
             train_size=result.n_train,
             test_size=result.n_test,
@@ -129,11 +129,11 @@ class RotationModelService:
         today = datetime.now().strftime("%Y-%m-%d")
         rec = self.session.query(SectorRegime).filter_by(date=today).one_or_none()
         if rec is None:
-            rec = SectorRegime(date=today, regime_label=label, confidence=conf, model_version="hmm_v0")
+            rec = SectorRegime(date=today, regime_label=label, confidence=conf, model_version="hmm")
             self.session.add(rec)
         else:
             rec.regime_label = label
             rec.confidence = conf
-            rec.model_version = "hmm_v0"
+            rec.model_version = "hmm"
         self.session.commit()
         return rec

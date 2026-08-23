@@ -1,5 +1,5 @@
 """Tests for services.picks_scoring — the shared scoring + validity module
-consumed by generate_secv3.py, PicksUniverseService, and insight.py.
+consumed by generate_report.py, PicksUniverseService, and insight.py.
 
 These tests anchor the invariants that the NVL-style "target below close"
 bug must never return. Any change to the scoring/stop/target rules must

@@ -75,7 +75,8 @@ class APIKeyManager:
         stmt = (
             select(APIKey, APIUser)
             .join(APIUser, APIKey.user_id == APIUser.id)
-            .where(APIKey.key_prefix == prefix, APIKey.is_active == True, APIUser.is_active == True)
+            .where(APIKey.key_prefix == prefix,
+                   APIKey.is_active.is_(True), APIUser.is_active.is_(True))
         )
         results = self.session.execute(stmt).all()
 
@@ -101,7 +102,7 @@ class APIKeyManager:
         return True
 
     def list_keys(self, user_id: int) -> list[dict]:
-        stmt = select(APIKey).where(APIKey.user_id == user_id, APIKey.is_active == True)
+        stmt = select(APIKey).where(APIKey.user_id == user_id, APIKey.is_active.is_(True))
         keys = self.session.execute(stmt).scalars().all()
         return [{
             "id": k.id, "name": k.name, "prefix": k.key_prefix,

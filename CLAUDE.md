@@ -12,10 +12,17 @@ Pivot the VN Trading system from per-symbol prediction to **sector-level money-f
 - KEEP: Python/FastAPI/SQLAlchemy/SQLite(WAL), migrations, service-layer pattern, router pattern, backtest engine skeleton, risk math, scheduler heartbeat (Asia/Ho_Chi_Minh), vnstock integration.
 - REMOVE: 170-symbol universe, `stock_prices`, `stock_features`, `trade_setups`, `predictions`, symbol screener, T+3 scanner, symbol pages in frontend, per-symbol ML.
 - REPLACE: primary key `symbol` → `sector_code` everywhere.
-- **Per-ticker picks (2026-04-17 onward):** `generate_secv5.py` and `api/routers/insight.py` read per-ticker BUY/ACCUMULATE picks exclusively from `services.picks_universe_service.PicksUniverseService` (dynamic HOSE universe from vnstock Listing). They no longer read `_legacy_stocks`, `_legacy_stock_prices`, or `_legacy_stock_features`. These three tables stay in the DB during a 2-week shadow window then drop in migration 10.
-- **Email report (2026-04-23 onward):** `generate_secv5.py` is the **sole** daily email generator. It unifies the picks surfaced in the Daily Insight page (`snapshot.top_buys`/`top_sells` — no ranker gate) with the ranker-gated BUY/ACCUMULATE picks into a single de-duped list, each entry tagged with its source (`BOTH` / `DAILY_INSIGHT` / `RANKER`). The HTML/PDF gains an Expert Trader Memo section at the top; the email body is plain text (buy symbols + reasons + Dashboard + news links). Default recipients: `tka2001@gmail.com, anhchitruong18@gmail.com, hill.nguyen.1373@gmail.com`. `scripts/jobs/job_sector_signal_publish.bat` calls `generate_secv5.py`.
-- **SecV3/SecV4 deleted (2026-06-18):** `generate_secv3.py` and `generate_secv4.py` removed from the repo — they were carried only as manual rollback paths and had drifted from secv5 (duplicate-but-divergent helpers). secv5 is now the single source of truth for the daily report. If a stale Task Scheduler entry still invokes secv3/secv4, run `scripts/pause_secv3_secv4_email.ps1` (elevated PowerShell) to evict it.
-- **SecV2 retired (2026-04-20):** `generate_secv2.py` + `run_secv2_daily.bat` deleted from the repo. The Windows 17:00 scheduled task that invoked them is obsolete — run `scripts/cleanup_scheduled_tasks.ps1` (elevated PowerShell) to unregister it and dedupe the SecV4 task.
+- **Per-ticker picks (2026-04-17 onward):** `generate_report.py` and `api/routers/insight.py` read per-ticker BUY/ACCUMULATE picks exclusively from `services.picks_universe_service.PicksUniverseService` (dynamic HOSE universe from vnstock Listing). They no longer read `_legacy_stocks`, `_legacy_stock_prices`, or `_legacy_stock_features`. These three tables stay in the DB during a 2-week shadow window then drop in migration 10.
+- **Email report (2026-04-23 onward):** `generate_report.py` is the **sole** daily email generator. It unifies the picks surfaced in the Daily Insight page (`snapshot.top_buys`/`top_sells` — no ranker gate) with the ranker-gated BUY/ACCUMULATE picks into a single de-duped list, each entry tagged with its source (`BOTH` / `DAILY_INSIGHT` / `RANKER`). The HTML/PDF gains an Expert Trader Memo section at the top; the email body is plain text (buy symbols + reasons + Dashboard + news links). Default recipients: `tka2001@gmail.com, anhchitruong18@gmail.com, hill.nguyen.1373@gmail.com`. `scripts/jobs/job_sector_signal_publish.bat` calls `generate_report.py`.
+- **One report generator, no versioned copies.** `generate_report.py` is the only
+  daily-report generator in the repo. Every earlier numbered copy is gone:
+  SecV2 on 2026-04-20, SecV3 + SecV4 on 2026-06-18 (they were kept only as
+  manual rollback paths and had drifted into duplicate-but-divergent helpers),
+  and SecV5 was renamed to `generate_report.py` on 2026-08-22 (§21 — version
+  numbers do not belong in names). If a stale Task Scheduler entry still points
+  at one of them, run `scripts/pause_legacy_email_task.ps1` (elevated
+  PowerShell) to evict it, then `scripts/cleanup_scheduled_tasks.ps1` to
+  re-register the 8 canonical jobs.
 
 ## 3. The 15 Sectors (inherited from legacy SECTOR_MAP)
 Ngân hàng, Chứng khoán, Bất động sản, Thép & VLXD, Bán lẻ, Thực phẩm, Dầu khí, Điện & NL, Công nghệ, Hàng không & Logistics, Bảo hiểm, Hóa chất & Phân bón, Dệt may, Cao su & Nhựa, Thủy sản.
@@ -70,6 +77,22 @@ Benchmark VNINDEX B&H. Sharpe > 1.0, MaxDD < 15%, top-rank hit-rate > 55%.
 ## 12. Frontend
 Replace 9 symbol pages with 5 sector pages: Flow Dashboard, Rotation Ranking, Regime Monitor, Sector Backtest, Risk.
 
+> **2026-08-23 — reconciled with what actually shipped.** Four of the five
+> pages above (Ranking, Regime, Backtest, Risk) had been *built and working*
+> for months but had no `<Route>`, so the only way to reach them was to edit
+> the source. They are wired now, lazily, under a second nav group
+> ("Ra quyết định"). The nav is:
+>
+> | Theo dõi | Ra quyết định |
+> |---|---|
+> | Daily Insight · Money Flow Monitor · Rotation Map · Stealth Watch · Flow Pulse | Xếp hạng ngành · Trạng thái thị trường · Rủi ro & Vị thế · Backtest |
+>
+> Twelve page components were deleted rather than wired: nine were one-line
+> stubs, and `FlowPage`, `BriefingPage` and `AccumulationPage` were superseded
+> (by FlowMonitorPage, by the in-page trader agent, and by StealthWatchPage
+> respectively — and `/accumulation` would have rendered permanently empty
+> since `accumulation_age` is zero on every row).
+
 ## 13. Migration Order (execution sequence)
 1. Freeze legacy tables with `_legacy_` prefix.
 2. Migration 8: add new schema.
@@ -79,7 +102,7 @@ Replace 9 symbol pages with 5 sector pages: Flow Dashboard, Rotation Ranking, Re
 6. Retrofit backtest + risk services.
 7. Rewrite briefing + Gmail template. **[2026-04-18 SUPERSEDED]** OpenClaw removed; replaced by in-process `services.trader_agent.TraderAgent` via `claude_agent_sdk` (see `specs/trader_agent.md`).
 8. Replace frontend pages.
-8.5. **Introduce `PicksUniverseService`** — consolidate per-ticker picks under one dynamic HOSE universe; retire `_legacy_stock_*` reads from `generate_secv3.py` and `api/routers/insight.py` (see `specs/picks_universe.md`, 2026-04-17).
+8.5. **Introduce `PicksUniverseService`** — consolidate per-ticker picks under one dynamic HOSE universe; retire `_legacy_stock_*` reads from the report generator (then SecV3, now `generate_report.py`) and `api/routers/insight.py` (see `specs/picks_universe.md`, 2026-04-17).
 9. Shadow-run 2 weeks.
 10. Drop `_legacy_` tables + delete symbol code.
 
@@ -87,7 +110,7 @@ Replace 9 symbol pages with 5 sector pages: Flow Dashboard, Rotation Ranking, Re
 - Proxy basket size: **top 5 by market cap** per sector.
 - Backfill depth: **5 years** (or max vnstock available).
 - Execution universe: **top-3 constituents basket** (ETF liquidity in VN is thin).
-- OpenClaw agent Trung: **retired 2026-04-18** — replaced by `services.trader_agent.TraderAgent` ("Minh"), powered by `claude_agent_sdk` (uses your Claude Code subscription, no separate API key). Invoked from `POST /api/insight/refresh`. Output rendered inline on the Daily Insight page.
+- OpenClaw agent Trung: **retired 2026-04-18** — replaced by `services.trader_agent.TraderAgent` ("Minh"). **2026-07-20: default provider is now `local`** — plain HTTP to an OpenAI-compatible `/chat/completions` endpoint, no `claude_agent_sdk`. **2026-08-23: `local` names the transport, not where the model runs.** It points at 9Router (`LOCAL_BASE_URL` default `http://localhost:20128/v1`, dashboard `http://localhost:20128/dashboard`), a local router fronting hosted Claude models; `LOCAL_MODEL` default `claude-opus-5`. The previous Ollama defaults (`:11434`, `qwen3:8b`) were dropped — Ollama was never running on this box, so the agent had been failing on every run. Alternatives via `AGENT_PROVIDER`: `glm` (Z.ai Anthropic-compatible endpoint, model `glm-5.2`, needs `GLM_API_KEY`) or `claude` (Claude Code subscription). The SDK is imported lazily, so a local-only install does not need it. Invoked from `POST /api/insight/refresh`. Output rendered inline on the Daily Insight page.
 - Frontend: **feature flag** during shadow run, hard-cut after.
 
 Change any of these by editing this file and logging in `MODIFICATION_LOG.md`.
@@ -103,6 +126,13 @@ Every code or schema change must:
 > **Thesis:** In the VN market, public news/analyst coverage lags real money movement by **~1 month**. By the time a sector is "on the news", smart money has already accumulated. The system's job is therefore **not** to predict next-day return — it is to **detect stealth accumulation 2-4 weeks before the breakout**, so Tom can buy "at the root" (gốc) or at worst "high on the branch" (cành cao), never at the canopy (ngọn).
 
 ### 16.1 What "early" means, formally
+> **⚠ Doctrine vs. code (2026-08-22).** The thresholds below are the approved
+> doctrine. `analysis/stealth.py` currently ships **N=3** and **bottom 60%**,
+> and drops condition 2 entirely whenever `foreign_net` is all-zero — which it
+> is across the whole history (see §20, P0-5). The gate can therefore run on 3
+> conditions, not 5. This was never logged per §15. **Decide which numbers are
+> real and make both places agree** — see `docs/reviews/CODE_REVIEW_2026-08-22.md` P1-1.
+
 A sector is in **stealth accumulation** when ALL of these hold simultaneously for ≥ N sessions (default N=5):
 1. **Rolling 20d net dollar flow z-score > +1.0** (flow regime shift vs own history)
 2. **Foreign net buy positive on ≥ 60% of sessions in the last 20d** (smart-money persistence)
@@ -140,7 +170,7 @@ Extend `SectorSignal.action` enum:
 |---|---|---|
 | stealth_scanner | 0 17 * * 1-5 | Evaluate §16.1 conditions per sector, emit `ACCUMULATE` signals when they flip. |
 | lead_time_audit | 0 3 * * 1 | Weekly: for each past breakout, measure how many days earlier `flow_z20` crossed +1; store in `flow_leadtime_proxy`. Use as model diagnostic. |
-| flow_regime_report | 30 17 * * 5 | Friday EOD: export a "sector flow heatmap" (z20 grid) to Gmail via `trader_agent` + `generate_secv4`. |
+| flow_regime_report | 30 17 * * 5 | Friday EOD: export a "sector flow heatmap" (z20 grid) to Gmail via `trader_agent` + `generate_report.py`. |
 
 ### 16.6 Backtest extension
 Add an **entry-timing attribution** report to `SectorBacktestService`:
@@ -240,15 +270,27 @@ As of 2026-04-23:
 
 | Suite | Count | Command |
 |---|---|---|
-| Backend (pytest) | 88 | `python -m pytest tests/` |
+| Backend (pytest) | 156 | `python -m pytest tests/` |
 | Frontend (vitest) | 13 | `cd frontend && npm test` |
-| **Total** | **101** | — |
+| **Total** | **169** | — |
+
+> 2026-08-23: +6 in `tests/test_picks_universe_service.py` — the disk-snapshot
+> round-trip (identity between `by_sector` and `tickers` preserved), cold-cache
+> load from disk, the stale-vs-latest-signal-date flag, and the two degrade
+> paths (corrupt file, missing file) that must return `None` rather than raise.
+> An empty build is not persisted.
+
+> 2026-08-22: +28 in `tests/test_review_20260822.py`, one guard per finding in
+> `docs/reviews/CODE_REVIEW_2026-08-22.md`. The 105 figure above also counted ~9 one-line
+> placeholder files under `tests/test_api/`, `tests/test_services/` and
+> `tests/test_database/` that contain only "Legacy test removed in sector
+> redesign" — real backend coverage before this review was ~101.
 
 Backend modules covered:
 - `config.py`, `database/models.py` schema (21 pre-existing).
 - `services/picks_scoring.py` — 20 tests (NVL-style regression guard, SWING/TPLUS profiles, is_valid_long_pick parametric matrix).
 - `services/picks_universe_service.py` — 14 tests (classification priority, cache lifecycle, degraded-mode fallback). vnstock calls mocked.
-- `services/trader_agent.py` — 15 tests (JSON parse variants, prompt trimming, cache invalidation). No live Claude SDK call.
+- `services/trader_agent.py` — 23 tests (JSON parse variants incl. `<think>` stripping, prompt trimming, cache invalidation, provider routing for local/glm/claude, missing-key guard, local connect-error message, timeout guard). No live LLM call — the local transport is faked at `httpx.AsyncClient`.
 - `services/insight_refresh.py` — 5 tests (happy path, idempotent start while running, error propagation, stale run_id lookup, worker-thread progress plumbing). Uses an injected fake pipeline; no KBS / Claude / DB.
 - `api/routers/insight.py` refresh endpoints — 3 tests via FastAPI `TestClient` (POST returns run_id; polling completes with payload; second click while running returns same run_id + already_running).
 - `services/unified_picks.py` — 10 tests (NEW 2026-04-23). Anchors the SecV5 union-merge rule: consensus sort to top with `source=BOTH`; empty ranker → fallback to pure DAILY_INSIGHT (regression guard for the SecV4 silent-ranker bug); input lists not mutated; extra fields flow through; missing-score sort tiebreaker. Pure; no DB / vnstock / Claude dependencies.
@@ -262,3 +304,189 @@ Test runners:
 
 Live integration (not in pytest): `POST /api/insight/refresh` — exercises vnstock KBS + Claude Agent SDK end-to-end; run manually after meaningful changes to those paths. Since 2026-04-20 this endpoint is async: it returns a `run_id` immediately and the UI polls `GET /api/insight/refresh/status` for stage + progress. See `specs/daily-insight.md` §4.5 for the full contract.
 
+
+
+## 20. Code Review — 2026-08-22
+
+Full findings: **`docs/reviews/CODE_REVIEW_2026-08-22.md`** (22 findings: 6 P0, 6 P1, 4 P2, 6 P3).
+
+### 20.1 The central defect
+
+One causal chain ran through most of the P0s and started at one table,
+`sector_flow_daily`. The 16:00 EOD job wrote rows **without** `close_idx`. The
+only ingest path that writes `close_idx` (`services/fast_ingest.py`, reachable
+solely from `POST /api/flow/ingest`) skipped any date that already had a row —
+so the scheduler claimed each date first and permanently locked it in a
+price-less state. `scripts/backfill_close_idx.py`, `scripts/fix_close_idx.py`
+and the `STEALTH_SYNTHETIC_CLOSE` flag all exist only to paper over this.
+
+Because `close_idx` feeds the ML target, stealth condition 5 and the entire
+backtest P&L, every number the system surfaced rested on an untrustworthy
+daily table.
+
+### 20.2 Fixed in this pass
+
+| Id | Fix | Files |
+|---|---|---|
+| P0-1 | `rollup_to_daily()` derives each row's date from the bar's own timestamp and refuses to stamp a stale bar as a new session | `services/sector_ingest_service.py` |
+| P0-2 | The scheduled path now carries `close_idx` + `return_1d` through; `fast_ingest` upserts instead of skipping, so it can repair damaged dates | `sector_ingest_service.py`, `fast_ingest.py`, migration 11 |
+| P0-3 | `SectorAggregate.basket_return` — the split-safe weighted mean of constituent returns. `close_idx` remains a raw price sum and must not be used for returns | `analysis/flow_aggregation.py` |
+| P0-4 | Backtest replays published `sector_signals` by default (`strategy="signals"`), with `flow_z` and legacy `flow_raw` baselines for comparison; benchmark is VNINDEX per §11, labelled when it falls back | `services/backtest_service.py` |
+| P0-6 | Purged/embargoed CV — embargo = horizon + 2 sessions (§18.3/13, was BLOCKER). Metrics replaced with `top1_excess_hit` (vs. median sector), `decile_monotonic` (§18.7) and `ndcg_at_3` | `models/rotation_ranker.py` |
+| P1-2 | The mean-flow fallback is flagged `is_degraded` and announced loudly instead of shipping as "ranker-gated" | `rotation_ranker.py`, `sector_signal_service.py` |
+| P1-5 | §16.9 ACCUMULATE cap (4) and 30-session auto-exit, §18.4/20 `TRADING_HALT` kill-switch, and `ALLOW_SHORT_SIGNALS` to retire the cash-leg short per §18.2/12 | `config.py`, `services/sector_signal_service.py` |
+| P1-6 | `utils/clock.py` — one market-local definition of "today". `config.TIMEZONE` was declared and used nowhere | new module + call sites |
+| P2-1 | `require_api_key` is wired to every router behind `API_REQUIRE_KEY`; the slowapi limiter is finally attached to the app; the inert `"https://*.ngrok-free.app"` CORS entries are gone | `api/main.py`, `config.py` |
+| P3-1 | `AGENTS.md` reduced to a pointer — one source of truth again | `AGENTS.md` |
+| P3-3 | `.env.example` regenerated from `config.py` | `.env.example` |
+| P3-4 | `rollup_to_daily` no longer loads the whole `sector_flow_ts` table; `_stealth_sectors()` N+1 collapsed to one query | ingest + signal services |
+| P3-5 | ruff config in `pyproject.toml`; 666 findings → 30, all of them real | `pyproject.toml` + call sites |
+
+**Defaults chosen to preserve live behaviour:** `API_REQUIRE_KEY=0`,
+`ALLOW_SHORT_SIGNALS=1`, `TRADING_HALT=0`. Nothing in the daily email changes
+until you flip these. `MAX_ACCUMULATE_SECTORS=4` and the 30-session release
+DO change behaviour — they implement §16.9, which was never enforced.
+
+### 20.3 Still open — needs a decision, not just code
+
+| Id | Question |
+|---|---|
+| P0-5 | `foreign_net` is **zero across the entire history** — `backfill_sector` passes an empty map and `price_board` only exposes today. The "killer VN signal" (§4) has never contributed anything, and three `FEATURE_COLS` entries are constant. Source a historical series (§18.4/17 proposes CafeF/SSI), or drop the features and amend the doctrine. |
+| P1-1 | Reconcile §16.1's thresholds with what `analysis/stealth.py` ships. |
+| P1-3 | Breadth over 5 names takes 6 discrete values (§18.1/6, still open). |
+| P1-4 | Regime labels are back-painted — Viterbi re-decodes the whole history each run, so yesterday's label can change. Use the filtered posterior for the last bar. |
+| P2-2 | Two rate-limit buckets in one process: `utils/vnstock_gate` and `picks_universe_service._kbs_throttle`. `/insight/refresh` takes no `job_lock` at all, so a UI refresh overlapping the intraday job runs at 2× the KBS ceiling. |
+| P2-3 | The "intraday" job fetches `interval="1D"` and re-downloads 120 days every 15 minutes (~3,750 calls/day against an 18/min gate). Either fetch real 15m bars or admit it is an EOD pipeline and fix §4/§8. |
+| P3-2 | `generate_report.py` is 1,629 module-level lines with zero tests, and it is the one output read every day. Extract the decision layer. |
+
+### 20.4 Doctrine drift to close
+
+`docs/reviews/CODE_REVIEW_2026-08-22.md` carries a "plan vs. code" table of ten places where
+this document describes a system different from the one running. Per §18.8,
+each needs either a code change or a doctrine amendment — not silence.
+
+
+## 21. Naming — no version suffixes (2026-08-22)
+
+Tom's directive: version numbers do not belong in names. A file called
+`generate_secv5.py` tells you there were four before it and nothing about what
+it does, and it forces a rename every time it changes.
+
+| was | now |
+|---|---|
+| `generate_secv5.py` | `generate_report.py` |
+| `report/report_template_secv5.html` | `report/report_template.html` |
+| `report/secv5_<date>.{html,pdf}` | `report/daily_report_<date>.{html,pdf}` |
+| `scripts/register_secv5_task.ps1` | `scripts/register_report_task.ps1` |
+| `scripts/pause_secv3_secv4_email.ps1` | `scripts/pause_legacy_email_task.ps1` |
+| model_name `rotation_ranker_v0` | `rotation_ranker` |
+| `models/saved/rotation_ranker_v0.pkl` | `rotation_ranker.pkl` |
+| model_version `hmm_v0` | `hmm` |
+| env `SECV3_DB_PATH` | `REPORT_DB_PATH` (old name still honoured) |
+
+Dates are NOT versions and were left alone: `MODIFICATION_LOG.md`,
+`docs/reviews/CODE_REVIEW_2026-08-22.md` and the dated post-mortems keep their names,
+because a dated record is supposed to say when it was written.
+
+**Consequence to know about:** renaming `model_name` orphans the 74 existing
+`model_runs` rows from the active-model lookup. That is intentional -- every
+one of them was a degraded mean-flow fallback (see section 20 / P0-8), so
+none was worth keeping. The next `--train` writes the first real one.
+
+
+## 22. Frontend flow audit — 2026-08-23
+
+Every route and every endpoint behind it was exercised against the running
+server. Full numbers in the **Sector Flow Bench** artifact.
+
+### 22.1 Flows that render nothing
+These return HTTP 200 with an empty collection, so the page draws an empty
+state. They are not broken code — they are correct code with no data:
+
+| surface | endpoint | why it is empty |
+|---|---|---|
+| Stealth Watch | `/api/stealth/active`, `/api/stealth/history` | `accumulation_age` is 0 on all 13k rows; §16 has never fired |
+| Rotation Map | `/api/rotation/pairs` | ~~no pair clears the 1.5 threshold~~ — **wrong, corrected below** |
+| Flow Pulse | `/api/pulse/exposure` | ~~no positions are tracked~~ — **wrong, corrected below** |
+
+Fixing Stealth Watch means fixing §16 (see §20.3), not the UI. The other two
+rows were **misdiagnosed**; both were fixed on 2026-08-23:
+
+- **Rotation Map** was not threshold-limited, it was structurally empty.
+  `rotation.py` builds `pairs` as the cartesian product of
+  `delta < -threshold*sigma` × `delta > +threshold*sigma`, and a live probe
+  returned 10 nodes **all on the target side**. The product is therefore empty
+  at *every* threshold — lowering it widens both sets from the same one-sided
+  `delta`. The page now reads `/api/sectors/handoff`, which computes the same
+  thing correctly (`max(0, -Δz_A) * max(0, +Δz_B)`; the independent clip per
+  side is what keeps both sides non-empty) and had 270 rows and no consumer.
+  `/api/rotation/*` stays mounted, unread.
+- **Flow Pulse** exposure was not "no positions" — `api/routers/pulse.py`
+  returns a hardcoded `{"rows": []}` while the real implementation sits in
+  `sectors_risk.py`. The client now calls `/api/sectors/risk/exposure`.
+
+### 22.2 Client code pointing at deleted routes
+`agentApi.briefing()` and `agentApi.stoplossAlerts()` called `/api/agent/*`,
+which was removed from the backend on 2026-04-18 when OpenClaw was replaced by
+`services.trader_agent`. Both returned 404 for four months. Removed, along with
+`BriefingPage`, which was their only caller.
+
+### 22.3 Performance
+- `flowApi.series` and `flowApi.sector` hard-coded `lookback = 400` in the
+  **client**, so lowering the backend default to 120 changed nothing until the
+  client changed too. Now 120 both ends: **2.8 s / 1.0 MB → 1.3 s / 303 KB**.
+  > **2026-08-23: this was only two-thirds true.** The client *default* and
+  > `SectorDetailPage` were changed, but `FlowMonitorPage.tsx` passed an
+  > explicit `400` that overrode the default, so the route users actually open
+  > still shipped 1.0 MB. Fixed now — measured 1,000,870 B / 2.72 s →
+  > 304,682 B / 1.61 s. The lesson: changing a default proves nothing until you
+  > grep the call sites.
+- Wiring the four pages eagerly took the main bundle from 372 kB to 732 kB,
+  because `BacktestPage` imports recharts. They are `React.lazy` now: main
+  bundle 376 kB, recharts in a 346 kB chunk that only loads when you open
+  Backtest.
+
+### 22.4 Dev server bound to every adapter
+`vite.config.ts` had `host: true`, which binds 0.0.0.0 and advertises every
+network adapter — including `172.20.16.1`, the Hyper-V vEthernet switch WSL and
+Docker Desktop create, which nothing outside the machine can reach. Now
+`host: 'localhost'`; use `npm run dev:lan` when you want it on the LAN. That is
+also the safer default while `API_REQUIRE_KEY=0`: the Vite proxy fronts the
+trading API, so putting the dev server on the LAN puts the API there too.
+
+### 22.5 The frontend test suite was red, and §19 said it was green
+8 of the 13 vitest tests failed with `TypeError: React.act is not a function`.
+React 19.2 ships `act` only in its development build, and Vitest runs with
+`NODE_ENV=test`, so Vite resolved React's production entry and
+`@testing-library/react` fell back to the removed `react-dom/test-utils.act`.
+Fixed in `vitest.config.ts` by asking the resolver for the `development`
+condition. **13/13 pass now** — the count in §19 is finally true.
+
+### 22.6 The homepage was empty after every restart — 2026-08-23
+The defect the audit above missed, because it only shows up on a cold process.
+`PicksUniverseService` kept its snapshot **only in memory**, so a backend
+restart blanked Daily Insight until a human clicked Refresh. `/api/insight/daily`
+deliberately does a cache-only `.peek()` (a cold `get_snapshot()` would hang the
+endpoint for 2–10 minutes behind the 18 req/min KBS throttle), so the endpoint
+was correct and the cache was the gap — it was the only stage of the daily
+pipeline with no durable store. It now persists to
+`data/snapshots/picks_universe.json` and reloads on a cold cache. The file is a
+cache, not a source of truth: corrupt, missing or stale degrades to the existing
+empty-state banner and never raises; a stale one is loaded anyway and flagged
+through `freshness.errors`. See `MODIFICATION_LOG.md` 2026-08-23 (evening) A1.
+
+### 22.7 Docs layout — 2026-08-23
+Seven outdated documents were **deleted**, not archived (Tom's call: an archived
+wrong doc is still a wrong doc someone will read). `README.md`'s email command
+had been running a file deleted on 2026-06-18. What survives:
+
+```
+README.md · CLAUDE.md · ARCHITECTURE.md · MODIFICATION_LOG.md · AGENTS.md   ← root, entry points
+specs/                  ← one topic per file, referenced from 5 .py docstrings; untouched
+docs/reference/         ← ALGORITHM.md, GLOSSARY_VI.md
+docs/reviews/           ← the dated reviews (§21: dated records keep their names)
+```
+
+**No Python file moved.** `scripts/jobs/*.bat` invoke `main.py` from the repo
+root under Task Scheduler, and `MODIFICATION_LOG.md` 2026-07-19 already records
+one path move that left shortcuts pointing at a dead directory.

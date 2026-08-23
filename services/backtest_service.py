@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -27,9 +27,13 @@ from sqlalchemy.orm import Session
 from config import (
     BACKTEST_FEE_BPS, BACKTEST_INITIAL_CAPITAL, BACKTEST_LONG_ONLY,
     BACKTEST_PRICE_BAND_PCT, BACKTEST_SELL_TAX_BPS, BACKTEST_SETTLEMENT_LAG,
-    BACKTEST_SLIPPAGE_ATR_MULT, BACKTEST_SLIPPAGE_MIN_PCT, MAX_LONG_SECTORS,
+    BACKTEST_SLIPPAGE_ATR_MULT, BACKTEST_SLIPPAGE_MIN_PCT,
+    MAX_ACCUMULATE_SECTORS, MAX_LONG_SECTORS,
 )
-from database.models import BacktestRun, SectorFlowDaily
+from database.models import BacktestRun, MacroAnchor, SectorFlowDaily, SectorSignal
+
+# Actions that open or hold a long position (CLAUDE.md §16.3).
+LONG_ACTIONS = ("ACCUMULATE", "BUY")
 
 
 @dataclass
@@ -55,6 +59,10 @@ class BacktestResult:
     total_cost_pct: float = 0.0          # cumulative friction as % of initial capital
     ceiling_floor_skips: int = 0         # entries skipped due to ±7% band
     root_capture_ratio: float | None = None  # median entry/peak across closed trades
+    # --- what was actually simulated (review 2026-08-22, P0-4) ---
+    strategy_source: str = "signals"     # "signals" | "flow_z" | "flow_raw"
+    benchmark_source: str = "vnindex"    # "vnindex" | "sector_mean"
+    signal_dates_covered: int = 0        # days that had published signals
 
 
 @dataclass
@@ -84,6 +92,66 @@ class SectorBacktestService:
             "net_dollar_flow": r.net_dollar_flow, "atr_pct": r.atr_pct,
         } for r in rows])
 
+    def _load_signals(self, start: str, end: str) -> dict[str, list[str]]:
+        """{date: [sector_code, ...]} of published long signals, best rank first.
+
+        Review 2026-08-22, P0-4. The backtest used to rank by raw
+        `net_dollar_flow` and never look at `sector_signals` at all -- so every
+        success criterion in CLAUDE.md §16.11 / §18.7 was being measured
+        against a strategy nobody trades.
+        """
+        rows = (
+            self.session.query(SectorSignal)
+            .filter(SectorSignal.date >= start, SectorSignal.date <= end,
+                    SectorSignal.action.in_(LONG_ACTIONS))
+            .order_by(SectorSignal.date, SectorSignal.rank)
+            .all()
+        )
+        out: dict[str, list[str]] = {}
+        for r in rows:
+            out.setdefault(r.date, []).append(r.sector_code)
+        return out
+
+    def _load_benchmark(self, start: str, end: str) -> tuple[pd.Series, str]:
+        """VNINDEX daily returns (CLAUDE.md §11), or a flagged fallback.
+
+        The previous benchmark was the equal-weighted mean of all 15 sector
+        `return_1d` values, which is not VNINDEX buy-and-hold and quietly
+        flattered any strategy that tilted toward the larger sectors.
+        """
+        rows = (
+            self.session.query(MacroAnchor)
+            .filter(MacroAnchor.vnindex.isnot(None))
+            .order_by(MacroAnchor.time)
+            .all()
+        )
+        if rows:
+            df = pd.DataFrame([
+                {"date": pd.Timestamp(r.time).strftime("%Y-%m-%d"),
+                 "vnindex": float(r.vnindex)}
+                for r in rows
+            ])
+            daily = df.groupby("date")["vnindex"].last()
+            daily = daily[(daily.index >= start) & (daily.index <= end)]
+            if len(daily) > 5:
+                return daily.pct_change().fillna(0.0), "vnindex"
+        return pd.Series(dtype=float), "sector_mean"
+
+    @staticmethod
+    def _cross_sectional_z(group: pd.DataFrame, col: str) -> pd.Series:
+        """Z-score within the day.
+
+        Raw `net_dollar_flow` is un-normalised VND, so ranking 15 sectors by it
+        is structurally "rank by sector size" -- BANK/REAL/STEEL win nearly
+        every day and the result is a near-static portfolio dressed up as
+        rotation (review 2026-08-22, P0-4).
+        """
+        v = pd.to_numeric(group[col], errors="coerce")
+        sd = v.std(ddof=0)
+        if not sd or pd.isna(sd) or sd == 0:
+            return pd.Series(0.0, index=group.index)
+        return (v - v.mean()) / sd
+
     @staticmethod
     def _slippage(atr_pct: float | None) -> float:
         a = float(atr_pct) if atr_pct is not None and not pd.isna(atr_pct) else 0.0
@@ -95,10 +163,31 @@ class SectorBacktestService:
         start_date: str,
         end_date: str,
         initial_capital: float = BACKTEST_INITIAL_CAPITAL,
+        strategy: str = "signals",
     ) -> BacktestResult:
+        """`strategy` selects what is being simulated:
+
+        "signals"  -- replay the ACCUMULATE/BUY signals this system actually
+                      published (default). Falls back to "flow_z" when the
+                      range has no published signals.
+        "flow_z"   -- baseline: top-N by cross-sectional z-score of flow.
+        "flow_raw" -- the pre-2026-08-22 behaviour, kept only so the two can
+                      be compared. It ranks by un-normalised VND and is
+                      effectively "hold the largest sectors".
+        """
         panel = self._load_panel(start_date, end_date)
         if panel.empty:
             raise RuntimeError("no sector_flow_daily data in range")
+
+        signals_by_date: dict[str, list[str]] = {}
+        if strategy == "signals":
+            signals_by_date = self._load_signals(start_date, end_date)
+            if not signals_by_date:
+                print("[backtest] no published signals in range — "
+                      "falling back to the flow_z baseline")
+                strategy = "flow_z"
+        max_positions = (MAX_LONG_SECTORS + MAX_ACCUMULATE_SECTORS
+                         if strategy == "signals" else MAX_LONG_SECTORS)
 
         fee = BACKTEST_FEE_BPS / 10_000.0
         sell_tax = BACKTEST_SELL_TAX_BPS / 10_000.0
@@ -142,11 +231,22 @@ class SectorBacktestService:
                 if c is not None and not pd.isna(c):
                     pos.peak_close = max(pos.peak_close, float(c))
 
-            # 3) Target set: top-N by flow score, excluding price-band gap days
-            ranked = group.sort_values("net_dollar_flow", ascending=False)
+            # 3) Target set, excluding price-band gap days
+            if strategy == "signals":
+                wanted = signals_by_date.get(date, [])
+                ranked = (group.set_index("sector_code")
+                               .reindex([c for c in wanted if c in set(group["sector_code"])])
+                               .reset_index())
+            elif strategy == "flow_z":
+                g = group.copy()
+                g["_z"] = self._cross_sectional_z(g, "net_dollar_flow")
+                ranked = g.sort_values("_z", ascending=False)
+            else:  # flow_raw — legacy behaviour, size-biased
+                ranked = group.sort_values("net_dollar_flow", ascending=False)
+
             target: list[str] = []
             for _, row in ranked.iterrows():
-                if len(target) >= MAX_LONG_SECTORS:
+                if len(target) >= max_positions:
                     break
                 code = row["sector_code"]
                 r1d = row["return_1d"]
@@ -173,7 +273,7 @@ class SectorBacktestService:
                 pending.append((t + lag, net))
                 closed += 1
                 c = close_by.get(code, pos.peak_close)
-                if pos.peak_close > 0:
+                if pos.peak_close > 0 and pos.entry_close > 0:
                     root_caps.append(pos.entry_close / pos.peak_close)
                 # win = exited above entry close
                 if c and pos.entry_close and c > pos.entry_close:
@@ -217,8 +317,10 @@ class SectorBacktestService:
         final_equity = float(eq_series.iloc[-1]) if not eq_series.empty else float(initial_capital)
         total_ret = (final_equity / initial_capital - 1) * 100
 
-        bench = panel.groupby("date")["return_1d"].mean().fillna(0)
-        bench_total = float((1 + bench).prod() - 1) * 100
+        bench_ret, bench_source = self._load_benchmark(start_date, end_date)
+        if bench_ret.empty:
+            bench_ret = panel.groupby("date")["return_1d"].mean().fillna(0)
+        bench_total = float((1 + bench_ret).prod() - 1) * 100
 
         result = BacktestResult(
             name=name, start_date=start_date, end_date=end_date,
@@ -233,13 +335,16 @@ class SectorBacktestService:
             total_cost_pct=(total_cost / initial_capital) * 100 if initial_capital else 0.0,
             ceiling_floor_skips=ceiling_skips,
             root_capture_ratio=(float(np.median(root_caps)) if root_caps else None),
+            strategy_source=strategy,
+            benchmark_source=bench_source,
+            signal_dates_covered=len(signals_by_date),
         )
         self._persist(result)
         return result
 
     def _persist(self, r: BacktestResult) -> None:
         run = BacktestRun(
-            name=r.name, strategy="rotation_long_only",
+            name=r.name, strategy=f"rotation_long_only:{r.strategy_source}",
             start_date=r.start_date, end_date=r.end_date,
             initial_capital=r.initial_capital, final_capital=r.final_capital,
             total_trades=r.total_trades, win_rate=r.win_rate,
@@ -255,6 +360,9 @@ class SectorBacktestService:
                 "total_cost_pct": r.total_cost_pct,
                 "ceiling_floor_skips": r.ceiling_floor_skips,
                 "root_capture_ratio": r.root_capture_ratio,
+                "strategy_source": r.strategy_source,
+                "benchmark_source": r.benchmark_source,
+                "signal_dates_covered": r.signal_dates_covered,
             }),
             equity_curve=json.dumps(r.equity_curve),
             trade_log=json.dumps(r.trade_log[:500]),

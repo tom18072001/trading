@@ -17,6 +17,12 @@ import pandas as pd
 REQUIRED_COLS = ("open", "high", "low", "close", "volume")
 
 
+def _market_now():
+    """Naive market-local datetime. Lazy import keeps this module dependency-light."""
+    from utils.clock import now
+    return now().replace(tzinfo=None)
+
+
 @dataclass
 class SectorAggregate:
     """One row of sector-level money flow."""
@@ -33,6 +39,13 @@ class SectorAggregate:
     breadth_sma50: float
     atr_pct: float
     close_idx: float
+    # Weighted last-bar return of the basket (review 2026-08-22, P0-3).
+    # `close_idx` is a raw weighted SUM OF PRICES, so it jumps on a stock
+    # split or a constituent change and manufactures a fake return. This is
+    # the split-safe quantity: the mean of each constituent's own 1-day
+    # return, which no corporate action can distort. Downstream code should
+    # prefer this over close_idx ratios.
+    basket_return: float = 0.0
 
 
 def _validate(df: pd.DataFrame) -> None:
@@ -49,6 +62,17 @@ def _net_dollar_flow(df: pd.DataFrame) -> float:
     prev_close = df.iloc[-2]["close"]
     sign = 1.0 if last["close"] > prev_close else (-1.0 if last["close"] < prev_close else 0.0)
     return float(last["close"] * last["volume"] * sign)
+
+
+def _last_bar_return(df: pd.DataFrame) -> float | None:
+    """close_t / close_{t-1} - 1 for the final bar, or None if undefined."""
+    if len(df) < 2:
+        return None
+    prev = float(df.iloc[-2]["close"])
+    last = float(df.iloc[-1]["close"])
+    if prev <= 0 or np.isnan(prev) or np.isnan(last):
+        return None
+    return last / prev - 1.0
 
 
 def _up_down_volume(df: pd.DataFrame) -> tuple[float, float]:
@@ -108,7 +132,7 @@ def aggregate_sector(
     syms = list(constituents.keys())
     n = len(syms)
     if weights is None:
-        weights = {s: 1.0 / n for s in syms}
+        weights = dict.fromkeys(syms, 1.0 / n)
 
     net_flow = 0.0
     up = 0.0
@@ -120,6 +144,8 @@ def aggregate_sector(
     atr_acc = 0.0
     atr_n = 0
     close_idx = 0.0
+    ret_acc = 0.0
+    ret_w = 0.0
     last_time: pd.Timestamp | None = None
 
     for sym, df in constituents.items():
@@ -147,8 +173,15 @@ def aggregate_sector(
             atr_acc += atr * w
             atr_n += 1
 
-        # Synthetic sector index = weighted last-close (not normalized)
+        # Synthetic sector index = weighted last-close (not normalized).
+        # Kept for backwards compatibility; see `basket_return` for the
+        # split-safe quantity downstream code should use.
         close_idx += float(df["close"].iloc[-1]) * w
+
+        r = _last_bar_return(df)
+        if r is not None:
+            ret_acc += r * w
+            ret_w += w
         ts = df.index[-1]
         if last_time is None or ts > last_time:
             last_time = ts
@@ -178,7 +211,7 @@ def aggregate_sector(
 
     return SectorAggregate(
         sector_code=sector_code,
-        time=last_time if last_time is not None else pd.Timestamp.utcnow(),
+        time=last_time if last_time is not None else pd.Timestamp(_market_now()),
         net_dollar_flow=net_flow,
         up_vol=up,
         down_vol=down,
@@ -190,6 +223,7 @@ def aggregate_sector(
         breadth_sma50=(breadth50_hits / breadth50_n) if breadth50_n else float("nan"),
         atr_pct=(atr_acc / atr_n) if atr_n else float("nan"),
         close_idx=close_idx,
+        basket_return=(ret_acc / ret_w) if ret_w > 0 else 0.0,
     )
 
 

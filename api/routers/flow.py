@@ -16,7 +16,6 @@ from typing import Optional
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Query
-from sqlalchemy import and_
 
 from config import SECTORS
 from database.connection import SessionLocal
@@ -33,10 +32,22 @@ def _load_daily(
 ) -> pd.DataFrame:
     sess = SessionLocal()
     try:
-        q = sess.query(SectorFlowDaily)
+        # `days` counts SESSIONS, not rows. This used to be `.limit(days * 20)`,
+        # a row cap that always exceeded the table (15 sectors x ~900 sessions),
+        # so every lookback value returned the identical 1319 points and the
+        # UI's lookback buttons did nothing (review 2026-08-23, A5). Bound the
+        # distinct dates first, then take every row on or after the oldest one.
+        dq = sess.query(SectorFlowDaily.date).distinct()
+        if sector:
+            dq = dq.filter(SectorFlowDaily.sector_code == sector)
+        dates = [d[0] for d in dq.order_by(SectorFlowDaily.date.desc()).limit(days).all()]
+        if not dates:
+            return pd.DataFrame()
+
+        q = sess.query(SectorFlowDaily).filter(SectorFlowDaily.date >= min(dates))
         if sector:
             q = q.filter(SectorFlowDaily.sector_code == sector)
-        rows = q.order_by(SectorFlowDaily.date.desc()).limit(days * 20).all()
+        rows = q.order_by(SectorFlowDaily.date.desc()).all()
     finally:
         sess.close()
 
@@ -73,10 +84,19 @@ def _as_of(df: pd.DataFrame) -> Optional[str]:
 def flow_series(
     interval: str = Query("1d"),
     sectors: Optional[str] = Query(None, description="Comma-separated sector codes; default = all 15"),
-    lookback: int = Query(400, ge=20, le=2000),
+    lookback: int = Query(120, ge=20, le=2000),
 ):
     """Multi-sector time series of net_dollar_flow, flow_z20, close_idx,
-    resampled to the requested interval. Shape driven by flow-monitor.md §3."""
+    resampled to the requested interval. Shape driven by flow-monitor.md §3.
+
+    2026-08-23: the default lookback was 400 sessions x 15 sectors, which made
+    this the slowest route in the API by an order of magnitude -- measured at
+    **3,338 ms and 1.19 MB** while every other route sat between 10 and 200 ms.
+    A chart shows months, not years. 120 sessions (~6 months) is the default
+    now; ask for more explicitly with ?lookback= when you actually need it.
+    Values are also rounded on the way out -- full float64 repr was spending
+    ~17 characters per number to express noise well below display precision.
+    """
     try:
         interval = normalize_interval(interval)
     except ValueError as e:
@@ -97,9 +117,9 @@ def flow_series(
             "points": [
                 {
                     "date": row["date"],
-                    "net_dollar_flow": float(row.get("net_dollar_flow") or 0.0),
-                    "flow_z20": None if pd.isna(row.get("flow_z20")) else float(row["flow_z20"]),
-                    "close_idx": None if pd.isna(row.get("close_idx")) else float(row["close_idx"]),
+                    "net_dollar_flow": round(float(row.get("net_dollar_flow") or 0.0), 2),
+                    "flow_z20": None if pd.isna(row.get("flow_z20")) else round(float(row["flow_z20"]), 4),
+                    "close_idx": None if pd.isna(row.get("close_idx")) else round(float(row["close_idx"]), 3),
                 }
                 for _, row in g.iterrows()
             ],

@@ -19,6 +19,9 @@ models/saved/*.json
 # Data artifacts
 data/*.csv
 output/
+# PicksUniverseService cache (2026-08-23). Rebuilt from vnstock on demand and
+# machine-local; it is a cache, not a source of truth. See CLAUDE.md 22.6.
+data/snapshots/picks_universe.json
 
 # Environment
 .env
@@ -60,3 +63,23 @@ weekly_flow.csv
 # Downloaded tooling binaries (63MB - not source)
 scripts/cloudflared.exe
 *.exe
+
+# Local backups taken by the audit scripts (2026-08-23). Never commit these:
+# the .env copy carries live API keys and the .db copy is 20 MB.
+.env.bak-*
+*.db.bak-*
+vnstock_market.db.bak-*
+
+# Audit tooling: keep the scripts, drop their output.
+_audit/*.log
+
+# Generated daily reports and rotated job logs (2026-08-23).
+# These are build output, not source. 68 of them had accumulated in git before
+# the 2026-08-22 housekeeping deleted 71 in one go; a rotated
+# sector_intraday_flow.log.1 alone was 78,662 lines. Regenerate with
+# `python generate_report.py` instead of versioning the artefacts.
+report/daily_report_*
+report/secv5_*
+report/sector_flow_*
+report/SAMPLE_*
+report/jobs/*.log.*

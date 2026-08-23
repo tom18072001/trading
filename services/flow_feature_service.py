@@ -105,6 +105,22 @@ class FlowFeatureService:
             else:
                 df[col] = 0.0
 
+        # --- rs_vnindex_5d / rs_vnindex_20d ------------------------------
+        # Measured 2026-08-23: both columns were NULL on all 13,140 rows. They
+        # have been in FEATURE_COLS since day one and nothing ever wrote them,
+        # which is also what forced pandas to type them `object` and knocked
+        # LightGBM into the mean-flow fallback on all 74 nightly runs.
+        #
+        # They are derivable from data already in the table, so they are
+        # computed here rather than waiting on an ingest change -- that also
+        # backfills the whole 876-day history for free.
+        #
+        # Benchmark preference: VNINDEX from macro_anchors when it is present
+        # for the date, otherwise the equal-weighted cross-sector composite,
+        # which is a legitimate "strength vs the market" reading and needs no
+        # external source. `rs_benchmark` records which one was used.
+        df = self._add_relative_strength(df)
+
         macro = self._load_macro()
         if not macro.empty and "vnindex" in macro:
             macro["macro_vn_ret_5d"] = macro["vnindex"].pct_change(5)
@@ -114,12 +130,74 @@ class FlowFeatureService:
         else:
             df["macro_vn_ret_5d"] = np.nan
 
+        # Force every model input to a real numeric dtype.
+        #
+        # Found by running the live DB on 2026-08-22: rs_vnindex_5d and
+        # rs_vnindex_20d are 100% NULL (nothing has ever written them), so
+        # pandas types those columns as `object`. RotationModelService then
+        # fillna(0.0)'s them -- which leaves an object column full of floats --
+        # and LightGBM refuses it with "pandas dtypes must be int, float or
+        # bool". RotationRanker caught that, fell back to _MeanFlowRanker, and
+        # did so on EVERY nightly run: 74 model_runs, not one of them a real
+        # ranker. The published "score" column was therefore raw net_dollar_flow
+        # all along (see sector_signals: scores of 6e+07).
+        #
+        # One coercion is the whole difference between a ranker and
+        # "sort the sectors by size".
+        for col in FEATURE_COLS:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce").astype("float64")
+            else:
+                df[col] = 0.0
+
         if with_target:
             df["fwd_return"] = (
                 df.groupby("sector_code")["close_idx"]
                   .shift(-ROTATION_TARGET_HORIZON_DAYS) / df["close_idx"] - 1
             )
             df["target"] = df["fwd_return"]
+        return df
+
+    def _add_relative_strength(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Fill rs_vnindex_5d / rs_vnindex_20d = sector return - benchmark return."""
+        close = pd.to_numeric(df.get("close_idx"), errors="coerce")
+        if close is None or close.notna().sum() == 0:
+            df["rs_vnindex_5d"] = np.nan
+            df["rs_vnindex_20d"] = np.nan
+            df["rs_benchmark"] = "none"
+            return df
+
+        df = df.copy()
+        df["close_idx"] = close
+
+        bench = None
+        source = "sector_composite"
+        macro = self._load_macro()
+        if not macro.empty and "vnindex" in macro:
+            m = macro.copy()
+            m["date"] = pd.to_datetime(m["time"]).dt.strftime("%Y-%m-%d")
+            vn = (m.groupby("date")["vnindex"]
+                    .last()
+                    .pipe(pd.to_numeric, errors="coerce")
+                    .dropna())
+            # Only trust it if it actually covers the panel.
+            coverage = df["date"].isin(vn.index).mean()
+            if len(vn) > 30 and coverage > 0.8:
+                bench = vn
+                source = "vnindex"
+
+        if bench is None:
+            # Equal-weighted composite of every sector's own index.
+            bench = df.groupby("date")["close_idx"].mean().dropna()
+
+        for lb in (5, 20):
+            b_ret = (bench / bench.shift(lb) - 1.0).rename(f"_b{lb}")
+            s_ret = df.groupby("sector_code")["close_idx"].pct_change(lb)
+            df[f"rs_vnindex_{lb}d"] = (
+                s_ret.to_numpy() - df["date"].map(b_ret).to_numpy()
+            )
+
+        df["rs_benchmark"] = source
         return df
 
     def latest_features(self) -> pd.DataFrame:

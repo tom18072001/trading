@@ -13,7 +13,7 @@
 #   --rotation-predict next-day sector ranking     (job: rotation_predict)
 #   --publish          write signals + stdout      (job: sector_signal_publish,
 #                                                   Gmail send happens in
-#                                                   generate_secv5.py after)
+#                                                   generate_report.py after)
 #   --risk-sentinel    stop-loss breach scan       (job: sector_risk_sentinel)
 #
 # Compound flags (ad-hoc only, NOT scheduled):
@@ -49,16 +49,30 @@ def cmd_init() -> None:
     print("[main] DB initialized + sectors seeded.")
 
 
+# Jobs that spend the shared vnstock/KBS per-minute budget run under one
+# cross-process lock (see utils/vnstock_gate.py). Before 2026-08-22 an
+# intraday run that overran its 15-minute slot would overlap the next
+# firing - and the hourly macro job on top - so three processes each
+# assumed they owned the full quota and all three got 429'd.
+
 def cmd_macro() -> None:
-    with get_session() as s:
-        row = MacroService(s).ingest_now()
-        print(f"[main] macro row written: {row is not None}")
+    from utils.vnstock_gate import guarded
+    with guarded("macro") as ok:
+        if not ok:
+            return
+        with get_session() as s:
+            row = MacroService(s).ingest_now()
+            print(f"[main] macro row written: {row is not None}")
 
 
 def cmd_intraday() -> None:
-    with get_session() as s:
-        n = SectorIngestService(s).ingest_intraday_now()
-        print(f"[main] sector_flow_ts rows: {n}")
+    from utils.vnstock_gate import guarded
+    with guarded("intraday") as ok:
+        if not ok:
+            return
+        with get_session() as s:
+            n = SectorIngestService(s).ingest_intraday_now()
+            print(f"[main] sector_flow_ts rows: {n}")
 
 
 def cmd_eod_rollup() -> None:
@@ -115,14 +129,18 @@ def cmd_ingest() -> None:
 
 def cmd_backfill(years: int = 2) -> None:
     from config import SECTORS
-    with get_session() as s:
-        svc = SectorIngestService(s)
-        for code in SECTORS.keys():
-            try:
-                n = svc.backfill_sector(code, years=years)
-                print(f"[backfill] {code}: {n} rows")
-            except BaseException as e:
-                print(f"[backfill] {code} error: {e}")
+    from utils.vnstock_gate import guarded
+    with guarded("backfill") as ok:
+        if not ok:
+            return
+        with get_session() as s:
+            svc = SectorIngestService(s)
+            for code in SECTORS.keys():
+                try:
+                    n = svc.backfill_sector(code, years=years)
+                    print(f"[backfill] {code}: {n} rows")
+                except BaseException as e:
+                    print(f"[backfill] {code} error: {e}")
 
 
 # ---------- dispatch ----------

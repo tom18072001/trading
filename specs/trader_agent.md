@@ -22,15 +22,53 @@ rotation, and a conviction star rating.
 
 ## 2. Transport
 
-`claude_agent_sdk` — executes through the user's existing Claude Code
-subscription. No `ANTHROPIC_API_KEY` required. One-shot call via
-`claude_agent_sdk.query()`:
+One shot, one turn, no tool use, no thinking. `AGENT_PROVIDER` in `config.py`
+selects one of three transports:
 
-- `max_turns=1`, no tool use, `thinking=disabled`.
-- `model="sonnet"` by default (maps to `claude-sonnet-4-6` in the SDK
-  resolver as of 2026-04).
-- Ambient cost: ~$0.10–0.15 / call at today's pricing (visible in the
-  `ResultMessage.total_cost_usd` field — surfaced in the frontend header).
+### `local` (default since 2026-07-20)
+
+Plain `httpx` POST to an OpenAI-compatible `/chat/completions` endpoint —
+Ollama, LM Studio and llama.cpp's server all speak this shape.
+
+- `LOCAL_BASE_URL` (default `http://localhost:11434/v1`), `LOCAL_MODEL`
+  (default `qwen3:8b`), `LOCAL_API_KEY` (Ollama ignores it; LM Studio wants
+  a non-empty value).
+- No API key, no per-call cost, no internet egress, **no `claude_agent_sdk`
+  subprocess**. `cost_usd` is reported as `0.0`.
+- `temperature=0.3`, non-streaming — the reply is ~500 tokens and the caller
+  already wraps the call in `asyncio.wait_for`.
+- Errors are made actionable: connection refused → "is Ollama running?";
+  HTTP error → status + body + "is model '<tag>' pulled?".
+
+Sizing note: an 8B at Q4 is ~5GB and stays fully on a 6GB card. Expect
+~20–40s for a full VN JSON reply, comfortably inside the 120s wall. A
+6GB-VRAM / 32GB-RAM box can go bigger with a small-active-param MoE
+(e.g. Qwen3.6 35B-A3B) via CPU-expert offload — raise `AGENT_TIMEOUT_SEC`.
+
+### `glm`
+
+`claude_agent_sdk`, but the CLI subprocess env gets
+`ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic` (override via
+`GLM_BASE_URL`) and `ANTHROPIC_AUTH_TOKEN=$GLM_API_KEY`. Model defaults to
+`glm-5.2`. Requires `GLM_API_KEY` in `.env`; if missing, `analyze()` returns
+a graceful invalid report (no stall). Z.ai may report null cost → header
+shows n/a.
+
+### `claude`
+
+Native Claude Code subscription path via `claude_agent_sdk`, no API key.
+Model defaults to `haiku`.
+
+> `claude_agent_sdk` is imported **lazily** (`_SDK_IMPORT_ERROR`). A
+> local-only install does not need the wheel; the `glm` / `claude` paths
+> return a clear error if it is missing.
+
+### Output cleanup (all providers)
+
+`_parse_response` strips `<think>...</think>` before locating the JSON —
+local reasoning models emit a monologue containing braces that would
+otherwise poison the no-fence `{...}` fallback. Unterminated blocks (output
+truncated mid-think) are dropped to end-of-text.
 
 ## 3. Invocation surface
 

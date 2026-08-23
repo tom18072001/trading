@@ -286,7 +286,7 @@ function DistChart({ values, label, bins = 30 }: { values: number[]; label: stri
 export default function SectorDetailPage() {
   const { code } = useParams<{ code: string }>();
   const [interval, setInterval] = useState<Interval>('1d');
-  const [lookback, setLookback] = useState(400);
+  const [lookback, setLookback] = useState(120);
   const [data, setData] = useState<{ sector: string; name: string; points: Point[]; stats: any } | null>(null);
   const [err, setErr] = useState<string | null>(null);
 

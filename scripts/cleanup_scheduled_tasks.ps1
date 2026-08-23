@@ -1,6 +1,6 @@
-# ============================================================
-# cleanup_scheduled_tasks.ps1 — sync Windows Task Scheduler with
-# CLAUDE.md §8. Runs on Windows (PowerShell, elevated).
+﻿# ============================================================
+# cleanup_scheduled_tasks.ps1 -- sync Windows Task Scheduler with
+# CLAUDE.md section 8. Runs on Windows (PowerShell, elevated).
 #
 # Behaviour:
 #   1. UNREGISTER every stale Trading-related task:
@@ -8,10 +8,10 @@
 #       - SecV2 / generate_secv2.py / run_secv2_daily.bat
 #       - anything with "Trading" in its action that is NOT registered by
 #         THIS script (identified by the `SectorFlow_` prefix in TaskName).
-#   2. REGISTER the 8 canonical §8 jobs, all under the task-path
+#   2. REGISTER the 8 canonical section 8 jobs, all under the task-path
 #      `\SectorFlow\` with TaskName prefix `SectorFlow_`.
-#   3. Leave §16.5 stealth jobs OUT — those services are still pending
-#      (§16.10 steps 11-18). When they land, append to $CanonicalJobs
+#   3. Leave section 16.5 stealth jobs OUT -- those services are still pending
+#      (section 16.10 steps 11-18). When they land, append to $CanonicalJobs
 #      below and re-run this script.
 #
 # Usage (PowerShell as Admin):
@@ -44,7 +44,7 @@ Write-Host "Task folder  : $TaskFolder"
 Write-Host "Jobs bat dir : $JobsDir"
 Write-Host ""
 
-# ---------- canonical §8 job table -----------------------------------------
+# ---------- canonical section 8 job table -----------------------------------------
 # Schedule strings use schtasks.exe semantics so they survive weird locales.
 # Each row: key | bat file | ScheduledTask trigger builder.
 $CanonicalJobs = @(
@@ -127,13 +127,13 @@ if (-not $KeepLegacy) {
             return $false
         }
         # keep canonical tasks we are about to re-register (they'll be
-        # overwritten by Register-ScheduledTask below anyway — cleaner to
+        # overwritten by Register-ScheduledTask below anyway -- cleaner to
         # unregister first so any renamed task is removed too).
         $true
     })
 
     if ($stale.Count -eq 0) {
-        Write-Host "  already clean — no matching tasks found." -ForegroundColor Green
+        Write-Host "  already clean -- no matching tasks found." -ForegroundColor Green
     } else {
         foreach ($t in $stale) {
             Write-Host ("  [drop] {0}{1}" -f $t.TaskPath, $t.TaskName) -ForegroundColor Yellow
@@ -144,12 +144,12 @@ if (-not $KeepLegacy) {
     }
     Write-Host ""
 } else {
-    Write-Host "[1/2] -KeepLegacy set — skipping unregister step." -ForegroundColor DarkYellow
+    Write-Host "[1/2] -KeepLegacy set -- skipping unregister step." -ForegroundColor DarkYellow
     Write-Host ""
 }
 
 # ---------- step 2: register canonical set --------------------------------
-Write-Host "[2/2] Registering canonical §8 jobs ..." -ForegroundColor Cyan
+Write-Host "[2/2] Registering canonical section 8 jobs ..." -ForegroundColor Cyan
 
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME `
                 -LogonType Interactive -RunLevel Highest
@@ -160,7 +160,7 @@ $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
 foreach ($job in $CanonicalJobs) {
     $bat = Join-Path $JobsDir $job.Bat
     if (-not (Test-Path $bat)) {
-        Write-Host ("  [skip] {0} — bat missing: {1}" -f $job.Name, $bat) -ForegroundColor Red
+        Write-Host ("  [skip] {0} -- bat missing: {1}" -f $job.Name, $bat) -ForegroundColor Red
         continue
     }
 
@@ -175,7 +175,7 @@ foreach ($job in $CanonicalJobs) {
         Register-ScheduledTask -TaskName $taskName -TaskPath $TaskFolder `
             -Action $action -Trigger $trigger `
             -Principal $principal -Settings $settings `
-            -Description ("SectorFlow canonical job ({0}). See CLAUDE.md §8." -f $job.Cron) `
+            -Description ("SectorFlow canonical job ({0}). See CLAUDE.md section 8." -f $job.Cron) `
             -Force | Out-Null
     }
 }
@@ -188,5 +188,5 @@ Get-ScheduledTask -TaskPath $TaskFolder -ErrorAction SilentlyContinue |
     Format-Table -AutoSize
 
 Write-Host ""
-Write-Host "§16.5 stealth jobs (stealth_scanner / lead_time_audit / flow_regime_report)" -ForegroundColor DarkYellow
-Write-Host "are NOT registered — services still pending (§16.10 steps 11–18)." -ForegroundColor DarkYellow
+Write-Host "section 16.5 stealth jobs (stealth_scanner / lead_time_audit / flow_regime_report)" -ForegroundColor DarkYellow
+Write-Host "are NOT registered -- services still pending (section 16.10 steps 11-18)." -ForegroundColor DarkYellow

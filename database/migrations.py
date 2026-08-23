@@ -81,6 +81,24 @@ MIGRATIONS: list[tuple[int, str, list[str]]] = [
             "CREATE INDEX IF NOT EXISTS ix_handoff_date ON sector_flow_handoff(date)",
         ],
     ),
+    (
+        11,
+        "carry price into the scheduled rollup (review 2026-08-22, P0-2/P0-3)",
+        # sector_flow_ts had no price column at all, so rollup_to_daily -- the
+        # only ingest path that runs on a schedule -- could not populate
+        # sector_flow_daily.close_idx / return_1d. Those three columns feed the
+        # ML target, stealth condition 5 and the whole backtest P&L, so they
+        # were being filled only by the UI-triggered fast_ingest path, and only
+        # for dates the scheduler had not already claimed.
+        #
+        # basket_return is the split-safe companion to close_idx: the weighted
+        # mean of each constituent's own 1-day return. close_idx is a raw sum
+        # of prices and jumps on any split or basket change.
+        [
+            "ALTER TABLE sector_flow_ts ADD COLUMN close_idx REAL",
+            "ALTER TABLE sector_flow_ts ADD COLUMN basket_return REAL",
+        ],
+    ),
 ]
 
 
@@ -171,7 +189,7 @@ def seed_sectors() -> None:
             for c in session.query(SectorConstituent).all()
         }
         for code, symbols in PROXY_BASKETS.items():
-            for i, sym in enumerate(symbols):
+            for sym in symbols:
                 if (code, sym) in existing_pairs:
                     continue
                 # Equal-weight by default; flow_aggregation re-weights at runtime.

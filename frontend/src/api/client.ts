@@ -15,25 +15,6 @@ const api = axios.create({
 
 const LONG_TIMEOUT = 300_000;
 
-export type SectorFlowDaily = {
-  sector_code: string;
-  date: string;
-  net_dollar_flow: number | null;
-  foreign_net: number | null;
-  up_down_vol_ratio: number | null;
-  breadth_sma20: number | null;
-  atr_pct: number | null;
-  return_1d: number | null;
-};
-
-export type SectorFlowTick = {
-  time: string | null;
-  net_dollar_flow: number | null;
-  foreign_net: number | null;
-  breadth_sma20: number | null;
-  atr_pct: number | null;
-};
-
 export type SectorSignalRow = {
   date: string;
   sector_code: string;
@@ -96,13 +77,19 @@ export type BacktestResult = {
   trade_log: { date: string; sector: string; side: string; ret: number }[];
 };
 
-export const sectorsApi = {
-  // ----- flow -----
-  listFlow: (limit = 200) =>
-    api.get<SectorFlowDaily[]>('/sectors/flow', { params: { limit } }),
-  sectorFlow: (code: string, limit = 60) =>
-    api.get<SectorFlowTick[]>(`/sectors/${code}/flow`, { params: { limit } }),
+// One handoff row = flow leaving `from_sector` while entering `to_sector` on
+// one session. See analysis/flow_handoff.compute_handoff().
+export type HandoffRow = {
+  date: string;
+  from_sector: string;
+  to_sector: string;
+  handoff_score: number;
+};
+export type HandoffResponse = { count: number; window: number; handoffs: HandoffRow[] };
 
+// 2026-08-23: six methods removed here — listFlow, sectorFlow, heatmap, varOne,
+// listBacktests and stealth. All had zero call sites across frontend/src.
+export const sectorsApi = {
   // ----- ranking -----
   latestRanking: () => api.get<SectorSignalRow[]>('/sectors/ranking'),
   publishRanking: () =>
@@ -117,48 +104,26 @@ export const sectorsApi = {
   // ----- backtest -----
   runBacktest: (req: BacktestRequest) =>
     api.post<BacktestResult>('/sectors/backtest', req, { timeout: LONG_TIMEOUT }),
-  listBacktests: (limit = 20) =>
-    api.get('/sectors/backtest', { params: { limit } }),
 
   // ----- risk -----
   varAll: () => api.get<VaRReport[]>('/sectors/risk/var'),
-  varOne: (code: string) => api.get<VaRReport>(`/sectors/risk/var/${code}`),
   exposure: () => api.get<ExposureRow[]>('/sectors/risk/exposure'),
   stoploss: () => api.get<StopLossAlert[]>('/sectors/risk/stoploss'),
 
-  // ----- stealth / accumulation (§16) -----
-  stealth: () => api.get<StealthResponse>('/sectors/stealth'),
-  heatmap: () => api.get<HeatmapResponse>('/sectors/heatmap'),
+  // ----- rotation (§4 handoff matrix) -----
+  // Backs the Rotation Map page since 2026-08-23. /api/rotation/* is left
+  // mounted but unread: its pair detection returns a cartesian product of two
+  // sets that is empty at every threshold on the live panel. See the module
+  // docstring in api/routers/rotation.py.
+  handoff: (lookback_days = 60, window = 5, top_k = 5) =>
+    api.get<HandoffResponse>('/sectors/handoff', { params: { lookback_days, window, top_k } }),
 };
 
-export type StealthEntry = {
-  sector_code: string;
-  start_date?: string | null;
-  accumulation_age?: number | null;
-  stealth_score?: number | null;
-  flow_z20?: number | null;
-  foreign_hit_20d?: number | null;
-  breadth_sma20?: number | null;
-  atr_pct?: number | null;
-  days_until_breakout?: number | null;
-};
-export type StealthResponse = {
-  active: StealthEntry[];
-  warming: StealthEntry[];
-  history: StealthEntry[];
-};
-export type HeatmapCell = {
-  date: string;
-  sector_code: string;
-  flow_z20: number | null;
-  stealth_score: number | null;
-};
-export type HeatmapResponse = { count: number; cells: HeatmapCell[] };
-
-export const agentApi = {
-  briefing: () => api.get('/agent/briefing'),
-  stoplossAlerts: () => api.get('/agent/stoploss-alerts'),
-};
+// agentApi (briefing / stoploss-alerts) removed 2026-08-23.
+// Both endpoints returned 404: the /api/agent/* router was deleted from the
+// backend on 2026-04-18 when OpenClaw was replaced by services.trader_agent,
+// which is invoked from POST /api/insight/refresh and rendered inline on the
+// Daily Insight page. The client kept calling the dead routes for four months.
 
 // ===== Phase 15 — Feature A Money Flow Monitor =====
 export type Interval = '1d' | '1w' | '2w' | '1m' | '1q';
@@ -204,14 +169,19 @@ export type FlowHeatResponse = {
   cells: FlowHeatCell[];
 };
 
+// 2026-08-23: `lookback` defaulted to 400 sessions here, which is what made
+// /api/flow/series the slowest route in the system -- 2.8 s and 1.0 MB for a
+// chart that shows months. The backend default was lowered to 120 the same
+// day, but the client always sent an explicit 400, so the change did nothing
+// until this line changed too. Pass a bigger number when you actually want it.
 export const flowApi = {
-  series: (interval: Interval = '1d', lookback = 400) =>
+  series: (interval: Interval = '1d', lookback = 120) =>
     api.get<FlowSeriesResponse>('/flow/series', { params: { interval, lookback } }),
   ranking: (interval: Interval = '1d', flow_z_hot = 1.0) =>
     api.get<FlowRankingResponse>('/flow/ranking', { params: { interval, flow_z_hot } }),
   heat: (interval: Interval = '1d', lookback = 60) =>
     api.get<FlowHeatResponse>('/flow/heat', { params: { interval, lookback } }),
-  sector: (code: string, interval: Interval = '1d', lookback = 400) =>
+  sector: (code: string, interval: Interval = '1d', lookback = 120) =>
     api.get('/flow/sector/' + code, { params: { interval, lookback } }),
   refresh: () => api.post('/flow/refresh'),
   refreshStatus: () => api.get('/flow/refresh/status'),
@@ -220,12 +190,9 @@ export const flowApi = {
 };
 
 // ===== Phase 15 — Features B/C/D/E =====
-export const rotationApi = {
-  sankey: (interval: Interval = '1w', threshold = 1.5) =>
-    api.get('/rotation/sankey', { params: { interval, threshold } }),
-  pairs: (interval: Interval = '1w', threshold = 1.5, limit = 20) =>
-    api.get('/rotation/pairs', { params: { interval, threshold, limit } }),
-};
+// rotationApi (sankey / pairs) removed 2026-08-23. Its only consumer,
+// RotationMapPage, now reads sectorsApi.handoff — /api/rotation/* returns an
+// empty pair list at every threshold. See api/routers/rotation.py.
 
 export const stealthApi15 = {
   active: (params: Record<string, number> = {}) =>
@@ -236,7 +203,8 @@ export const stealthApi15 = {
 export const pulseApi = {
   live: (alert_z = 1.5) => api.get('/pulse/live', { params: { alert_z } }),
   alerts: (alert_z = 1.5) => api.get('/pulse/alerts', { params: { alert_z } }),
-  exposure: () => api.get('/pulse/exposure'),
+  // exposure() removed 2026-08-23: /api/pulse/exposure is a hardcoded empty
+  // stub. Use sectorsApi.exposure() — /api/sectors/risk/exposure.
 };
 
 // Daily Insight refresh is async: POST kicks off a background job and

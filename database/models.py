@@ -81,6 +81,11 @@ class SectorFlowTS(Base):
     rs_vnindex_5d = Column(Float)
     rs_vnindex_20d = Column(Float)
     atr_pct = Column(Float)
+    # Migration 11 (review 2026-08-22, P0-2). Without these the EOD rollup
+    # had nothing to carry into sector_flow_daily, so close_idx/return_1d
+    # were left NULL by the only pipeline that runs on a schedule.
+    close_idx = Column(Float)
+    basket_return = Column(Float)
 
     __table_args__ = (
         UniqueConstraint("sector_code", "time", name="uq_flow_ts_sector_time"),
@@ -232,7 +237,7 @@ class ModelRun(Base):
     __tablename__ = "model_runs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    model_name = Column(String(50), nullable=False)        # "rotation_ranker_v0", "regime_hmm_v0"
+    model_name = Column(String(50), nullable=False)        # "rotation_ranker", "hmm"
     target_col = Column(String(50), nullable=False)        # "fwd_5d_sector_return"
     trained_at = Column(DateTime, default=datetime.utcnow)
     train_size = Column(Integer)

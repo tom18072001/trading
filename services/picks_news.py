@@ -73,9 +73,8 @@ def fetch_news(symbol: str, company_name: str | None = None,
 
 def _fetch_kbs(symbol: str, limit: int) -> list[NewsItem]:
     try:
-        from vnstock import Vnstock
-        s = Vnstock().stock(symbol=symbol, source="KBS")
-        df = s.company.news()
+        from utils.vn_api import company_news
+        df = company_news(symbol, source="KBS").news()
     except BaseException as e:
         log.debug("[picks-news] KBS news %s failed: %s", symbol, e)
         return []

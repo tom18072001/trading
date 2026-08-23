@@ -12,8 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database.models import (
-    Base, Sector, SectorConstituent, SectorFlowDaily, SectorFlowTS,
-    MacroAnchor,
+    Base, Sector, SectorConstituent, SectorFlowDaily, MacroAnchor,
 )
 from config import PROXY_BASKETS, SECTORS
 
@@ -70,7 +69,6 @@ def synthetic_constituent_df():
     rows = []
     price = 100.0
     for i in range(100):
-        dt = base + timedelta(days=i)
         price += np.sin(i / 5) * 0.5
         rows.append({
             "open": price - 0.3, "high": price + 0.5,

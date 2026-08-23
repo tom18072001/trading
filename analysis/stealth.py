@@ -82,7 +82,7 @@ def compute_leading_features(df: pd.DataFrame) -> pd.DataFrame:
         return df
     df = df.sort_values(["sector_code", "date"]).reset_index(drop=True)
     out_parts = []
-    for code, grp in df.groupby("sector_code", sort=False):
+    for _code, grp in df.groupby("sector_code", sort=False):
         g = grp.copy()
         flow = g["net_dollar_flow"].astype(float)
         foreign = g["foreign_net"].astype(float)

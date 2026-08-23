@@ -14,15 +14,13 @@ Cac chuc nang:
   - Lay chi so tai chinh co ban
 """
 
-import os
 import time
 import logging
-import socket
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
-from config import DATA_DIR, DATA_SOURCE, START_DATE, END_DATE
+from config import DATA_SOURCE, START_DATE, END_DATE
 try:
     from config import SECTOR_MAP
 except ImportError:
@@ -89,11 +87,10 @@ def get_all_symbols():
     Returns:
         pd.DataFrame: Bang danh sach ma CK voi cac cot [ticker, organ_name, ...]
     """
-    from vnstock import Listing
+    from utils.vn_api import listing as vn_listing
 
     def _fetch():
-        listing = Listing()
-        return listing.all_symbols()
+        return vn_listing().all_symbols()
 
     df = _call_with_retry(_fetch, "get_all_symbols")
     _safe_log(f"[INFO] Total symbols: {len(df)}")
@@ -116,11 +113,11 @@ def get_stock_history(symbol, start_date=START_DATE, end_date=END_DATE, source=D
             - open, high, low, close: Gia OHLC
             - volume: Khoi luong giao dich
     """
-    from vnstock import Vnstock
+    from utils.vn_api import quote_history
 
     def _fetch():
-        stock = Vnstock().stock(symbol=symbol, source=source)
-        return stock.quote.history(start=start_date, end=end_date, interval=interval)
+        return quote_history(symbol, start_date, end_date,
+                             interval=interval, source=source)
 
     try:
         df = _call_with_retry(_fetch, f"history({symbol})")
@@ -171,11 +168,10 @@ def get_company_overview(symbol, source=DATA_SOURCE):
     Returns:
         pd.DataFrame: Thong tin tong quan
     """
-    from vnstock import Vnstock
+    from utils.vn_api import company_news
 
     def _fetch():
-        stock = Vnstock().stock(symbol=symbol, source=source)
-        return stock.company.overview()
+        return company_news(symbol, source=source).overview()
 
     try:
         return _call_with_retry(_fetch, f"overview({symbol})")
@@ -281,10 +277,10 @@ def get_price_board(symbols):
     Returns:
         pd.DataFrame: Bang gia
     """
-    from vnstock import Trading
+    from utils.vn_api import price_board
 
     def _fetch():
-        return Trading(source=DATA_SOURCE).price_board(symbols)
+        return price_board(symbols)
 
     try:
         return _call_with_retry(_fetch, "price_board")

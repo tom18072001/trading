@@ -1,8 +1,19 @@
-"""Trader Expert Agent — Vietnamese stock analyst powered by Claude.
+"""Trader Expert Agent — Vietnamese stock analyst.
 
 Replaces the legacy OpenClaw "Trung" agent (see CLAUDE.md §7) with an
-in-process Python agent that calls Claude via `claude_agent_sdk` using the
-user's existing Claude Code subscription (no separate API key needed).
+in-process Python agent. Three transports, picked by `config.AGENT_PROVIDER`:
+
+  "local" (default, 2026-07-20) — plain HTTP to any OpenAI-compatible
+      /chat/completions endpoint reachable from this box. In practice that is
+      9Router (a local router on :20128 that fronts hosted models), but LM
+      Studio, llama.cpp and Ollama all speak the same shape. No
+      `claude_agent_sdk` subprocess: the agent takes one turn and uses no
+      tools, so the SDK was pure overhead here.
+  "glm"   — `claude_agent_sdk` pointed at Z.ai's Anthropic-compatible
+      endpoint (GLM models). Needs GLM_API_KEY in .env.
+  "claude"— native Claude Code subscription path via `claude_agent_sdk`.
+
+`claude_agent_sdk` is imported lazily: a local-only install does not need it.
 
 The agent is stateless and one-shot. It consumes the snapshot assembled by
 `PicksUniverseService` plus sector-level signals/regime from the DB, then
@@ -44,19 +55,33 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from claude_agent_sdk import (
-    AssistantMessage,
-    ClaudeAgentOptions,
-    ResultMessage,
-    TextBlock,
-    ThinkingConfigDisabled,
-    query,
-)
+from urllib.parse import urlsplit
+
+import httpx
+
+# Optional — only the "glm" / "claude" providers need the SDK. Keeping this
+# soft lets a local-only box run the agent without installing the CLI wheel
+# (~80MB) and without `import api.routers.insight` blowing up.
+try:
+    from claude_agent_sdk import (
+        AssistantMessage,
+        ClaudeAgentOptions,
+        ResultMessage,
+        TextBlock,
+        ThinkingConfigDisabled,
+        query,
+    )
+    _SDK_IMPORT_ERROR: str | None = None
+except ImportError as _e:            # pragma: no cover - env-dependent
+    AssistantMessage = ClaudeAgentOptions = ResultMessage = None  # type: ignore
+    TextBlock = ThinkingConfigDisabled = query = None             # type: ignore
+    _SDK_IMPORT_ERROR = str(_e)
 
 from config import (
     AGENT_MAX_AVOID, AGENT_MAX_BUY_CANDIDATES, AGENT_MAX_BUYS,
     AGENT_MAX_SELL_CANDIDATES, AGENT_MODEL, AGENT_NEWS_PER_CANDIDATE,
-    AGENT_TIMEOUT_SEC,
+    AGENT_PROVIDER, AGENT_TIMEOUT_SEC, GLM_API_KEY, GLM_BASE_URL,
+    LOCAL_API_KEY, LOCAL_BASE_URL,
 )
 
 log = logging.getLogger(__name__)
@@ -179,29 +204,66 @@ class TraderAgent:
 
         prompt = self._build_prompt(snapshot_dict, context)
         t0 = time.monotonic()
-        opts = ClaudeAgentOptions(
-            system_prompt=SYSTEM_PROMPT,
-            max_turns=self.max_turns,
-            model=self.model,
-            thinking=ThinkingConfigDisabled(type="disabled"),
-            allowed_tools=[],   # no tool use — pure analysis
-        )
 
         # Mutable accumulators so the inner coroutine can fill them under wait_for.
         acc: dict[str, Any] = {"raw_text": "", "model_used": self.model,
                                "cost_usd": None, "stop_reason": None}
 
-        async def _consume() -> None:
-            async for msg in query(prompt=prompt, options=opts):
-                if isinstance(msg, AssistantMessage):
-                    for block in msg.content:
-                        if isinstance(block, TextBlock):
-                            acc["raw_text"] += block.text
-                    if getattr(msg, "model", None):
-                        acc["model_used"] = msg.model
-                elif isinstance(msg, ResultMessage):
-                    acc["cost_usd"] = getattr(msg, "total_cost_usd", None)
-                    acc["stop_reason"] = getattr(msg, "stop_reason", None)
+        # ---- provider routing (2026-07-20) ----
+        if AGENT_PROVIDER == "local":
+            # Plain HTTP to an OpenAI-compatible server on this box. No SDK
+            # subprocess, no key, no network egress.
+            async def _consume() -> None:
+                await self._consume_http(prompt, acc)
+        else:
+            if query is None:
+                return AgentReport(
+                    built_at=now, as_of=as_of, model=self.model,
+                    duration_ms=0, cost_usd=None,
+                    gist="", regime_comment="", top_buys=[], avoid=[],
+                    portfolio_note="", raw_text="", is_valid=False,
+                    error=(f"claude_agent_sdk unavailable ({_SDK_IMPORT_ERROR}) — "
+                           f"install it or set AGENT_PROVIDER=local"),
+                )
+            # "glm" keeps the SDK transport but points the CLI subprocess at
+            # Z.ai's Anthropic-compatible endpoint, so GLM serves the call.
+            sdk_env: dict[str, str] = {}
+            if AGENT_PROVIDER == "glm":
+                if not GLM_API_KEY:
+                    log.error("[trader-agent] AGENT_PROVIDER=glm but GLM_API_KEY is empty")
+                    return AgentReport(
+                        built_at=now, as_of=as_of, model=self.model,
+                        duration_ms=0, cost_usd=None,
+                        gist="", regime_comment="", top_buys=[], avoid=[],
+                        portfolio_note="", raw_text="",
+                        is_valid=False,
+                        error="GLM_API_KEY not set — add it to .env or switch AGENT_PROVIDER=local",
+                    )
+                sdk_env = {
+                    "ANTHROPIC_BASE_URL": GLM_BASE_URL,
+                    "ANTHROPIC_AUTH_TOKEN": GLM_API_KEY,
+                }
+
+            opts = ClaudeAgentOptions(
+                system_prompt=SYSTEM_PROMPT,
+                max_turns=self.max_turns,
+                model=self.model,
+                thinking=ThinkingConfigDisabled(type="disabled"),
+                allowed_tools=[],   # no tool use — pure analysis
+                env=sdk_env,
+            )
+
+            async def _consume() -> None:
+                async for msg in query(prompt=prompt, options=opts):
+                    if isinstance(msg, AssistantMessage):
+                        for block in msg.content:
+                            if isinstance(block, TextBlock):
+                                acc["raw_text"] += block.text
+                        if getattr(msg, "model", None):
+                            acc["model_used"] = msg.model
+                    elif isinstance(msg, ResultMessage):
+                        acc["cost_usd"] = getattr(msg, "total_cost_usd", None)
+                        acc["stop_reason"] = getattr(msg, "stop_reason", None)
 
         try:
             # HARD timeout: without this, a stalled SDK transport hangs the whole
@@ -247,6 +309,67 @@ class TraderAgent:
     def invalidate(self) -> None:
         self._cache = None
         self._cache_key = None
+
+    # ---------- local transport ----------
+
+    async def _consume_http(self, prompt: str, acc: dict[str, Any]) -> None:
+        """One-shot POST to an OpenAI-compatible /chat/completions endpoint.
+
+        Endpoint-agnostic: 9Router, LM Studio, llama.cpp and Ollama all speak
+        this shape, so nothing here assumes a particular one. Non-streaming:
+        the reply is short (~500 tokens) and the caller already wraps us in
+        asyncio.wait_for, so streaming buys nothing.
+        """
+        url = f"{LOCAL_BASE_URL.rstrip('/')}/chat/completions"
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            # Low temp: this is structured extraction, not creative writing.
+            "temperature": 0.3,
+            "stream": False,
+        }
+        headers = {"Content-Type": "application/json"}
+        if LOCAL_API_KEY:
+            headers["Authorization"] = f"Bearer {LOCAL_API_KEY}"
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_sec) as client:
+                resp = await client.post(url, json=payload, headers=headers)
+                resp.raise_for_status()
+                data = resp.json()
+        except httpx.ConnectError as e:
+            # Name what is actually configured. This message used to hardcode
+            # "is Ollama running? (`ollama serve`)", which sent people chasing
+            # a service this box does not use once the transport moved to
+            # 9Router (2026-08-23). Nothing connects: the server at
+            # LOCAL_BASE_URL is down, not misconfigured.
+            host = urlsplit(LOCAL_BASE_URL).netloc or LOCAL_BASE_URL
+            raise RuntimeError(
+                f"nothing is listening at {url} (AGENT_PROVIDER=local, "
+                f"model '{self.model}'). Start whatever serves {host} — on "
+                f"this box that is 9Router, dashboard at http://{host.split(':')[0]}"
+                f":20128/dashboard. Change LOCAL_BASE_URL in .env to point "
+                f"somewhere else. [{e}]"
+            ) from e
+        except httpx.HTTPStatusError as e:
+            body = (e.response.text or "")[:300]
+            raise RuntimeError(
+                f"the model endpoint returned HTTP {e.response.status_code}: {body} "
+                f"(is model '{self.model}' offered by {LOCAL_BASE_URL}? "
+                f"GET {LOCAL_BASE_URL.rstrip('/')}/models lists what it has)"
+            ) from e
+
+        choices = data.get("choices") or []
+        if not choices:
+            raise RuntimeError(
+                f"the model endpoint returned no choices: {str(data)[:300]}")
+        acc["raw_text"] = (choices[0].get("message") or {}).get("content") or ""
+        acc["model_used"] = data.get("model") or self.model
+        acc["stop_reason"] = choices[0].get("finish_reason")
+        acc["cost_usd"] = 0.0        # self-hosted — no marginal cost per call
 
     # ---------- prompt assembly ----------
 
@@ -302,10 +425,17 @@ class TraderAgent:
                 top_buys=[], avoid=[], portfolio_note="", raw_text=text,
                 is_valid=False, error="empty response",
             )
-        m = re.search(r"```json\s*(\{.*?\})\s*```", text, re.S)
+        # Local reasoning models (Qwen3 & friends) prepend a <think>...</think>
+        # monologue. It routinely contains braces, which would poison the
+        # no-fence fallback below, so drop it before matching. An unterminated
+        # block (output truncated mid-think) is dropped to end-of-text.
+        search_text = re.sub(r"<think>.*?</think>", "", text, flags=re.S)
+        search_text = re.sub(r"<think>.*$", "", search_text, flags=re.S)
+
+        m = re.search(r"```json\s*(\{.*?\})\s*```", search_text, re.S)
         if not m:
             # Try to grab the first {...} blob if no fence
-            m = re.search(r"(\{[\s\S]*\})", text)
+            m = re.search(r"(\{[\s\S]*\})", search_text)
         if not m:
             return AgentReport(
                 built_at=built_at, as_of=as_of, model=model, duration_ms=dur_ms,
