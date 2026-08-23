@@ -1,5 +1,5 @@
-# ============================================================
-# register_tasks.ps1 — (re)register every SectorFlow scheduled task.
+﻿# ============================================================
+# register_tasks.ps1 -- (re)register every SectorFlow scheduled task.
 #
 # Scheduled tasks are CODE, not hand-edited configuration. After moving the
 # project (or on a new machine) run this once from an elevated PowerShell:
@@ -35,7 +35,7 @@ $Jobs = [ordered]@{
 foreach ($name in $Jobs.Keys) {
   $cfg = $Jobs[$name]
   $bat = Join-Path $JobsDir "job_$name.bat"
-  if (-not (Test-Path $bat)) { Write-Warning "skip $name — missing $bat"; continue }
+  if (-not (Test-Path $bat)) { Write-Warning "skip $name -- missing $bat"; continue }
 
   $action  = New-ScheduledTaskAction -Execute 'cmd.exe' `
                -Argument "/c `"$bat`"" -WorkingDirectory $Root
