@@ -1,7 +1,7 @@
 """PicksUniverseService — dynamic per-ticker universe for report + insight.
 
 Builds ONE validated snapshot per trading day, cached in memory. Both the
-email report (generate_secv5.py) and the Daily Insight API
+email report (generate_report.py) and the Daily Insight API
 (api/routers/insight.py) consume this service as the single source of truth
 for per-ticker BUY/ACCUMULATE picks. Per CLAUDE.md §2 the legacy
 `_legacy_stock_prices` + `_legacy_stock_features` tables are NOT read.
@@ -34,7 +34,6 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any, Callable, Iterable
 
-import numpy as np
 import pandas as pd
 
 from config import (
@@ -96,7 +95,7 @@ class TickerRow:
     daily_prices: list[dict[str, Any]] = field(default_factory=list)
 
     def as_picks_dict(self) -> dict[str, Any]:
-        """Compatibility projection consumed by generate_secv5.py's
+        """Compatibility projection consumed by generate_report.py's
         rendering code (which expects `sym`, `sector`, `close`, etc.)."""
         return {
             "sym": self.symbol,
@@ -258,9 +257,7 @@ def _technical_bits(r: "TickerRow") -> list[str]:
     if r.adx_14 is not None and r.adx_14 > 20:
         bits.append(f"ADX {r.adx_14:.0f}")
     if r.volume_ratio_20 is not None:
-        if r.volume_ratio_20 > 1.3:
-            bits.append(f"Vol {r.volume_ratio_20:.1f}x")
-        elif r.volume_ratio_20 < 0.7:
+        if r.volume_ratio_20 > 1.3 or r.volume_ratio_20 < 0.7:
             bits.append(f"Vol {r.volume_ratio_20:.1f}x")
     if r.atr_pct is not None:
         bits.append(f"ATR% {r.atr_pct:.1f}")
@@ -343,11 +340,8 @@ def _fetch_price_board_chunk(symbols: list[str]) -> pd.DataFrame:
     failure (caller handles fallback per-symbol)."""
     _kbs_throttle()
     try:
-        from vnstock import Vnstock
-        # price_board takes a list; pick any symbol for stock() init — it
-        # accepts the list at call time.
-        stock = Vnstock().stock(symbol=symbols[0], source=DATA_SOURCE)
-        df = stock.trading.price_board(symbols)
+        from utils.vn_api import price_board
+        df = price_board(symbols)
         if df is None or df.empty:
             return pd.DataFrame()
         # Flatten multi-level columns if present
@@ -845,7 +839,6 @@ class PicksUniverseService:
         chosen = filtered[:n]
 
         from services.picks_news import fetch_news
-        from config import PROXY_BASKETS  # for company name hints (optional)
 
         out: list[PickEntry] = []
         for r in chosen:

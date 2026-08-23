@@ -28,12 +28,10 @@ def fetch_vnindex_daily(days: int = 180) -> pd.Series:
     irrelevant to the classifier, which works on pct_change. (2026-06-19)
     """
     try:
-        from vnstock import Vnstock
-        from config import DATA_SOURCE
+        from utils.vn_api import quote_history
         end = datetime.now().strftime("%Y-%m-%d")
         start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-        idx = Vnstock().stock(symbol="VNINDEX", source=DATA_SOURCE)
-        df = idx.quote.history(start=start, end=end, interval="1D")
+        df = quote_history("VNINDEX", start, end, interval="1D")
         if df is None or df.empty or "close" not in df.columns:
             return pd.Series(dtype=float)
         df = df.copy()
@@ -52,12 +50,11 @@ class MacroService:
 
     def _fetch_vnindex(self) -> Optional[float]:
         try:
-            from vnstock import Vnstock
-            from config import DATA_SOURCE
-            idx = Vnstock().stock(symbol="VNINDEX", source=DATA_SOURCE)
-            df = idx.quote.history(
-                start=(datetime.now()).strftime("%Y-%m-%d"),
-                end=datetime.now().strftime("%Y-%m-%d"),
+            from utils.vn_api import quote_history
+            df = quote_history(
+                "VNINDEX",
+                (datetime.now()).strftime("%Y-%m-%d"),
+                datetime.now().strftime("%Y-%m-%d"),
                 interval="1D",
             )
             if df is not None and not df.empty:
