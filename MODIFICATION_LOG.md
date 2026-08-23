@@ -14,6 +14,76 @@
 
 ---
 
+## 2026-08-23 (late, 4) — Backtest controls; and `flow_z` was `flow_raw` in disguise
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `services/backtest_service.py` (strategy fix, cost overrides, benchmark curve)
+  - `api/routers/sectors_backtest.py` (`strategy` + cost fields on the request)
+  - `frontend/src/api/client.ts` (`BacktestStrategy`, 10 result fields, `listBacktests`)
+  - `frontend/src/pages/BacktestPage.tsx` (rewritten)
+  - new `tests/test_backtest_controls.py` (13)
+- Reason: sponsor review step 5. The backend had modelled T+2, fees, sell tax,
+  slippage and the ±7% band since 2026-08-22 and returned ten fields proving
+  it — the frontend received none of them and the router accepted no
+  `strategy`, so every run the UI could trigger was the same default. Tom's
+  words: *"đây là filter đắt giá nhất đang bị giấu."*
+- Summary:
+  - **Strategy selector.** `BacktestRequest` gains `strategy` as a `Literal`,
+    not a `str`: unvalidated, a typo fell through to the `flow_raw` branch,
+    which is the one behaviour nobody wants by accident.
+  - **`flow_z` and `flow_raw` were the same strategy.** Found by shipping the
+    selector and comparing: both returned **-25.06% over an identical 330
+    trades**. Cause: `_cross_sectional_z` computed `(v - mean) / sd` *within
+    the same day the rows were then sorted in*. A positive affine map preserves
+    order, so it produced the raw-VND permutation every day — the P0-4 fix for
+    size bias never actually removed the size bias. `flow_z` now ranks on
+    `flow_z20`, the per-sector z against a sector's **own** history (§16.2),
+    which is the only version that can surface a small sector. Now
+    signals -6.14% / flow_z -26.07% / flow_raw -25.06% — three strategies.
+    `_cross_sectional_z` is kept (P0-4 tests refer to it) with the proof in its
+    docstring and a test pinning it.
+  - **Per-run cost overrides.** `fee_bps` / `sell_tax_bps` / `settlement_lag`
+    thread through `run()`, clamped at ≥0 — a negative fee would pay the trader
+    to trade. Slippage and the ±7% band stay fixed: market structure, not a
+    negotiated rate.
+  - **Benchmark as a curve.** `_load_benchmark` already produced a daily series
+    but only the scalar escaped, so the chart could not draw it. Each
+    `equity_curve` row now carries `benchmark`, rebased to the same initial
+    capital. A test asserts the curve's total agrees with the tile.
+  - **Trade log rendered.** It was fetched and discarded, which made every
+    metric above it unauditable. Also corrects the TS type: rows carry
+    `alloc` (BUY) or `proceeds` (SELL) and `cost` — never the `ret` the type
+    claimed, which has never existed in the payload.
+  - **The Sharpe caveat was false.** The note added in the A7 pass said T+2,
+    fees, tax and the price band were *not* modelled. It was written from
+    §18.6's open-BLOCKER list without reading the service, which models all
+    four. It now prints the actual figures. A false caveat is worse than none:
+    it teaches the reader to discount a number that is already net.
+  - **Default range moved to 2026-04-09 → today.** It was 2025, and
+    `sector_signals` starts 2026-04-09 — so the page opened on "Tín hiệu đã
+    phát" and silently fell back on every first run. A visible banner now says
+    so when a fallback does happen.
+  - Compare-2-runs pins the current result client-side and joins the pinned
+    curve **by date**, not by index — an index join would slide two ranges
+    against each other and draw a comparison that never happened.
+- Evidence (§18.8): backend 169 → **182** (13 new); frontend 13/13; `tsc`
+  clean; build main bundle **374.84 kB** (unchanged — the growth is in the lazy
+  `BacktestPage` chunk, 346 → 361.97 kB). Live: all three strategies exercised
+  through the UI at 1440px, 3 curves render with the pinned run, 0 failed
+  requests.
+- Follow-ups:
+  - The `flow_z`/`flow_raw` collapse means **P0-4's size-bias fix never worked**
+    in the flow baseline. CLAUDE.md §20.2's P0-4 row overstates what shipped.
+  - The live run shows **45% friction on 844 trades/year** at default costs.
+    That is the daily-rebalance turnover, not a bug in the cost model, but it
+    says the strategy as simulated is uninvestable — worth a look before any
+    §18.7 net-of-cost Sharpe target is taken seriously.
+  - Many trade-log rows show a 0 VND fill (cash exhausted by earlier buys in
+    the same session). Harmless but noisy; a minimum-allocation floor would
+    stop them.
+  - No VNINDEX rows in `macro_anchors` for 2025, so ranges there label the
+    benchmark `sector_mean`. §11 wants VNINDEX — backfill it.
+
 ## 2026-08-23 (late, 3) — Kill-switch, position book, watchlist, data-age bar
 - Author: Claude Code on behalf of Tom
 - Files:

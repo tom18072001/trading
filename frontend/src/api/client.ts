@@ -57,11 +57,18 @@ export type StopLossAlert = {
   severity: string;
 };
 
+export type BacktestStrategy = 'signals' | 'flow_z' | 'flow_raw';
+
 export type BacktestRequest = {
   name: string;
   start_date: string;
   end_date: string;
   initial_capital?: number;
+  strategy?: BacktestStrategy;
+  // null/omitted = use the config defaults (§18.2/7,10).
+  fee_bps?: number | null;
+  sell_tax_bps?: number | null;
+  settlement_lag?: number | null;
 };
 
 export type BacktestResult = {
@@ -76,8 +83,32 @@ export type BacktestResult = {
   total_trades: number;
   win_rate: number;
   benchmark_return_pct: number;
-  equity_curve: { date: string; equity: number }[];
-  trade_log: { date: string; sector: string; side: string; ret: number }[];
+  equity_curve: { date: string; equity: number; benchmark: number | null }[];
+  // The service emits `alloc` on BUY rows and `proceeds` on SELL rows — never
+  // both, and never the `ret` this type used to claim.
+  trade_log: {
+    date: string; sector: string; side: 'BUY' | 'SELL';
+    alloc?: number; proceeds?: number; cost: number;
+  }[];
+  // §18.2 realism diagnostics — modelled by the service since 2026-08-22,
+  // returned all along, rendered by nobody until backlog step 5.
+  long_only: boolean;
+  settlement_lag: number;
+  fee_bps: number;
+  sell_tax_bps: number;
+  total_cost_pct: number;
+  ceiling_floor_skips: number;
+  root_capture_ratio: number | null;
+  strategy_source: BacktestStrategy;
+  benchmark_source: 'vnindex' | 'sector_mean';
+  signal_dates_covered: number;
+};
+
+export type BacktestRunRow = {
+  id: number; name: string; strategy: string;
+  start_date: string; end_date: string;
+  total_return_pct: number; sharpe_ratio: number;
+  max_drawdown_pct: number; win_rate: number;
 };
 
 // One handoff row = flow leaving `from_sector` while entering `to_sector` on
@@ -92,6 +123,8 @@ export type HandoffResponse = { count: number; window: number; handoffs: Handoff
 
 // 2026-08-23: six methods removed here — listFlow, sectorFlow, heatmap, varOne,
 // listBacktests and stealth. All had zero call sites across frontend/src.
+// (listBacktests came back the same day: the run-history table on the Backtest
+// tab is its caller.)
 export const sectorsApi = {
   // ----- ranking -----
   latestRanking: () => api.get<SectorSignalRow[]>('/sectors/ranking'),
@@ -107,6 +140,8 @@ export const sectorsApi = {
   // ----- backtest -----
   runBacktest: (req: BacktestRequest) =>
     api.post<BacktestResult>('/sectors/backtest', req, { timeout: LONG_TIMEOUT }),
+  listBacktests: (limit = 20) =>
+    api.get<BacktestRunRow[]>('/sectors/backtest', { params: { limit } }),
 
   // ----- risk -----
   varAll: () => api.get<VaRReport[]>('/sectors/risk/var'),

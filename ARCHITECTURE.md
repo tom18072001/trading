@@ -5,6 +5,21 @@
 > change must be logged in `MODIFICATION_LOG.md`.
 
 ## CHANGELOG
+- **2026-08-23 (late, 4) — Backtest controls; and `flow_z` was `flow_raw` in disguise.**
+  Contract change on `POST /api/sectors/backtest`: the request model gains
+  `strategy` (a Pydantic `Literal` — an unvalidated string used to fall through
+  to the `flow_raw` branch) plus bounded per-run overrides for `fee_bps`,
+  `sell_tax_bps` and `settlement_lag`; the response's `equity_curve` gains a
+  `benchmark` point per row, so the chart can draw VNINDEX instead of leaving
+  "did I beat the index" as mental arithmetic. Everything else the service has
+  modelled since 2026-08-22 (§18.2/7–10 frictions, `trade_log`, root capture,
+  band skips) was already returned and simply had no type in `client.ts` and no
+  renderer — now both. **The defect this surfaced:** `_cross_sectional_z`
+  computes `(v − mean)/sd` within the same day the rows are then sorted in, a
+  positive affine map, so `flow_z` produced the raw-VND permutation every day —
+  the two "different" baselines returned an identical −25.06% over 330 trades.
+  `flow_z` now ranks on `flow_z20` (per-sector z vs. its own history). §20.2's
+  P0-4 row was accordingly half true; see `CLAUDE.md` §23.
 - **2026-08-23 (late, 3) — Operator state: kill-switch, position book, watchlist.**
   New layer, new contract. `services/trading_state.py` is the first piece of
   state the *operator* owns rather than the model: a single JSON file

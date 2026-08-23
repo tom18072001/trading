@@ -252,6 +252,10 @@ Anything worse than this means the thesis is still lagging — go back to featur
 ### 18.6 Priority queue (append to §13 + §16.10)
 Ship order, blockers first:
 - P0: §18.1/1–2, §18.2/7–10, §18.3/13, §18.4/17 — before any live paper trade.
+  > **2026-08-23:** §18.2/7, 9, 10 are **closed in the backtest engine** — T+2,
+  > slippage, fee, sell tax and the ±7% band are modelled and now reported on
+  > every run (§23). They stay open in `risk_service`, which sizes positions
+  > with no cost model. §18.3/13 closed 2026-08-22 (§20.2 P0-6).
 - P1: §18.1/3–6, §18.2/11–12, §18.3/14–15, §18.5/21–22 — before shadow-run metrics matter.
 - P2: remaining HYGIENE + EDGE.
 
@@ -270,9 +274,19 @@ As of 2026-04-23:
 
 | Suite | Count | Command |
 |---|---|---|
-| Backend (pytest) | 169 | `python -m pytest tests/` |
+| Backend (pytest) | 182 | `python -m pytest tests/` |
 | Frontend (vitest) | 13 | `cd frontend && npm test` |
-| **Total** | **182** | — |
+| **Total** | **195** | — |
+
+> 2026-08-23 (late, 4): +13 in `tests/test_backtest_controls.py` — the backtest
+> controls the UI can now reach. Two of them are the interesting ones:
+> `test_flow_z_is_not_the_same_strategy_as_flow_raw` (a +2.5σ small sector must
+> be reachable by `flow_z` and unreachable by `flow_raw`) and
+> `test_cross_sectional_z_preserves_raw_order`, which pins the *proof* that the
+> old cross-sectional z was an order-preserving affine map. The rest guard the
+> benchmark curve, cost-override clamping (a negative fee must not pay the
+> trader), the `Literal` strategy validation (422 on a typo, which used to fall
+> through to `flow_raw`) and the `trade_log` row shape the TS type claims.
 
 > 2026-08-23 (late): +13 in `tests/test_trading_state.py` — the operator store
 > behind the kill-switch, the position book and the watchlist. The guards that
@@ -339,7 +353,7 @@ daily table.
 | P0-1 | `rollup_to_daily()` derives each row's date from the bar's own timestamp and refuses to stamp a stale bar as a new session | `services/sector_ingest_service.py` |
 | P0-2 | The scheduled path now carries `close_idx` + `return_1d` through; `fast_ingest` upserts instead of skipping, so it can repair damaged dates | `sector_ingest_service.py`, `fast_ingest.py`, migration 11 |
 | P0-3 | `SectorAggregate.basket_return` — the split-safe weighted mean of constituent returns. `close_idx` remains a raw price sum and must not be used for returns | `analysis/flow_aggregation.py` |
-| P0-4 | Backtest replays published `sector_signals` by default (`strategy="signals"`), with `flow_z` and legacy `flow_raw` baselines for comparison; benchmark is VNINDEX per §11, labelled when it falls back | `services/backtest_service.py` |
+| P0-4 | Backtest replays published `sector_signals` by default (`strategy="signals"`), with `flow_z` and legacy `flow_raw` baselines for comparison; benchmark is VNINDEX per §11, labelled when it falls back. **Half-true until 2026-08-23** — see §23 | `services/backtest_service.py` |
 | P0-6 | Purged/embargoed CV — embargo = horizon + 2 sessions (§18.3/13, was BLOCKER). Metrics replaced with `top1_excess_hit` (vs. median sector), `decile_monotonic` (§18.7) and `ndcg_at_3` | `models/rotation_ranker.py` |
 | P1-2 | The mean-flow fallback is flagged `is_degraded` and announced loudly instead of shipping as "ranker-gated" | `rotation_ranker.py`, `sector_signal_service.py` |
 | P1-5 | §16.9 ACCUMULATE cap (4) and 30-session auto-exit, §18.4/20 `TRADING_HALT` kill-switch, and `ALLOW_SHORT_SIGNALS` to retire the cash-leg short per §18.2/12 | `config.py`, `services/sector_signal_service.py` |
@@ -591,3 +605,71 @@ symbol from the watchlist: you cannot be watching something you have bought.
 The book stores no exit price, so there is no P&L yet. That is the next thing to
 add if performance attribution is wanted — it is a deliberate stop, not an
 oversight.
+
+## 23. Backtest controls — and `flow_z` was `flow_raw` in disguise — 2026-08-23
+
+### 23.1 What was unreachable
+`services/backtest_service.py` has modelled the whole of §18.2/7–10 since
+2026-08-22 — T+2 settlement, per-side broker fee, the 0.1% sell tax, slippage
+`max(0.3%, 0.5×ATR%)` and the ±7% HOSE band — and returns each of them on the
+result. None of it reached a human:
+
+| existed in the service | why nobody saw it |
+|---|---|
+| three strategies (`signals` / `flow_z` / `flow_raw`) | the router's request model carried no `strategy`, so every run the UI could trigger was the default |
+| per-run fee / tax / settlement overrides | same — no field in |
+| ten realism fields on the result | `client.ts`'s `BacktestResult` type omitted them |
+| `trade_log` | fetched and discarded by the page |
+| VNINDEX | returned as a **scalar total only**, so the chart could draw one line |
+
+All five are now surfaced (`api/routers/sectors_backtest.py`, `client.ts`,
+`BacktestPage.tsx`). `strategy` is a Pydantic `Literal`, not `str`: unvalidated,
+a typo fell through the `if/elif` to the `flow_raw` branch — the one behaviour
+nobody wants by accident. Costs are clamped at the service (`max(0.0, …)`); a
+negative fee would otherwise pay the trader to trade.
+
+### 23.2 The defect shipping the selector exposed
+`flow_z` and `flow_raw` were **the same strategy**. Measured over
+2026-04-09→08-23: both −25.06%, both 330 trades, byte-identical.
+
+`_cross_sectional_z` computes `(v − mean)/sd` **within the same day the rows are
+then sorted in**. That is a positive affine map, and a positive affine map
+preserves order — so it always produced the raw-VND permutation. Verified twice:
+a five-row worked example and 2000/2000 random days identical.
+
+So §20.2's P0-4 row was half true. The signals replay was real; the size-bias
+fix it claimed for the flow baseline never changed a single ordering.
+
+`flow_z` now ranks on **`flow_z20`** — the z of a sector against *its own* 20d
+history, which is what §16.2 means by flow z and the only version that can make
+a small sector reachable. Three genuinely distinct strategies now:
+`signals −6.14% / flow_z −26.07% / flow_raw −25.06%`. Two tests pin both the fix
+and the proof.
+
+### 23.3 The false caveat, removed
+The Sharpe tile said T+2, fees, tax and the price band were **not** modelled.
+That was written from §18.6's open-BLOCKER list without reading the service,
+which had modelled all four for a day. It now names the resolved figures the run
+actually used. A caveat that is false is worse than none: it teaches the reader
+to discount a number that is already net.
+
+Consequence for doctrine: **§18.2/7, 9, 10 and §18.6's P0 row for them are
+closed in the backtest engine.** They remain open in `risk_service`, which sizes
+positions without a cost model.
+
+### 23.4 The default range guaranteed a silent fallback
+The page opened on `2025-01-01 → 2025-12-31`. `sector_signals` starts
+2026-04-09, so the default range had zero of them and the page opened on a
+strategy it could not run — falling back to the flow baseline with only a
+`print()` to say so. Defaults are now `2026-04-09 → today`, and a fallback
+raises a visible banner instead of a server-side log line.
+
+### 23.5 Open, logged, not fixed
+- **45% friction on 844 trades a year** at default costs. Not a cost-model bug —
+  daily rebalance turnover. It says the simulated strategy is uninvestable, and
+  no §18.7 net-of-cost Sharpe target is credible until it changes.
+- `macro_anchors` has **no VNINDEX rows for 2025**, so those ranges label the
+  benchmark `sector_mean` rather than the §11-mandated VNINDEX.
+- Zero-VND trade-log rows want a minimum-allocation floor.
+- `_cross_sectional_z` is kept only because `_persist` and the P0-4 tests refer
+  to it; it has no caller that depends on its ordering.
