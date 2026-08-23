@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { insightApi, type InsightRefreshStatus } from '../api/client';
 import { ActionBadge } from '../lib/actions';
+import { isHeld, tradingState, useTradingState } from '../lib/tradingState';
 
 // Polls /insight/refresh/status until the background run completes. Used by
 // the Refresh button so the UI can surface stage + progress % instead of
@@ -331,6 +332,46 @@ function tPlusDays(date: string | undefined): { label: string; date: string; sub
   return out;
 }
 
+/**
+ * "Đã vào lệnh" / "Theo dõi" — the app had no idea which recommendations you
+ * had acted on, so it kept surfacing tomorrow what you bought today. Marking a
+ * pick stores it in the operator's book (services/trading_state.py) with the
+ * price shown on this card, which is the price the recommendation was made at.
+ */
+function PickActions({ p, kind, close }: { p: any; kind: 'BUY' | 'SELL'; close: number | null }) {
+  const s = useTradingState();
+  const sym = p.symbol;
+  const held = isHeld(s, sym, kind);
+  const watched = s.watchlist.includes(sym);
+
+  return (
+    <div className="flex items-center gap-2 pt-1">
+      <button
+        onClick={() => held
+          ? tradingState.removePosition(sym, kind)
+          : tradingState.addPosition({ symbol: sym, sector_code: pSecCode(p), side: kind, entry_price: close })}
+        className={`flex-1 px-3 py-2 rounded-lg text-[12px] font-bold transition border ${
+          held
+            ? 'bg-buy/[0.14] border-buy/40 text-buy hover:bg-buy/[0.2]'
+            : 'bg-raise border-line2 text-mid hover:text-hi hover:border-acc/40'}`}
+      >
+        {held ? '✓ Đã vào lệnh — bỏ đánh dấu' : 'Đã vào lệnh'}
+      </button>
+      {!held && (
+        <button
+          onClick={() => tradingState.toggleWatch(sym)}
+          className={`px-3 py-2 rounded-lg text-[12px] font-semibold transition border ${
+            watched
+              ? 'bg-acc/[0.12] border-acc/40 text-acc'
+              : 'bg-raise border-line2 text-mid hover:text-hi'}`}
+        >
+          {watched ? '★ Đang theo dõi' : '☆ Theo dõi'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function PickCard({ p, kind, alloc }: { p: any; kind: 'BUY' | 'SELL'; alloc: number }) {
   const [openNews, setOpenNews] = useState(false);
   const sym = p.symbol;
@@ -463,6 +504,8 @@ function PickCard({ p, kind, alloc }: { p: any; kind: 'BUY' | 'SELL'; alloc: num
           )}
         </div>
       )}
+
+      <PickActions p={p} kind={kind} close={close} />
     </div>
   );
 }
@@ -647,6 +690,16 @@ export default function DailyInsightPage() {
   const [pickView, setPickView] = useState<PickView>('cards');
   const [capital, setCapital] = useState(100); // million VND (tr)
   const activeRunRef = useRef<string | null>(null);
+  // The slider used to reset to 100tr on every F5. Seed it from the stored
+  // value once it arrives, but never fight the user mid-session.
+  const persistedCapital = useTradingState().capital_mn;
+  const seededCapital = useRef(false);
+  useEffect(() => {
+    if (!seededCapital.current && persistedCapital) {
+      seededCapital.current = true;
+      setCapital(persistedCapital);
+    }
+  }, [persistedCapital]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -848,9 +901,13 @@ export default function DailyInsightPage() {
           <div className="flex items-center gap-4">
             <label className="flex items-center gap-2 text-[12px] text-mid">
               <span>Vốn</span>
+              {/* Persisted on release, not on every drag tick: the slider
+                  fires onChange per pixel and each one would be a POST. */}
               <input
                 type="range" min={50} max={500} step={10} value={capital}
                 onChange={(e) => setCapital(Number(e.target.value))}
+                onPointerUp={() => tradingState.setCapital(capital)}
+                onKeyUp={() => tradingState.setCapital(capital)}
                 className="accent-[#46C9E6] w-32"
               />
               <span className="font-mono text-hi w-12 text-right">{capital}tr</span>

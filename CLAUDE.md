@@ -270,9 +270,17 @@ As of 2026-04-23:
 
 | Suite | Count | Command |
 |---|---|---|
-| Backend (pytest) | 156 | `python -m pytest tests/` |
+| Backend (pytest) | 169 | `python -m pytest tests/` |
 | Frontend (vitest) | 13 | `cd frontend && npm test` |
-| **Total** | **169** | — |
+| **Total** | **182** | — |
+
+> 2026-08-23 (late): +13 in `tests/test_trading_state.py` — the operator store
+> behind the kill-switch, the position book and the watchlist. The guards that
+> matter: a corrupt file must not take the API down, the `TRADING_HALT` env
+> override must not be clearable from a browser, marking the same pick twice
+> must update rather than duplicate, and — the point of the whole feature — a
+> flag set from the browser must reach `SectorSignalService.publish()` and make
+> it emit all-HOLD.
 
 > 2026-08-23: +6 in `tests/test_picks_universe_service.py` — the disk-snapshot
 > round-trip (identity between `by_sector` and `tickers` preserved), cold-cache
@@ -335,6 +343,7 @@ daily table.
 | P0-6 | Purged/embargoed CV — embargo = horizon + 2 sessions (§18.3/13, was BLOCKER). Metrics replaced with `top1_excess_hit` (vs. median sector), `decile_monotonic` (§18.7) and `ndcg_at_3` | `models/rotation_ranker.py` |
 | P1-2 | The mean-flow fallback is flagged `is_degraded` and announced loudly instead of shipping as "ranker-gated" | `rotation_ranker.py`, `sector_signal_service.py` |
 | P1-5 | §16.9 ACCUMULATE cap (4) and 30-session auto-exit, §18.4/20 `TRADING_HALT` kill-switch, and `ALLOW_SHORT_SIGNALS` to retire the cash-leg short per §18.2/12 | `config.py`, `services/sector_signal_service.py` |
+| P1-5b | **2026-08-23** — the kill-switch stops being env-only. `publish()` ORs `TRADING_HALT` with a runtime flag toggled from `/positions?tab=risk`, read once before the loop so a mid-run toggle cannot split a batch. The env var remains a hard override a browser cannot clear | `services/trading_state.py`, `api/routers/state.py`, `sector_signal_service.py` |
 | P1-6 | `utils/clock.py` — one market-local definition of "today". `config.TIMEZONE` was declared and used nowhere | new module + call sites |
 | P2-1 | `require_api_key` is wired to every router behind `API_REQUIRE_KEY`; the slowapi limiter is finally attached to the app; the inert `"https://*.ngrok-free.app"` CORS entries are gone | `api/main.py`, `config.py` |
 | P3-1 | `AGENTS.md` reduced to a pointer — one source of truth again | `AGENTS.md` |
@@ -540,3 +549,45 @@ about two laptop screens down.
 Bundle: main **376.43 → 371.12 kB**. `PositionsPage` (12.7 kB) and
 `ResearchPage` (1.05 kB) are lazy, and recharts stays in its own 346 kB chunk
 that only loads when you select the Backtest tab.
+
+### 22.10 Operator state — kill-switch, book, watchlist — 2026-08-23
+
+Everything on every page was model output. The app knew what it thought and
+nothing about what Tom did, which showed up in four places at once:
+
+| symptom | cause |
+|---|---|
+| stopping the 17:00 publish meant editing `.env` and restarting | §18.4/20's kill-switch was an env var |
+| "Vị thế đang mở" on the Risk page was not your book | `current_exposure()` equal-weights today's BUY/SELL signals — model suggestions wearing a book's name |
+| the "Vốn 50-500tr" slider reset to 100tr on every F5 | it only split weights; nothing stored it |
+| eight of nine routes never said how old the data was | `FlowMonitorPage` was the only page fetching `/flow/freshness` |
+
+`services/trading_state.py` is one JSON file (`data/trading_state.json`,
+gitignored) with four keys — halt, capital, positions, watchlist — behind
+`/api/state/*`. **Not a table on purpose:** three keys do not justify migration
+12, and the scheduler process has no HTTP client, so it must read the halt flag
+directly off disk. If a second machine or a second trader ever appears this
+becomes a table and the read path becomes a query; the API shape above it does
+not have to change.
+
+The halt has **two sources, OR'd**. `TRADING_HALT` stays a hard override a
+browser cannot clear; the runtime flag is what the UI toggles. `halt_env` and
+`halt_effective` are returned so that asymmetry is visible rather than
+surprising — the toggle disables itself, with a title saying why, when the env
+var is the one holding the halt. `publish()` reads the answer **once before the
+loop**, so toggling mid-run cannot publish half a batch.
+
+The banner is app-wide and un-dismissable. A halt you can only see on the page
+where you set it is a halt you will forget about, and forgetting it means
+trading picks the 17:00 job has already stopped publishing. Below it sits a
+data-age bar on the same principle: quiet when fresh, warn-coloured with the
+session gap when behind.
+
+`lib/tradingState.ts` is a `useSyncExternalStore` module store, not Context —
+Layout would otherwise own state it never reads, and one object does not justify
+a state library. Marking a pick is idempotent on `(symbol, side)` and drops the
+symbol from the watchlist: you cannot be watching something you have bought.
+
+The book stores no exit price, so there is no P&L yet. That is the next thing to
+add if performance attribution is wanted — it is a deliberate stop, not an
+oversight.

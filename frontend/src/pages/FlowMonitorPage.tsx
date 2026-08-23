@@ -168,17 +168,18 @@ export default function FlowMonitorPage() {
   const [err, setErr] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshMsg, setRefreshMsg] = useState<string | null>(null);
-  const [freshness, setFreshness] = useState<any>(null);
 
+  // The freshness fetch that used to live here moved to the app-wide bar in
+  // Layout (review §D). Two copies of "how old is the data" on one screen is
+  // one copy too many.
   const load = () => {
     setErr(null);
     Promise.all([
       flowApi.ranking(interval, flowZHot),
       flowApi.heat(interval, 60),
       flowApi.series(interval),
-      flowApi.freshness(),
     ])
-      .then(([r, h, s, f]) => { setRanking(r.data); setHeat(h.data); setSeries(s.data); setFreshness(f.data); })
+      .then(([r, h, s]) => { setRanking(r.data); setHeat(h.data); setSeries(s.data); })
       .catch((e) => setErr(String(e?.message || e)));
   };
   useEffect(load, [interval, flowZHot]);
@@ -220,10 +221,7 @@ export default function FlowMonitorPage() {
           <p className="text-[13px] text-mid mt-0.5">Dòng tiền vào/ra ngành nào, mạnh đến đâu</p>
         </div>
         <div className="text-[11px] text-lo font-mono text-right self-center">
-          DB: {freshness?.latest_date || ranking?.as_of || '—'}
-          {freshness && !freshness.is_fresh && freshness.gap_days > 0 && (
-            <span className="text-warn ml-1">({freshness.gap_days}d behind)</span>
-          )}
+          Xếp hạng tính đến {ranking?.as_of || '—'}
         </div>
       </header>
 

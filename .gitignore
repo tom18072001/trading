@@ -22,6 +22,9 @@ output/
 # PicksUniverseService cache (2026-08-23). Rebuilt from vnstock on demand and
 # machine-local; it is a cache, not a source of truth. See CLAUDE.md 22.6.
 data/snapshots/picks_universe.json
+# Operator state (2026-08-23): kill-switch flag, position book, watchlist.
+# One trader, one machine — this is Tom's book, not repo content.
+data/trading_state.json
 
 # Environment
 .env

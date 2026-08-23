@@ -14,6 +14,58 @@
 
 ---
 
+## 2026-08-23 (late, 3) — Kill-switch, position book, watchlist, data-age bar
+- Author: Claude Code on behalf of Tom
+- Files:
+  - new `services/trading_state.py`, `api/routers/state.py`, `tests/test_trading_state.py`
+  - new `frontend/src/lib/tradingState.ts`, `frontend/src/components/KillSwitch.tsx`
+  - `api/main.py` (mount `/api/state`), `services/sector_signal_service.py` (read the flag)
+  - `frontend/src/api/client.ts` (`stateApi`, `Freshness` type)
+  - `frontend/src/components/Layout.tsx` (halt banner + data-age bar)
+  - `frontend/src/pages/RiskPage.tsx`, `frontend/src/pages/DailyInsightPage.tsx`
+  - `frontend/src/pages/FlowMonitorPage.tsx` (local freshness strip removed)
+  - `.gitignore` (`data/trading_state.json`)
+- Reason: sponsor review §D/§E, and §18.4/20. Three gaps, one cause — the app
+  knew what the *model* thought and nothing about what the *operator* did.
+  `TRADING_HALT` was an env var, so stopping the 17:00 publish meant editing
+  `.env` and restarting the process. No pick could be marked as taken, so the
+  Risk page's "Vị thế đang mở" was model suggestions wearing the name of a
+  book. The "Vốn 50-500tr" slider only split weights and reset to 100tr on
+  every F5. And "how old is this data" was answered on one route out of nine.
+- Summary:
+  - `trading_state.py` — one JSON file at `data/trading_state.json` holding
+    `halt`, `capital_mn`, `positions`, `watchlist`. Deliberately not a table:
+    three keys do not justify migration 12, and the scheduler process has no
+    HTTP client, so it must read the halt flag directly.
+  - The halt has **two sources, OR'd**: the `TRADING_HALT` env var stays a hard
+    override a browser cannot clear, the runtime flag is what the UI toggles.
+    `halt_env` / `halt_effective` are returned so the asymmetry is visible
+    rather than surprising, and the toggle disables itself when the env var is
+    the one holding the halt.
+  - `SectorSignalService.publish()` reads the flag **once before the loop**, so
+    a mid-run toggle cannot split a batch into half-published.
+  - Marking a pick is idempotent on `(symbol, side)` and drops the symbol from
+    the watchlist — you cannot be watching something you have bought.
+  - The halt banner is app-wide and un-dismissable: a halt visible only on the
+    page where you set it is a halt you will forget about.
+  - `DataAgeBar` in `Layout` — one freshness fetch above every page, quiet when
+    fresh, warn-coloured with the session gap when behind.
+  - Capital slider persists on pointer/key release, not per drag tick (one POST
+    per gesture, not per pixel), and seeds from the stored value on load.
+  - Renamed the Risk exposure table to "Tỷ trọng ngành mô hình đề xuất". With a
+    real book on the same page the two tables would otherwise be indistinguishable.
+- Evidence (§18.8): 13 new backend tests, incl. the integration guard that a
+  flag set from the browser reaches `publish()` and yields all-HOLD. Suite
+  156 → **169 passed**; frontend 13/13; `tsc --noEmit` clean; build 374.77 kB
+  (+0.65 kB). Live: halt → banner on `/insight` and `/flow`; marking BVH from a
+  pick card propagated to every other card through the shared store.
+- Follow-ups: the position book stores no exit price, so it cannot yet compute
+  P&L — deliberate, and the next thing to add if Tom wants performance
+  attribution. Step 5 of the review backlog (backtest strategy selector, fees,
+  benchmark, trade log) is next.
+
+---
+
 ## 2026-08-23 (late, 2) — Nav merged 9 → 5
 - Author: Claude Code on behalf of Tom
 - Files:

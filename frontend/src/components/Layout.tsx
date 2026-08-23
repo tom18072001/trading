@@ -1,5 +1,7 @@
-import { NavLink, Outlet } from 'react-router-dom';
-import type { ReactNode } from 'react';
+import { Link, NavLink, Outlet } from 'react-router-dom';
+import { useEffect, useState, type ReactNode } from 'react';
+import { useTradingState } from '../lib/tradingState';
+import { flowApi, type Freshness } from '../api/client';
 
 // ---- Inline stroke icons (18px) ----
 const ic = (paths: ReactNode) => (
@@ -71,6 +73,67 @@ const nav = [
   { to: '/research', label: 'Nghiên cứu', icon: 'backtest', hint: 'Backtest · xếp hạng · regime' },
 ];
 
+/**
+ * §18.4/20 kill-switch banner. Deliberately app-wide and un-dismissable: a
+ * halt that you can only see on the page where you set it is a halt you will
+ * forget about, and forgetting means acting on picks the 17:00 job has already
+ * stopped publishing.
+ */
+function HaltBanner() {
+  const s = useTradingState();
+  if (!s.halt_effective) return null;
+  return (
+    <div className="shrink-0 bg-sell/[0.14] border-b border-sell/40 px-8 py-2 flex items-center gap-3">
+      <span className="w-1.5 h-1.5 rounded-full bg-sell animate-dot-pulse shrink-0" />
+      <span className="text-[12.5px] font-semibold text-sell">
+        TẠM DỪNG GIAO DỊCH — không phát tín hiệu mua mới
+      </span>
+      {s.halt_reason && <span className="text-[12px] text-sell/80">· {s.halt_reason}</span>}
+      {s.halt_env && (
+        <span className="text-[11px] font-mono text-sell/70">
+          · đặt bằng biến môi trường TRADING_HALT (không tắt được từ giao diện)
+        </span>
+      )}
+      <Link to="/positions?tab=risk"
+        className="ml-auto text-[11.5px] font-semibold text-sell hover:underline shrink-0">
+        Quản lý →
+      </Link>
+    </div>
+  );
+}
+
+/**
+ * Review §D — how old is what I am looking at?
+ *
+ * Every page rendered its own answer or none at all, so a stale DB looked
+ * identical to a fresh one on eight of nine routes. One strip, above every
+ * page, fetched once. Quiet when fresh — a bar that always shouts is a bar
+ * nobody reads; it only takes colour when the data is actually behind.
+ */
+function DataAgeBar() {
+  const [f, setF] = useState<Freshness | null>(null);
+  useEffect(() => {
+    flowApi.freshness().then((r) => setF(r.data)).catch(() => {});
+  }, []);
+  if (!f) return null;
+
+  const stale = !f.is_fresh && f.gap_days > 0;
+  return (
+    <div className={`shrink-0 px-8 py-1.5 border-b flex items-center gap-2 text-[11.5px] font-mono ${
+      stale ? 'bg-warn/[0.10] border-warn/35 text-warn' : 'border-line text-lo'}`}>
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${stale ? 'bg-warn' : 'bg-buy/70'}`} />
+      <span>Dữ liệu đến {f.latest_date || '—'}</span>
+      {stale ? (
+        <span className="font-semibold">
+          · chậm {f.gap_days} phiên so với {f.last_trading_day} — chạy lại job EOD trước khi ra quyết định
+        </span>
+      ) : (
+        <span>· phiên gần nhất {f.last_trading_day}{f.is_weekend && ' · cuối tuần'}</span>
+      )}
+    </div>
+  );
+}
+
 export default function Layout() {
   return (
     <div className="flex h-screen bg-bg text-hi font-body">
@@ -137,8 +200,12 @@ export default function Layout() {
         </div>
       </aside>
 
-      <main className="flex-1 overflow-auto bg-bg">
-        <Outlet />
+      <main className="flex-1 overflow-auto bg-bg flex flex-col">
+        <HaltBanner />
+        <DataAgeBar />
+        <div className="flex-1">
+          <Outlet />
+        </div>
       </main>
     </div>
   );

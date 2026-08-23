@@ -5,6 +5,20 @@
 > change must be logged in `MODIFICATION_LOG.md`.
 
 ## CHANGELOG
+- **2026-08-23 (late, 3) — Operator state: kill-switch, position book, watchlist.**
+  New layer, new contract. `services/trading_state.py` is the first piece of
+  state the *operator* owns rather than the model: a single JSON file
+  (`data/trading_state.json`, gitignored) holding the halt flag, the capital
+  slider, the marked positions and the watchlist, exposed as `/api/state/*`
+  (router 13). `§18.4/20`'s kill-switch stops being env-only —
+  `SectorSignalService.publish()` now ORs the `TRADING_HALT` env var with a
+  runtime flag the UI can toggle, reading it once before the loop. Deliberately
+  a file and not a table: three keys do not justify a migration, and the
+  scheduler process has no HTTP client so it must read the flag directly. On the
+  frontend, `lib/tradingState.ts` is a `useSyncExternalStore` module store —
+  the halt banner (Layout), the toggle (Risk) and the mark buttons (Daily
+  Insight) are three trees that never meet. Layout also gained an app-wide
+  data-age bar; `FlowMonitorPage`'s local copy was removed.
 - **2026-08-23 (late) — Nav merged 9 → 5, §10 rewritten against the running app.**
   Nine nav doors became five, with the merged halves as URL-backed tabs
   (`components/Tabs.tsx`, `?tab=`): Dòng tiền = Monitor + Sector Detail,
@@ -387,7 +401,7 @@ powershell -ExecutionPolicy Bypass -File scripts\cleanup_scheduled_tasks.ps1
 
 ## 9. API ROUTERS (as of 2026-04-22)
 
-12 routers live under `api/routers/`. Phase-15 trader-first views are the
+13 routers live under `api/routers/`. Phase-15 trader-first views are the
 default; the `sectors_*` set remains for backend-only callers (the scheduler,
 the email report) and for backward-compat.
 
@@ -409,6 +423,12 @@ the email report) and for backward-compat.
 | `sectors_backtest.py` | `POST /api/sectors/backtest`, `GET /api/sectors/backtest/{id}` |
 | `sectors_risk.py` | `GET /api/sectors/risk/var`, `GET /api/sectors/risk/exposure` |
 | `sectors_handoff.py` | `GET /api/sectors/handoff` — sector-to-sector money handoff |
+
+**Operator state** (2026-08-23) — not model output; the only router backed by a
+file rather than the DB:
+| Router | Key endpoints |
+|---|---|
+| `state.py` | `GET /api/state`; `POST /api/state/{halt,capital,positions,watchlist}`; `DELETE /api/state/positions/{symbol}`. Every endpoint returns the whole state, so the client never merges. Backed by `services/trading_state.py` → `data/trading_state.json`. |
 
 **Removed (legacy, kept in `_trash_20260422/`):** `/api/stocks/*`, `/api/trade/*`, symbol parts of `/api/ml/*`, and the old `/api/agent/*` briefing (replaced by `/api/insight/*` + `trader_agent`).
 

@@ -122,6 +122,45 @@ export const sectorsApi = {
     api.get<HandoffResponse>('/sectors/handoff', { params: { lookback_days, window, top_k } }),
 };
 
+// ----- operator state: kill-switch, positions, watchlist (backlog step 4) -----
+// Every endpoint returns the whole state, so callers replace rather than merge.
+export type Position = {
+  symbol: string;
+  sector_code: string;
+  side: 'BUY' | 'SELL';
+  entry_price: number | null;
+  qty: number | null;
+  note: string;
+  opened_at: string;
+};
+
+export type TradingState = {
+  halt: boolean;
+  halt_reason: string;
+  halt_set_at: string | null;
+  /** TRADING_HALT env var. A hard override the UI cannot clear. */
+  halt_env: boolean;
+  /** halt || halt_env — what the publish job actually acts on. */
+  halt_effective: boolean;
+  capital_mn: number;
+  positions: Position[];
+  watchlist: string[];
+};
+
+export const stateApi = {
+  get: () => api.get<TradingState>('/state'),
+  setHalt: (halt: boolean, reason = '') =>
+    api.post<TradingState>('/state/halt', { halt, reason }),
+  setCapital: (capital_mn: number) =>
+    api.post<TradingState>('/state/capital', { capital_mn }),
+  addPosition: (p: Partial<Position> & { symbol: string }) =>
+    api.post<TradingState>('/state/positions', p),
+  removePosition: (symbol: string, side: 'BUY' | 'SELL' = 'BUY') =>
+    api.delete<TradingState>(`/state/positions/${symbol}`, { params: { side } }),
+  toggleWatch: (symbol: string) =>
+    api.post<TradingState>('/state/watchlist', { symbol }),
+};
+
 // agentApi (briefing / stoploss-alerts) removed 2026-08-23.
 // Both endpoints returned 404: the /api/agent/* router was deleted from the
 // backend on 2026-04-18 when OpenClaw was replaced by services.trader_agent,
@@ -167,6 +206,15 @@ export type FlowRankingResponse = {
   rows: FlowRankingRow[];
 };
 
+export type Freshness = {
+  latest_date: string | null;
+  last_trading_day: string | null;
+  today: string;
+  is_weekend: boolean;
+  is_fresh: boolean;
+  gap_days: number;
+};
+
 export type FlowHeatCell = { sector: string; bucket: string; flow_z20: number | null };
 export type FlowHeatResponse = {
   interval: Interval;
@@ -191,7 +239,7 @@ export const flowApi = {
     api.get('/flow/sector/' + code, { params: { interval, lookback } }),
   refresh: () => api.post('/flow/refresh'),
   refreshStatus: () => api.get('/flow/refresh/status'),
-  freshness: () => api.get('/flow/freshness'),
+  freshness: () => api.get<Freshness>('/flow/freshness'),
   index: (lookback = 60) => api.get('/flow/index', { params: { lookback } }),
 };
 

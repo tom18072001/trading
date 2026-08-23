@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { sectorsApi, type VaRReport, type ExposureRow, type StopLossAlert } from '../api/client';
 import { ActionBadge } from '../lib/actions';
+import { KillSwitchPanel, MyBookPanel } from '../components/KillSwitch';
 
 export default function RiskPage() {
   const [vars, setVars] = useState<VaRReport[]>([]);
@@ -32,6 +33,11 @@ export default function RiskPage() {
           VaR/CVaR theo ngành · tỷ trọng đang nắm · cảnh báo cắt lỗ
         </p>
       </header>
+
+      {/* Both are operator state, not model output — they render immediately
+          and do not wait on the VaR/exposure fetch below. */}
+      <KillSwitchPanel />
+      <MyBookPanel />
 
       {loading && <div className="text-mid text-sm">Đang tải…</div>}
       {error && (
@@ -72,7 +78,15 @@ export default function RiskPage() {
           </section>
 
           <section className="rounded-2xl bg-panel border border-line overflow-hidden">
-            <div className="px-4 py-3 border-b border-line section-label">Vị thế đang mở</div>
+            {/* Named "đề xuất", not "đang mở": current_exposure() equal-weights
+                today's BUY/SELL signals. It is what the model would hold, and
+                it was previously titled as if it were your book. */}
+            <div className="px-4 py-3 border-b border-line">
+              <div className="section-label">Tỷ trọng ngành mô hình đề xuất</div>
+              <p className="text-[11px] text-lo mt-0.5">
+                Chia đều theo tín hiệu BUY/SELL phiên gần nhất — không phải vị thế thật của bạn.
+              </p>
+            </div>
             <table className="w-full text-[13px]">
               <thead className="bg-panel2 border-b border-line text-[10px] uppercase tracking-wider text-mid">
                 <tr>
