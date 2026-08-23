@@ -5,6 +5,18 @@
 > change must be logged in `MODIFICATION_LOG.md`.
 
 ## CHANGELOG
+- **2026-08-23 (late, 5) — Global filter, stealth presets, CSV, send-report.**
+  Contract change: `/api/state/*` gains `POST /state/report/send` and
+  `GET /state/report/status`, backed by the new `services/report_runner.py`.
+  It runs `generate_report.py` as a **subprocess**, not an import — the script
+  is 1,629 module-level lines driven by `sys.argv` with no `main()`, so an
+  import would send mail as an import side effect. One run at a time; a second
+  call returns `already_running` rather than starting a second send. It lives
+  under `/state` because it is an operator action, the same category as the
+  kill-switch and the position book, not a new domain. No schema change.
+  Frontend gains three shared modules (`lib/filters.tsx`, `lib/glossary.tsx`,
+  `lib/stealthPresets.ts`); table filter, sort and stealth-threshold state now
+  live in the URL rather than component state.
 - **2026-08-23 (late, 4) — Backtest controls; and `flow_z` was `flow_raw` in disguise.**
   Contract change on `POST /api/sectors/backtest`: the request model gains
   `strategy` (a Pydantic `Literal` — an unvalidated string used to fall through

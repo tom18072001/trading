@@ -1,12 +1,22 @@
 import { useEffect, useState } from 'react';
 import { sectorsApi, type SectorSignalRow } from '../api/client';
 import { ActionBadge } from '../lib/actions';
+import { FilterBar, Th, downloadCsv, passes, useSorter, useTableFilter } from '../lib/filters';
+import { Hint } from '../lib/glossary';
+
+const ACTIONS = ['ACCUMULATE', 'BUY', 'TRIM', 'SELL', 'HOLD'];
 
 export default function RankingPage() {
   const [rows, setRows] = useState<SectorSignalRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const f = useTableFilter('rk');
+  const sorter = useSorter('rank', 'asc', 'rk');
+
+  // Filter, then sort. The other order sorts rows you are about to discard.
+  const shown = sorter.apply(
+    rows.filter((r) => passes(f, { sector: r.sector_code, action: r.action })));
 
   const load = () => {
     setLoading(true);
@@ -58,20 +68,34 @@ export default function RankingPage() {
       )}
 
       {!loading && !error && (
+        <>
+        <FilterBar
+          f={f} actions={ACTIONS} total={rows.length} shown={shown.length}
+          onExport={() => downloadCsv(
+            `xep_hang_nganh_${rows[0]?.date ?? 'export'}.csv`,
+            [
+              { key: 'rank', label: 'Hạng' }, { key: 'sector_code', label: 'Ngành' },
+              { key: 'score', label: 'Score' }, { key: 'action', label: 'Hành động' },
+              { key: 'persistence_ok', label: 'Bền tín hiệu' }, { key: 'date', label: 'Ngày' },
+            ],
+            shown)}
+        />
         <section className="rounded-2xl bg-panel border border-line overflow-hidden">
           <table className="w-full text-[13px]">
             <thead className="bg-panel2 border-b border-line text-[10px] uppercase tracking-wider text-mid">
               <tr>
-                <th className="p-2.5 text-left w-16">#</th>
-                <th className="p-2.5 text-left">Ngành</th>
-                <th className="p-2.5 text-right">Score</th>
-                <th className="p-2.5 text-center">Bền tín hiệu</th>
-                <th className="p-2.5 text-left">Hành động</th>
-                <th className="p-2.5 text-left">Ngày</th>
+                <Th s={sorter} col="rank" className="w-16">#</Th>
+                <Th s={sorter} col="sector_code">Ngành</Th>
+                <Th s={sorter} col="score" align="right"><Hint term="score">Score</Hint></Th>
+                <Th s={sorter} col="persistence_ok" align="center">
+                  <Hint term="persistence_ok">Bền tín hiệu</Hint>
+                </Th>
+                <Th s={sorter} col="action">Hành động</Th>
+                <Th s={sorter} col="date">Ngày</Th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {shown.map((r) => (
                 <tr key={r.sector_code} className="border-b border-line hover:bg-panel2/60">
                   <td className="p-2.5 font-mono font-bold text-mid tabular">#{r.rank}</td>
                   <td className="p-2.5 font-semibold text-hi">{r.sector_code}</td>
@@ -87,17 +111,22 @@ export default function RankingPage() {
                   <td className="p-2.5 font-mono text-lo tabular">{r.date}</td>
                 </tr>
               ))}
-              {rows.length === 0 && (
+              {shown.length === 0 && (
                 <tr>
                   <td colSpan={6} className="p-8 text-center text-mid text-[13px]">
-                    Chưa có tín hiệu. Bấm <span className="text-buy font-semibold">Publish ngay</span> để
-                    chạy ranker cho phiên gần nhất.
+                    {rows.length === 0 ? (
+                      <>Chưa có tín hiệu. Bấm <span className="text-buy font-semibold">Publish ngay</span> để
+                      chạy ranker cho phiên gần nhất.</>
+                    ) : (
+                      <>Không ngành nào khớp bộ lọc ({rows.length} ngành bị ẩn).</>
+                    )}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
         </section>
+        </>
       )}
     </div>
   );

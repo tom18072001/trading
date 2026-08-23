@@ -1,5 +1,10 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { stealthApi15 } from '../api/client';
+import { Hint } from '../lib/glossary';
+import {
+  DEFAULT_PRESET, STEALTH_PRESETS, matchPreset, type StealthParams,
+} from '../lib/stealthPresets';
 
 const GATE_KEYS = ['cond1_flow', 'cond2_foreign', 'cond3_breadth', 'cond4_atr_quiet', 'cond5_price_cheap'] as const;
 const GANTT_WINDOW = 30;
@@ -73,21 +78,32 @@ export default function StealthWatchPage() {
   const [err, setErr] = useState<string | null>(null);
   const [tab, setTab] = useState<'active' | 'warming'>('active');
 
-  const [flowZHot, setFlowZHot] = useState(1.0);
-  const [foreignHitMin, setForeignHitMin] = useState(0.6);
-  const [breadthMin, setBreadthMin] = useState(0.5);
-  const [atrRankMax, setAtrRankMax] = useState(0.5);
-  const [closePctMax, setClosePctMax] = useState(0.4);
-  const [minSessions, setMinSessions] = useState(5);
+  // The six knobs live in the URL: a gate you tuned is a view you send to
+  // someone, and F5 must not silently put you back on doctrine defaults while
+  // the numbers on screen say otherwise.
+  const [sp, setSp] = useSearchParams();
+  const params: StealthParams = (Object.keys(DEFAULT_PRESET.params) as (keyof StealthParams)[])
+    .reduce((acc, k) => {
+      const raw = sp.get(k);
+      const n = raw == null ? NaN : Number(raw);
+      acc[k] = Number.isFinite(n) ? n : DEFAULT_PRESET.params[k];
+      return acc;
+    }, {} as StealthParams);
+  const activePreset = matchPreset(params);
+
+  const setParams = (patch: Partial<StealthParams>) => {
+    const next = new URLSearchParams(sp);
+    Object.entries({ ...params, ...patch }).forEach(([k, v]) => next.set(k, String(v)));
+    setSp(next, { replace: true });
+  };
 
   const load = useCallback(() => {
     setErr(null);
-    stealthApi15.active({
-      flow_z_hot: flowZHot, foreign_hit_min: foreignHitMin, breadth_min: breadthMin,
-      atr_rank_max: atrRankMax, close_pct_60d_max: closePctMax, min_sessions: minSessions,
-    }).then((r) => setData(r.data)).catch((e) => setErr(String(e?.message || e)));
+    stealthApi15.active({ ...params })
+      .then((r) => setData(r.data)).catch((e) => setErr(String(e?.message || e)));
     stealthApi15.history(50).then((r: any) => setHistory(r.data?.rows || r.data?.history || [])).catch(() => {});
-  }, [flowZHot, foreignHitMin, breadthMin, atrRankMax, closePctMax, minSessions]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sp]);
 
   useEffect(load, [load]);
 
@@ -96,9 +112,11 @@ export default function StealthWatchPage() {
   const inactive = data?.inactive ?? [];
   const ganttRows = [...active, ...warming, ...inactive];
 
-  const ctrl = (label: string, value: number, set: (n: number) => void, step: number) => (
-    <label className="text-[11px] text-mid flex items-center gap-1.5">{label}
-      <input type="number" step={step} value={value} onChange={(e) => set(+e.target.value || 0)}
+  const ctrl = (label: string, key: keyof StealthParams, step: number, term?: string) => (
+    <label className="text-[11px] text-mid flex items-center gap-1.5">
+      {term ? <Hint term={term}>{label}</Hint> : label}
+      <input type="number" step={step} value={params[key]}
+        onChange={(e) => setParams({ [key]: +e.target.value || 0 } as Partial<StealthParams>)}
         className="bg-panel2 border border-line rounded-md px-2 py-1 w-14 text-[11px] text-hi font-mono" />
     </label>
   );
@@ -113,13 +131,47 @@ export default function StealthWatchPage() {
         <span className="text-[11px] text-lo font-mono self-center">as of {data?.as_of || '—'}</span>
       </header>
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl bg-panel border border-line p-3">
-        {ctrl('flow_z', flowZHot, setFlowZHot, 0.1)}
-        {ctrl('foreign_hit', foreignHitMin, setForeignHitMin, 0.05)}
-        {ctrl('breadth', breadthMin, setBreadthMin, 0.05)}
-        {ctrl('atr_rank', atrRankMax, setAtrRankMax, 0.05)}
-        {ctrl('close_pct', closePctMax, setClosePctMax, 0.05)}
-        {ctrl('min_sessions', minSessions, setMinSessions, 1)}
+      <div className="rounded-2xl bg-panel border border-line p-3 space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="section-label mr-1">Bộ lọc</span>
+          {STEALTH_PRESETS.map((p) => {
+            const on = activePreset === p.key;
+            return (
+              <button key={p.key} onClick={() => setParams(p.params)} title={p.hint}
+                className={`px-3 py-1 rounded-lg border text-[12px] font-semibold transition ${
+                  on ? 'bg-acc/[0.13] text-acc border-acc/40'
+                     : 'bg-panel2 text-mid border-line hover:text-hi'}`}>
+                {p.label}
+              </button>
+            );
+          })}
+          <span className={`px-3 py-1 rounded-lg border text-[12px] font-semibold ${
+            activePreset === 'custom' ? 'bg-raise text-hi border-line2' : 'text-lo border-transparent'}`}>
+            Tuỳ chỉnh
+          </span>
+          <span className="text-[11px] text-lo ml-auto">
+            {STEALTH_PRESETS.find((p) => p.key === activePreset)?.hint ?? 'Ngưỡng tự đặt'}
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          {ctrl('flow_z', 'flow_z_hot', 0.1, 'flow_z20')}
+          {ctrl('foreign_hit', 'foreign_hit_min', 0.05, 'foreign_hit_20d')}
+          {ctrl('breadth', 'breadth_min', 0.05, 'breadth_sma20')}
+          {ctrl('atr_rank', 'atr_rank_max', 0.05, 'atr_pct')}
+          {ctrl('close_pct', 'close_pct_60d_max', 0.05, 'close_pct_60d')}
+          {ctrl('min_sessions', 'min_sessions', 1, 'min_sessions')}
+        </div>
+
+        {/* §20.3 P1-1, made visible instead of documented. Chặt and Vừa differ
+            only in min_sessions and close_pct — the two numbers doctrine and
+            analysis/stealth.py disagree on. */}
+        {activePreset === 'code' && (
+          <p className="text-[11px] text-warn leading-snug">
+            Đây là ngưỡng <b>code đang chạy</b> (3 phiên, đáy 60%), không phải doctrine §16.1
+            (5 phiên, đáy 40%). Hai nơi chưa thống nhất — xem CLAUDE.md §20.3 P1-1.
+          </p>
+        )}
       </div>
 
       {err && <div className="p-3 bg-sell/[0.12] border border-sell/40 text-sell rounded-xl text-sm">{err}</div>}

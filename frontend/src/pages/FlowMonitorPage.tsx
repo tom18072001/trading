@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { flowApi } from '../api/client';
 import type { FlowRankingResponse, FlowHeatResponse, FlowSeriesResponse, Interval } from '../api/client';
 import { FlowBadge } from '../lib/actions';
+import { FilterBar, Th, downloadCsv, passes, useSorter, useTableFilter } from '../lib/filters';
+import { Hint } from '../lib/glossary';
 
 const INTERVALS: Interval[] = ['1d', '1w', '2w', '1m', '1q'];
 
@@ -168,6 +170,11 @@ export default function FlowMonitorPage() {
   const [err, setErr] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshMsg, setRefreshMsg] = useState<string | null>(null);
+  const f = useTableFilter('fl');
+  const sorter = useSorter('rank', 'asc', 'fl');
+
+  const allRows = ranking?.rows ?? [];
+  const shown = sorter.apply(allRows.filter((r) => passes(f, r)));
 
   // The freshness fetch that used to live here moved to the app-wide bar in
   // Layout (review §D). Two copies of "how old is the data" on one screen is
@@ -257,23 +264,43 @@ export default function FlowMonitorPage() {
       <HeatStrip heat={heat} />
 
       {/* ranking table */}
+      <FilterBar
+        f={f} actions={['HOT', 'COOL', 'NEUTRAL']}
+        total={allRows.length} shown={shown.length}
+        onExport={() => downloadCsv(
+          `dong_tien_nganh_${ranking?.as_of ?? 'export'}.csv`,
+          [
+            { key: 'rank', label: 'Hạng' }, { key: 'sector', label: 'Ngành' },
+            { key: 'name', label: 'Tên' }, { key: 'score', label: 'Score' },
+            { key: 'flow_z20', label: 'flow_z20' },
+            { key: 'net_dollar_flow', label: 'Net flow (VND)' },
+            { key: 'breadth_sma20', label: 'breadth_sma20' },
+            { key: 'action', label: 'Dòng tiền' }, { key: 'why', label: 'Vì sao' },
+          ],
+          shown)}
+      />
+
       <section className="rounded-2xl bg-panel border border-line overflow-hidden">
         <div className="p-3 border-b border-line section-label">Xếp hạng dòng tiền</div>
         <table className="w-full text-sm">
           <thead className="bg-panel2 border-b border-line text-[10px] uppercase tracking-wider text-mid">
             <tr>
-              <th className="p-2.5 text-left">#</th>
-              <th className="p-2.5 text-left">Ngành</th>
-              <th className="p-2.5 text-right">Score</th>
-              <th className="p-2.5 text-right">Flow Z20</th>
-              <th className="p-2.5 text-right">Net Flow (tỷ)</th>
-              <th className="p-2.5 text-right">Breadth</th>
-              <th className="p-2.5 text-left">Dòng tiền</th>
+              <Th s={sorter} col="rank">#</Th>
+              <Th s={sorter} col="sector">Ngành</Th>
+              <Th s={sorter} col="score" align="right">Score</Th>
+              <Th s={sorter} col="flow_z20" align="right"><Hint term="flow_z20">Flow Z20</Hint></Th>
+              <Th s={sorter} col="net_dollar_flow" align="right">
+                <Hint term="net_dollar_flow">Net Flow (tỷ)</Hint>
+              </Th>
+              <Th s={sorter} col="breadth_sma20" align="right">
+                <Hint term="breadth_sma20">Breadth</Hint>
+              </Th>
+              <Th s={sorter} col="action">Dòng tiền</Th>
               <th className="p-2.5 text-left">Vì sao</th>
             </tr>
           </thead>
           <tbody>
-            {ranking?.rows.map((r) => {
+            {shown.map((r) => {
               const on = selected === r.sector;
               return (
                 <tr key={r.sector}
@@ -296,6 +323,11 @@ export default function FlowMonitorPage() {
                 </tr>
               );
             })}
+            {allRows.length > 0 && shown.length === 0 && (
+              <tr><td colSpan={8} className="p-8 text-center text-mid text-[13px]">
+                Không ngành nào khớp bộ lọc ({allRows.length} ngành bị ẩn).
+              </td></tr>
+            )}
           </tbody>
         </table>
       </section>

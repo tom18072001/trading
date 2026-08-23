@@ -274,9 +274,18 @@ As of 2026-04-23:
 
 | Suite | Count | Command |
 |---|---|---|
-| Backend (pytest) | 182 | `python -m pytest tests/` |
+| Backend (pytest) | 193 | `python -m pytest tests/` |
 | Frontend (vitest) | 13 | `cd frontend && npm test` |
-| **Total** | **195** | — |
+| **Total** | **206** | — |
+
+> 2026-08-23 (late, 5): +11 in `tests/test_report_runner.py` — the "Gửi báo cáo
+> ngay" button. One test carries the feature:
+> `test_second_click_does_not_start_a_second_run` — two clicks must send one
+> email, and the button being disabled is cosmetic, the backend is the guard.
+> The rest pin argv construction (`--no-email`, the date), rejection of a
+> malformed `report_date` **before** anything runs, and that a timeout lands in
+> the status instead of killing the daemon thread silently. No subprocess is
+> spawned: `send_report(runner=…)` takes the runner as a parameter for this.
 
 > 2026-08-23 (late, 4): +13 in `tests/test_backtest_controls.py` — the backtest
 > controls the UI can now reach. Two of them are the interesting ones:
@@ -673,3 +682,71 @@ raises a visible banner instead of a server-side log line.
 - Zero-VND trade-log rows want a minimum-allocation floor.
 - `_cross_sectional_z` is kept only because `_persist` and the P0-4 tests refer
   to it; it has no caller that depends on its ordering.
+
+## 24. Filters, presets and the P1-1 price tag — 2026-08-23
+
+### 24.1 One filter vocabulary
+Every sector table drew all 15 rows in one fixed order. `lib/filters.tsx` is
+now the single source for search, action filter, "chỉ ngành tôi đang nắm",
+column sorting and CSV, used by Ranking and Money Flow Monitor.
+
+State lives in the **URL**, not in component state (`?rk_act=BUY&rk_sort=score`,
+`replace: true`, one prefix per table). A tuned view is a thing you send to
+someone, and F5 must not clear it — the same reasoning as §22.9's tabs.
+
+Two details that are load-bearing rather than incidental:
+- **Filter, then sort.** The other order sorts rows you are about to discard.
+- **CSV carries a UTF-8 BOM.** Without it Excel on a Vietnamese locale opens
+  "Ngân hàng" as mojibake, which makes the export useless to its only user.
+
+"Chỉ ngành tôi đang nắm" is answered entirely from the §22.10 store — the app
+already knew the book, no page had ever asked it a question.
+
+### 24.2 The stealth presets are an argument, not a convenience
+**Chặt / Vừa / Rộng**, not tight/loose:
+
+| preset | numbers | what it is |
+|---|---|---|
+| Chặt | N=5, đáy 40% | doctrine §16.1 |
+| Vừa | N=3, đáy 60% | what `analysis/stealth.py` actually ships |
+| Rộng | N=1, mọi ngưỡng hạ | a probe — "ngành nào gần đạt", not a buy list |
+
+Switching between the first two prices the §20.3 P1-1 disagreement **in
+sectors**, which is the only unit in which anyone will care enough to close it.
+Selecting "Vừa" raises a warning naming both numbers and the section.
+
+The conflict turns out to be **three-way**, not two: `api/routers/stealth.py`'s
+own Query defaults (`min_sessions=5`, `close_pct_60d_max=0.4`) already match
+doctrine. So the offline scanner that writes `accumulation_age` and the
+endpoint this page reads are gated differently — the page can show a sector
+that the scanner will never record.
+
+### 24.3 Send the report without a terminal
+`POST /api/state/report/send` runs `generate_report.py` as a **subprocess**.
+Importing it would send mail as a side effect of the `import` statement, once
+per process and never again, because it is 1,629 module-level lines driven by
+`sys.argv` with no `main()` (§20.3 P3-2). A subprocess is the honest way to
+call a script that is a script.
+
+It sits under `/api/state/*` rather than a new router because it is an operator
+action — the same category as the kill-switch and the position book.
+
+The double-click guard is on the **backend** (`already_running`), not on the
+disabled button. A disabled button is a hint; two emails is a fact.
+
+### 24.4 Words on the screen
+`lib/glossary.tsx` defines 13 column names behind a native `title`. The
+definitions existed only in `CLAUDE.md` §16.2 and `docs/reference/GLOSSARY_VI.md`
+— neither of which is open while you are reading the table.
+
+`foreign_hit_20d`'s entry says out loud that `foreign_net` is zero across the
+whole history (§20.3 P0-5). A tooltip that explains a column doing nothing,
+without saying so, is worse than no tooltip.
+
+### 24.5 Not done
+- `Th` / `FilterBar` are on two tables. Risk, Stealth and Regime still have
+  their own headers.
+- Native `title`: no touch support, ~1s delay. Fine for a definition, not for
+  a formula or a link.
+- Report run history is in memory only. It survives no restart; the log file on
+  disk is the durable record.

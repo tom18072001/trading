@@ -9,7 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from services import trading_state
+from services import report_runner, trading_state
 
 router = APIRouter(prefix="/api/state", tags=["state"])
 
@@ -73,3 +73,25 @@ def toggle_watch(body: SymbolBody):
         return trading_state.toggle_watch(body.symbol)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
+
+
+# ----- send the daily report now (backlog step 6) --------------------------
+# Not part of the state file; it lives here because it is the same thing —
+# an operator action, not model output.
+
+class ReportBody(BaseModel):
+    report_date: str | None = None
+    send_email: bool = True
+
+
+@router.post("/report/send")
+def send_report(body: ReportBody):
+    try:
+        return report_runner.send_report(body.report_date, body.send_email)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+
+@router.get("/report/status")
+def report_status():
+    return report_runner.get_status()

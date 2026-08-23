@@ -14,6 +14,64 @@
 
 ---
 
+## 2026-08-23 (late, 5) — Global filter, stealth presets, CSV, send-report, tooltips
+- Author: Claude Code on behalf of Tom
+- Files:
+  - new `services/report_runner.py`, `api/routers/state.py` (+2 endpoints)
+  - new `frontend/src/lib/filters.tsx`, `lib/stealthPresets.ts`, `lib/glossary.tsx`
+  - `frontend/src/pages/RankingPage.tsx`, `FlowMonitorPage.tsx`,
+    `StealthWatchPage.tsx`, `DailyInsightPage.tsx`
+  - `frontend/src/api/client.ts` (`sendReport`, `reportStatus`, `ReportStatus`)
+  - new `tests/test_report_runner.py` (11)
+- Reason: sponsor review step 6, the last of the six. Every table showed all 15
+  sectors in one fixed order with no way to say "show me less", nothing on any
+  page said what `flow_z20` or `stealth_score` mean, and the only way to send
+  the daily email off-schedule was a terminal on this machine.
+- Summary:
+  - **One filter vocabulary, not five.** `lib/filters.tsx` exports
+    `useTableFilter` / `passes` / `useSorter` / `Th` / `downloadCsv` /
+    `FilterBar`, wired into Ranking and Money Flow Monitor. State lives in the
+    **URL** (`?rk_act=BUY&rk_sort=score&rk_dir=desc`, `replace: true`), because
+    a filtered view is a thing you send to someone and F5 must not clear it.
+    A prefix per table keeps two tables on one page from colliding.
+  - **"Chỉ ngành tôi đang nắm"** answers a question no page could answer,
+    purely client-side from the `lib/tradingState.ts` store — no backend call.
+    Disabled with the count visible when the book is empty.
+  - **CSV export** carries a UTF-8 BOM: without it Excel on a Vietnamese
+    locale renders "Ngân hàng" as mojibake, which makes the feature useless to
+    its only user.
+  - **Stealth presets — Chặt / Vừa / Rộng.** Named for the argument they
+    carry, not for tightness. "Chặt" is doctrine §16.1 (N=5, đáy 40%); "Vừa" is
+    what `analysis/stealth.py` actually ships (N=3, đáy 60%) and raises a
+    warning naming both numbers and §20.3 P1-1; "Rộng" is a probe, not a buy
+    list. Switching between the first two now prices the P1-1 disagreement **in
+    sectors**. The conflict is three-way: `api/routers/stealth.py`'s own Query
+    defaults already match doctrine, so the offline scanner that writes
+    `accumulation_age` and the endpoint this page reads are gated differently.
+    The six knobs became URL params too.
+  - **Send report now.** `POST /api/state/report/send` +
+    `GET /api/state/report/status`. It **shells out** rather than imports:
+    `generate_report.py` is 1,629 module-level lines driven by `sys.argv` with
+    no `main()` (§20.3 P3-2), so importing it would send mail as an import side
+    effect, once per process. Placed under `/api/state/*` because it is an
+    operator action — same category as the kill-switch and the book. A second
+    click returns `already_running` instead of starting a second subprocess;
+    two clicks must not send two emails, and that is the one thing tested hard.
+    `report_date` is regex-validated before anything runs.
+  - **Tooltips.** `lib/glossary.tsx` — 13 terms behind a native `title`. No
+    state, no portal, no library, and the only tooltip that works on a table
+    header without fighting `overflow-hidden`. `foreign_hit_20d` carries the
+    §20.3 P0-5 warning that `foreign_net` is zero across the whole history, so
+    the term names a condition that has never done anything.
+- Verification: 193 backend (182 + 11), 13 frontend, `npm run build` 385.49 kB
+  main + 361.97 kB recharts chunk, `ruff check` clean on the new files.
+- Follow-ups: `Th`/`FilterBar` are not yet on the Risk, Stealth or Regime
+  tables. Native `title` has no touch support (~1s delay) — swap for a popover
+  if a term ever needs a formula or a link. Report history is in-memory only;
+  it becomes a table like `model_runs` if a second operator appears.
+
+---
+
 ## 2026-08-23 (late, 4) — Backtest controls; and `flow_z` was `flow_raw` in disguise
 - Author: Claude Code on behalf of Tom
 - Files:

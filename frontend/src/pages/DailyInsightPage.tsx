@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { insightApi, type InsightRefreshStatus } from '../api/client';
+import { insightApi, stateApi, type InsightRefreshStatus, type ReportStatus } from '../api/client';
 import { ActionBadge } from '../lib/actions';
 import { isHeld, tradingState, useTradingState } from '../lib/tradingState';
 
@@ -677,6 +677,81 @@ export function PickTable({ title, subtitle, kind, picks }: {
 }
 
 // ===================================================================
+//  Send the daily report now (backlog step 6)
+// ===================================================================
+// The 17:00 job (§8) is the normal path. This is for the days you want the
+// email before then — or after a Refresh changed the picks.
+//
+// The button disables itself while a run is in flight, but that is cosmetic:
+// the backend is the real guard (report_runner returns already_running instead
+// of starting a second subprocess), because two clicks must not send two mails.
+function SendReportButton() {
+  const [st, setSt] = useState<ReportStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const timer = useRef<number | null>(null);
+
+  const stopPoll = () => {
+    if (timer.current) { window.clearInterval(timer.current); timer.current = null; }
+  };
+  useEffect(() => stopPoll, []);
+
+  const poll = () => {
+    stopPoll();
+    timer.current = window.setInterval(() => {
+      stateApi.reportStatus()
+        .then(({ data }) => {
+          setSt(data);
+          if (!data.running) { stopPoll(); setBusy(false); }
+        })
+        .catch(() => { stopPoll(); setBusy(false); });
+    }, REFRESH_POLL_INTERVAL_MS);
+  };
+
+  const send = async () => {
+    setBusy(true);
+    try {
+      const { data } = await stateApi.sendReport();
+      setSt(data);
+      poll();
+    } catch (e: any) {
+      setBusy(false);
+      setSt({
+        running: false, report_date: null, started_at: null, finished_at: null,
+        ok: false, returncode: -1, tail: String(e?.message || e),
+      });
+    }
+  };
+
+  const running = busy || st?.running;
+  const failed = st && !st.running && st.ok === false;
+  const done = st && !st.running && st.ok === true;
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <button
+        onClick={send}
+        disabled={!!running}
+        title="Chạy generate_report.py và gửi email ngay, không đợi job 17:00"
+        className="px-3.5 py-2 rounded-xl bg-warn/[0.13] text-warn border border-warn/30 hover:bg-warn/[0.2] disabled:opacity-50 text-[13px] font-semibold whitespace-nowrap"
+      >
+        {running
+          ? `✉ Đang gửi…${st?.elapsed_sec ? ` ${Math.round(st.elapsed_sec)}s` : ''}`
+          : '✉ Gửi báo cáo ngay'}
+      </button>
+      {done && <span className="text-[11px] text-buy font-mono">✓ Đã gửi</span>}
+      {failed && (
+        <span
+          className="text-[11px] text-sell font-mono max-w-[280px] truncate cursor-help"
+          title={st?.tail || ''}
+        >
+          ✗ Lỗi (exit {st?.returncode}) — di chuột để xem log
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ===================================================================
 //  Page
 // ===================================================================
 type PickView = 'cards' | 'table';
@@ -783,6 +858,8 @@ export default function DailyInsightPage() {
           {genTime && <p className="text-[11px] text-lo mt-1 font-mono">cập nhật {genTime}</p>}
         </div>
         <div className="flex flex-col items-end gap-1.5">
+          <div className="flex items-center gap-2">
+          <SendReportButton />
           <button
             onClick={refresh}
             disabled={refreshing || loading}
@@ -796,6 +873,7 @@ export default function DailyInsightPage() {
             <span className={refreshing ? 'inline-block animate-spin360' : ''}>↻</span>
             {refreshing ? STAGE_LABELS[refreshStatus?.stage || 'queued'] || 'Đang làm mới…' : 'Refresh'}
           </button>
+          </div>
           {refreshing && refreshStatus && (
             <div className="w-60">
               <div className="flex items-baseline justify-between text-[10px] text-mid font-mono">

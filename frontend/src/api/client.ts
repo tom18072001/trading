@@ -194,6 +194,24 @@ export const stateApi = {
     api.delete<TradingState>(`/state/positions/${symbol}`, { params: { side } }),
   toggleWatch: (symbol: string) =>
     api.post<TradingState>('/state/watchlist', { symbol }),
+
+  // Send the daily report now, instead of waiting for the 17:00 job (§8).
+  // Kicks a background subprocess and returns immediately — poll reportStatus.
+  sendReport: (report_date?: string, send_email = true) =>
+    api.post<ReportStatus>('/state/report/send', { report_date, send_email }),
+  reportStatus: () => api.get<ReportStatus>('/state/report/status'),
+};
+
+export type ReportStatus = {
+  running: boolean;
+  report_date: string | null;
+  started_at: number | null;
+  finished_at: number | null;
+  ok: boolean | null;
+  returncode: number | null;
+  tail: string;
+  elapsed_sec?: number;
+  already_running?: boolean;
 };
 
 // agentApi (briefing / stoploss-alerts) removed 2026-08-23.
