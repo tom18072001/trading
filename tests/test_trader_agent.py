@@ -224,9 +224,199 @@ def test_analyze_enforces_hard_timeout(monkeypatch):
         if False:
             yield None
 
+    monkeypatch.setattr(ta, "AGENT_PROVIDER", "glm")     # exercise the SDK transport
+    monkeypatch.setattr(ta, "GLM_API_KEY", "test-key")  # don't trip the missing-key guard
     monkeypatch.setattr(ta, "query", _slow_query)
     agent = ta.TraderAgent(timeout_sec=0.2)
     report = agent.analyze_sync(
         {"as_of": "2026-04-17", "top_buys": [], "top_sells": []}, {})
     assert report.is_valid is False
     assert "timeout" in (report.error or "").lower()
+
+
+# -------------------- GLM provider routing (2026-07-20) --------------------
+
+
+def test_analyze_glm_without_key_fails_gracefully(monkeypatch):
+    """AGENT_PROVIDER=glm with no GLM_API_KEY must return an invalid report
+    with a clear error instead of stalling on an SDK auth failure."""
+    import services.trader_agent as ta
+
+    monkeypatch.setattr(ta, "AGENT_PROVIDER", "glm")
+    monkeypatch.setattr(ta, "GLM_API_KEY", "")
+    agent = ta.TraderAgent()
+    report = agent.analyze_sync(
+        {"as_of": "2026-07-20", "top_buys": [], "top_sells": []}, {})
+    assert report.is_valid is False
+    assert "GLM_API_KEY" in (report.error or "")
+
+
+def test_analyze_glm_routes_env_and_model_to_sdk(monkeypatch):
+    """With provider=glm the SDK subprocess env must carry the Z.ai base URL
+    and auth token, and the configured GLM model must be requested."""
+    import services.trader_agent as ta
+
+    captured: dict = {}
+
+    async def _fake_query(prompt, options):
+        captured["env"] = options.env
+        captured["model"] = options.model
+        if False:
+            yield None
+
+    monkeypatch.setattr(ta, "AGENT_PROVIDER", "glm")
+    monkeypatch.setattr(ta, "GLM_API_KEY", "test-key")
+    monkeypatch.setattr(ta, "GLM_BASE_URL", "https://api.z.ai/api/anthropic")
+    monkeypatch.setattr(ta, "query", _fake_query)
+    agent = ta.TraderAgent(model="glm-5.2")
+    report = agent.analyze_sync(
+        {"as_of": "2026-07-20", "top_buys": [], "top_sells": []}, {})
+    assert captured["env"]["ANTHROPIC_BASE_URL"] == "https://api.z.ai/api/anthropic"
+    assert captured["env"]["ANTHROPIC_AUTH_TOKEN"] == "test-key"
+    assert captured["model"] == "glm-5.2"
+    assert report.is_valid is False  # empty stubbed response → "empty response"
+
+
+def test_analyze_claude_provider_passes_no_env_override(monkeypatch):
+    """AGENT_PROVIDER=claude keeps the native subscription path — no
+    ANTHROPIC_* overrides injected into the SDK subprocess."""
+    import services.trader_agent as ta
+
+    captured: dict = {}
+
+    async def _fake_query(prompt, options):
+        captured["env"] = options.env
+        if False:
+            yield None
+
+    monkeypatch.setattr(ta, "AGENT_PROVIDER", "claude")
+    monkeypatch.setattr(ta, "query", _fake_query)
+    agent = ta.TraderAgent(model="haiku")
+    agent.analyze_sync(
+        {"as_of": "2026-07-20", "top_buys": [], "top_sells": []}, {})
+    assert captured["env"] == {}
+
+
+# -------------------- local provider / Ollama transport (2026-07-20) --------------------
+
+
+class _FakeResponse:
+    def __init__(self, payload=None, status_code=200, text=""):
+        self.status_code = status_code
+        self._payload = payload or {}
+        self.text = text
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            import httpx
+            raise httpx.HTTPStatusError(
+                "err",
+                request=httpx.Request("POST", "http://localhost:11434/v1/chat/completions"),
+                response=self,  # type: ignore[arg-type]
+            )
+
+
+def _fake_client_factory(captured: dict, response=None, raise_exc=None):
+    class _FakeClient:
+        def __init__(self, *a, **kw):
+            captured["client_kwargs"] = kw
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json=None, headers=None):
+            captured["url"] = url
+            captured["payload"] = json
+            captured["headers"] = headers
+            if raise_exc is not None:
+                raise raise_exc
+            return response
+    return _FakeClient
+
+
+def test_local_provider_posts_openai_compatible_request(monkeypatch):
+    """provider=local must POST an OpenAI-style chat/completions body to the
+    configured localhost endpoint and parse the reply — no SDK involved."""
+    import services.trader_agent as ta
+
+    captured: dict = {}
+    reply = {
+        "model": "qwen3:8b",
+        "choices": [{
+            "finish_reason": "stop",
+            "message": {"content":
+                        '```json\n{"gist":"thị trường đi ngang",'
+                        '"regime_comment":"chop","top_buys":[],"avoid":[],'
+                        '"portfolio_note":"giữ 50% tiền mặt"}\n```'},
+        }],
+    }
+    monkeypatch.setattr(ta, "AGENT_PROVIDER", "local")
+    monkeypatch.setattr(ta, "LOCAL_BASE_URL", "http://localhost:11434/v1")
+    monkeypatch.setattr(ta, "LOCAL_API_KEY", "ollama")
+    monkeypatch.setattr(
+        ta.httpx, "AsyncClient",
+        _fake_client_factory(captured, response=_FakeResponse(reply)))
+
+    agent = ta.TraderAgent(model="qwen3:8b")
+    report = agent.analyze_sync(
+        {"as_of": "2026-07-20", "top_buys": [], "top_sells": []}, {})
+
+    assert captured["url"] == "http://localhost:11434/v1/chat/completions"
+    assert captured["payload"]["model"] == "qwen3:8b"
+    assert captured["payload"]["stream"] is False
+    roles = [m["role"] for m in captured["payload"]["messages"]]
+    assert roles == ["system", "user"]
+    assert report.is_valid
+    assert report.gist == "thị trường đi ngang"
+    assert report.cost_usd == 0.0      # self-hosted → no marginal cost
+
+
+def test_local_provider_connect_error_is_actionable(monkeypatch):
+    """Ollama not running must surface a clear message, not a raw httpx trace."""
+    import httpx
+    import services.trader_agent as ta
+
+    captured: dict = {}
+    monkeypatch.setattr(ta, "AGENT_PROVIDER", "local")
+    monkeypatch.setattr(
+        ta.httpx, "AsyncClient",
+        _fake_client_factory(captured, raise_exc=httpx.ConnectError("refused")))
+
+    agent = ta.TraderAgent(model="qwen3:8b")
+    report = agent.analyze_sync(
+        {"as_of": "2026-07-20", "top_buys": [], "top_sells": []}, {})
+    assert report.is_valid is False
+    assert "ollama" in (report.error or "").lower()
+
+
+def test_parse_response_strips_think_block():
+    """Local reasoning models emit <think>...</think> containing braces — the
+    no-fence fallback must not parse the monologue instead of the answer."""
+    agent = _make_agent()
+    raw = (
+        "<think>Hmm, maybe {\"symbol\": \"XYZ\"} is a good idea? "
+        "Let me reconsider.</think>\n"
+        '{"gist":"ok","regime_comment":"r","top_buys":[],"avoid":[],'
+        '"portfolio_note":"p"}'
+    )
+    r = agent._parse_response(raw, "2026-07-20", time.time(), 1, "qwen3:8b", 0.0)
+    assert r.is_valid
+    assert r.gist == "ok"
+
+
+def test_parse_response_strips_unterminated_think_block():
+    """A truncated reply can leave <think> open — must not crash or mis-parse."""
+    agent = _make_agent()
+    raw = (
+        '```json\n{"gist":"g","regime_comment":"r","top_buys":[],"avoid":[],'
+        '"portfolio_note":"p"}\n```\n<think>trailing {broken'
+    )
+    r = agent._parse_response(raw, "2026-07-20", time.time(), 1, "qwen3:8b", 0.0)
+    assert r.is_valid
+    assert r.gist == "g"

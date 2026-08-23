@@ -17,7 +17,7 @@
   `generate_sector_flow_enhanced.py`, `send_email_report.py`,
   `scripts/daily_stale_report.py`, plus 2 old templates. All 78 tests still
   green after every wave. OpenClaw references purged.
-- **2026-04-23 — SecV5: unified picks briefing.** `generate_secv5.py` replaces
+- **2026-04-23 — SecV5: unified picks briefing.** `generate_report.py` replaces
   `generate_secv4.py` as the active daily-email generator. Reason: Daily Insight
   page and SecV4 email were recommending different tickers — Daily Insight
   renders `snapshot.top_buys`/`top_sells` directly (no ranker gate) while SecV4
@@ -35,7 +35,7 @@
   still invoking secv3/secv4. See `MODIFICATION_LOG.md` entry 2026-04-23.
 - **2026-04-18 — Phase 12: OpenClaw retired, TraderAgent "Minh" in.** In-process
   agent via `claude_agent_sdk` replaces the external OpenClaw worker for both the
-  Gmail briefing (via `generate_secv4.py`, now `generate_secv5.py`) and the
+  Gmail briefing (via `generate_secv4.py`, now `generate_report.py`) and the
   `/api/insight/refresh` endpoint. See `specs/trader_agent.md`.
 - **2026-04-17 — PicksUniverseService introduced.** One dynamic HOSE universe
   (from vnstock Listing) replaces the per-script reads of `_legacy_stock_*` in
@@ -73,7 +73,7 @@ vnstock (proxy basket OHLCV + foreign flow)
   → sector_signal_service → sector_signals
   → picks_universe_service (per-ticker BUY/ACCUMULATE from sector signals)
   → trader_agent "Minh" (claude_agent_sdk, in-process)
-  → generate_secv5.py → Gmail briefing (was secv4 until 2026-04-23)
+  → generate_report.py → Gmail briefing (was secv4 until 2026-04-23)
   → FastAPI /api/* → React feature-sliced frontend
 ```
 
@@ -90,7 +90,7 @@ vnstock (proxy basket OHLCV + foreign flow)
 | Backtest (retrofit) | Long/short sector basket simulation | `services/backtest_service.py` |
 | Risk (retrofit) | Sector VaR/exposure/drawdown + stop-loss sentinel | `services/risk_service.py` |
 | Trader Agent | In-process Claude agent ("Minh") authoring the daily narrative | `services/trader_agent.py`, `services/insight_refresh.py` |
-| Email Report | Daily unified-picks HTML + PDF → Gmail | `generate_secv5.py` (active; +`generate_secv4.py`, `generate_secv3.py` as rollback) |
+| Email Report | Daily unified-picks HTML + PDF → Gmail | `generate_report.py` (active; +`generate_secv4.py`, `generate_secv3.py` as rollback) |
 | API | FastAPI, 12 routers | `api/main.py`, `api/routers/*` |
 | Frontend | React 19 feature-sliced pages (Phase 15) | `frontend/src/features/*` |
 
@@ -110,7 +110,7 @@ Trading/
 ├── README.md                         # Quickstart
 ├── config.py                         # SECTORS, PROXY_BASKETS, MACRO_TICKERS, RISK_CONFIG
 ├── main.py                           # CLI entry (one flag per §8 job)
-├── generate_secv5.py                 # Daily SecV5 unified-picks email generator (active)
+├── generate_report.py                 # Daily SecV5 unified-picks email generator (active)
 ├── generate_secv4.py                 # Rollback path (pre-union merge) — do not remove
 ├── generate_secv3.py                 # Rollback path (§2) — do not remove
 │
@@ -286,7 +286,7 @@ sector_flow_daily + macro_anchors
 sector_signals  →  /api/sectors/ranking
                 →  picks_universe_service  (per-ticker picks from signals)
                 →  trader_agent "Minh"     (in-process claude_agent_sdk)
-                →  generate_secv5.py       (union(DailyInsight, Ranker) merge
+                →  generate_report.py       (union(DailyInsight, Ranker) merge
                                             + Expert Trader Memo → HTML + PDF)
                 →  smtplib → Gmail (REPORT_EMAIL_TO, comma-separated list)
 ```
@@ -339,7 +339,7 @@ is the single source of truth for registration.
 | 3 | `sector_eod_rollup` | `0 16 * * 1-5` | `main.py --eod-rollup` | `SectorIngestService.rollup_to_daily()` |
 | 4 | `regime_classify` | `30 16 * * 1-5` | `main.py --regime` | `RotationModelService.classify_regime()` |
 | 5 | `rotation_predict` | `45 16 * * 1-5` | `main.py --rotation-predict` | `RotationModelService.predict_today()` |
-| 6 | `sector_signal_publish` | `0 17 * * 1-5` | `main.py --publish` → `generate_secv5.py` | `SectorSignalService.publish()` + unified-picks email |
+| 6 | `sector_signal_publish` | `0 17 * * 1-5` | `main.py --publish` → `generate_report.py` | `SectorSignalService.publish()` + unified-picks email |
 | 7 | `sector_risk_sentinel` | `*/30 9-15 * * 1-5` | `main.py --risk-sentinel` | `SectorRiskService.stoploss_breaches()` |
 | 8 | `rotation_train` | `0 2 * * *` | `main.py --train` | `RotationModelService.train_ranker()` |
 
@@ -371,7 +371,7 @@ the email report) and for backward-compat.
 | `pulse.py` | `GET /api/pulse/tape` (live 15m flow) |
 | `insight.py` | `GET /api/insight/daily`, `POST /api/insight/refresh` (async, returns `run_id`), `GET /api/insight/refresh/status` |
 
-**Sector APIs** (used by scheduler, `generate_secv5.py` / `generate_secv4.py`, legacy integrations):
+**Sector APIs** (used by scheduler, `generate_report.py` / `generate_secv4.py`, legacy integrations):
 | Router | Key endpoints |
 |---|---|
 | `sectors_flow.py` | `GET /api/sectors/flow`, `GET /api/sectors/{code}/flow` |
@@ -418,7 +418,7 @@ New backend routers for Phase 15: `routers/flow.py`, `routers/rotation.py`,
 4. ✅ Backfill 5y `sector_flow_daily`.
 5. ✅ Features + v0 ranker + HMM.
 6. ✅ Backtest + risk retrofit.
-7. ✅ **OpenClaw retired (2026-04-18)** — replaced by in-process `services/trader_agent.py` via `claude_agent_sdk`. Gmail template = `generate_secv5.py` (active since 2026-04-23; union-merge of Daily Insight + ranker picks). `generate_secv4.py` and `generate_secv3.py` retained as rollback paths.
+7. ✅ **OpenClaw retired (2026-04-18)** — replaced by in-process `services/trader_agent.py` via `claude_agent_sdk`. Gmail template = `generate_report.py` (active since 2026-04-23; union-merge of Daily Insight + ranker picks). `generate_secv4.py` and `generate_secv3.py` retained as rollback paths.
 8. ✅ **Phase 15 frontend** — feature-sliced pages shipped. Old `/backtest` and `/regime` scheduled for deletion after Phase-15 features prove out.
 8.5. ✅ **PicksUniverseService (2026-04-17)** — single dynamic HOSE universe; retired `_legacy_stock_*` reads.
 9. ⏳ **Shadow-run window** — still active until the 2-week comparison completes.

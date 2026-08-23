@@ -12,9 +12,9 @@ Pivot the VN Trading system from per-symbol prediction to **sector-level money-f
 - KEEP: Python/FastAPI/SQLAlchemy/SQLite(WAL), migrations, service-layer pattern, router pattern, backtest engine skeleton, risk math, scheduler heartbeat (Asia/Ho_Chi_Minh), vnstock integration.
 - REMOVE: 170-symbol universe, `stock_prices`, `stock_features`, `trade_setups`, `predictions`, symbol screener, T+3 scanner, symbol pages in frontend, per-symbol ML.
 - REPLACE: primary key `symbol` → `sector_code` everywhere.
-- **Per-ticker picks (2026-04-17 onward):** `generate_secv5.py` and `api/routers/insight.py` read per-ticker BUY/ACCUMULATE picks exclusively from `services.picks_universe_service.PicksUniverseService` (dynamic HOSE universe from vnstock Listing). They no longer read `_legacy_stocks`, `_legacy_stock_prices`, or `_legacy_stock_features`. These three tables stay in the DB during a 2-week shadow window then drop in migration 10.
-- **Email report (2026-04-23 onward):** `generate_secv5.py` is the **sole** daily email generator. It unifies the picks surfaced in the Daily Insight page (`snapshot.top_buys`/`top_sells` — no ranker gate) with the ranker-gated BUY/ACCUMULATE picks into a single de-duped list, each entry tagged with its source (`BOTH` / `DAILY_INSIGHT` / `RANKER`). The HTML/PDF gains an Expert Trader Memo section at the top; the email body is plain text (buy symbols + reasons + Dashboard + news links). Default recipients: `tka2001@gmail.com, anhchitruong18@gmail.com, hill.nguyen.1373@gmail.com`. `scripts/jobs/job_sector_signal_publish.bat` calls `generate_secv5.py`.
-- **SecV3/SecV4 deleted (2026-06-18):** `generate_secv3.py` and `generate_secv4.py` removed from the repo — they were carried only as manual rollback paths and had drifted from secv5 (duplicate-but-divergent helpers). secv5 is now the single source of truth for the daily report. If a stale Task Scheduler entry still invokes secv3/secv4, run `scripts/pause_secv3_secv4_email.ps1` (elevated PowerShell) to evict it.
+- **Per-ticker picks (2026-04-17 onward):** `generate_report.py` and `api/routers/insight.py` read per-ticker BUY/ACCUMULATE picks exclusively from `services.picks_universe_service.PicksUniverseService` (dynamic HOSE universe from vnstock Listing). They no longer read `_legacy_stocks`, `_legacy_stock_prices`, or `_legacy_stock_features`. These three tables stay in the DB during a 2-week shadow window then drop in migration 10.
+- **Email report (2026-04-23 onward):** `generate_report.py` is the **sole** daily email generator. It unifies the picks surfaced in the Daily Insight page (`snapshot.top_buys`/`top_sells` — no ranker gate) with the ranker-gated BUY/ACCUMULATE picks into a single de-duped list, each entry tagged with its source (`BOTH` / `DAILY_INSIGHT` / `RANKER`). The HTML/PDF gains an Expert Trader Memo section at the top; the email body is plain text (buy symbols + reasons + Dashboard + news links). Default recipients: `tka2001@gmail.com, anhchitruong18@gmail.com, hill.nguyen.1373@gmail.com`. `scripts/jobs/job_sector_signal_publish.bat` calls `generate_report.py`.
+- **SecV3/SecV4 deleted (2026-06-18):** `generate_secv3.py` and `generate_secv4.py` removed from the repo — they were carried only as manual rollback paths and had drifted from secv5 (duplicate-but-divergent helpers). secv5 is now the single source of truth for the daily report. If a stale Task Scheduler entry still invokes secv3/secv4, run `scripts/pause_legacy_email_task.ps1` (elevated PowerShell) to evict it.
 - **SecV2 retired (2026-04-20):** `generate_secv2.py` + `run_secv2_daily.bat` deleted from the repo. The Windows 17:00 scheduled task that invoked them is obsolete — run `scripts/cleanup_scheduled_tasks.ps1` (elevated PowerShell) to unregister it and dedupe the SecV4 task.
 
 ## 3. The 15 Sectors (inherited from legacy SECTOR_MAP)
@@ -87,7 +87,7 @@ Replace 9 symbol pages with 5 sector pages: Flow Dashboard, Rotation Ranking, Re
 - Proxy basket size: **top 5 by market cap** per sector.
 - Backfill depth: **5 years** (or max vnstock available).
 - Execution universe: **top-3 constituents basket** (ETF liquidity in VN is thin).
-- OpenClaw agent Trung: **retired 2026-04-18** — replaced by `services.trader_agent.TraderAgent` ("Minh"), powered by `claude_agent_sdk` (uses your Claude Code subscription, no separate API key). Invoked from `POST /api/insight/refresh`. Output rendered inline on the Daily Insight page.
+- OpenClaw agent Trung: **retired 2026-04-18** — replaced by `services.trader_agent.TraderAgent` ("Minh"). **2026-07-20: default provider is now `local`** — plain HTTP to an OpenAI-compatible server on this box (`LOCAL_BASE_URL`, default Ollama `http://localhost:11434/v1`; `LOCAL_MODEL` default `qwen3:8b`), no API key, no cost, no `claude_agent_sdk`. Alternatives via `AGENT_PROVIDER`: `glm` (Z.ai Anthropic-compatible endpoint, model `glm-5.2`, needs `GLM_API_KEY`) or `claude` (Claude Code subscription). The SDK is imported lazily, so a local-only install does not need it. Invoked from `POST /api/insight/refresh`. Output rendered inline on the Daily Insight page.
 - Frontend: **feature flag** during shadow run, hard-cut after.
 
 Change any of these by editing this file and logging in `MODIFICATION_LOG.md`.
@@ -103,6 +103,13 @@ Every code or schema change must:
 > **Thesis:** In the VN market, public news/analyst coverage lags real money movement by **~1 month**. By the time a sector is "on the news", smart money has already accumulated. The system's job is therefore **not** to predict next-day return — it is to **detect stealth accumulation 2-4 weeks before the breakout**, so Tom can buy "at the root" (gốc) or at worst "high on the branch" (cành cao), never at the canopy (ngọn).
 
 ### 16.1 What "early" means, formally
+> **⚠ Doctrine vs. code (2026-08-22).** The thresholds below are the approved
+> doctrine. `analysis/stealth.py` currently ships **N=3** and **bottom 60%**,
+> and drops condition 2 entirely whenever `foreign_net` is all-zero — which it
+> is across the whole history (see §20, P0-5). The gate can therefore run on 3
+> conditions, not 5. This was never logged per §15. **Decide which numbers are
+> real and make both places agree** — see `CODE_REVIEW_2026-08-22.md` P1-1.
+
 A sector is in **stealth accumulation** when ALL of these hold simultaneously for ≥ N sessions (default N=5):
 1. **Rolling 20d net dollar flow z-score > +1.0** (flow regime shift vs own history)
 2. **Foreign net buy positive on ≥ 60% of sessions in the last 20d** (smart-money persistence)
@@ -240,15 +247,21 @@ As of 2026-04-23:
 
 | Suite | Count | Command |
 |---|---|---|
-| Backend (pytest) | 88 | `python -m pytest tests/` |
+| Backend (pytest) | 138 | `python -m pytest tests/` |
 | Frontend (vitest) | 13 | `cd frontend && npm test` |
-| **Total** | **101** | — |
+| **Total** | **151** | — |
+
+> 2026-08-22: +28 in `tests/test_review_20260822.py`, one guard per finding in
+> `CODE_REVIEW_2026-08-22.md`. The 105 figure above also counted ~9 one-line
+> placeholder files under `tests/test_api/`, `tests/test_services/` and
+> `tests/test_database/` that contain only "Legacy test removed in sector
+> redesign" — real backend coverage before this review was ~101.
 
 Backend modules covered:
 - `config.py`, `database/models.py` schema (21 pre-existing).
 - `services/picks_scoring.py` — 20 tests (NVL-style regression guard, SWING/TPLUS profiles, is_valid_long_pick parametric matrix).
 - `services/picks_universe_service.py` — 14 tests (classification priority, cache lifecycle, degraded-mode fallback). vnstock calls mocked.
-- `services/trader_agent.py` — 15 tests (JSON parse variants, prompt trimming, cache invalidation). No live Claude SDK call.
+- `services/trader_agent.py` — 23 tests (JSON parse variants incl. `<think>` stripping, prompt trimming, cache invalidation, provider routing for local/glm/claude, missing-key guard, local connect-error message, timeout guard). No live LLM call — the local transport is faked at `httpx.AsyncClient`.
 - `services/insight_refresh.py` — 5 tests (happy path, idempotent start while running, error propagation, stale run_id lookup, worker-thread progress plumbing). Uses an injected fake pipeline; no KBS / Claude / DB.
 - `api/routers/insight.py` refresh endpoints — 3 tests via FastAPI `TestClient` (POST returns run_id; polling completes with payload; second click while running returns same run_id + already_running).
 - `services/unified_picks.py` — 10 tests (NEW 2026-04-23). Anchors the SecV5 union-merge rule: consensus sort to top with `source=BOTH`; empty ranker → fallback to pure DAILY_INSIGHT (regression guard for the SecV4 silent-ranker bug); input lists not mutated; extra fields flow through; missing-score sort tiebreaker. Pure; no DB / vnstock / Claude dependencies.
@@ -262,3 +275,91 @@ Test runners:
 
 Live integration (not in pytest): `POST /api/insight/refresh` — exercises vnstock KBS + Claude Agent SDK end-to-end; run manually after meaningful changes to those paths. Since 2026-04-20 this endpoint is async: it returns a `run_id` immediately and the UI polls `GET /api/insight/refresh/status` for stage + progress. See `specs/daily-insight.md` §4.5 for the full contract.
 
+
+
+## 20. Code Review — 2026-08-22
+
+Full findings: **`CODE_REVIEW_2026-08-22.md`** (22 findings: 6 P0, 6 P1, 4 P2, 6 P3).
+
+### 20.1 The central defect
+
+One causal chain ran through most of the P0s and started at one table,
+`sector_flow_daily`. The 16:00 EOD job wrote rows **without** `close_idx`. The
+only ingest path that writes `close_idx` (`services/fast_ingest.py`, reachable
+solely from `POST /api/flow/ingest`) skipped any date that already had a row —
+so the scheduler claimed each date first and permanently locked it in a
+price-less state. `scripts/backfill_close_idx.py`, `scripts/fix_close_idx.py`
+and the `STEALTH_SYNTHETIC_CLOSE` flag all exist only to paper over this.
+
+Because `close_idx` feeds the ML target, stealth condition 5 and the entire
+backtest P&L, every number the system surfaced rested on an untrustworthy
+daily table.
+
+### 20.2 Fixed in this pass
+
+| Id | Fix | Files |
+|---|---|---|
+| P0-1 | `rollup_to_daily()` derives each row's date from the bar's own timestamp and refuses to stamp a stale bar as a new session | `services/sector_ingest_service.py` |
+| P0-2 | The scheduled path now carries `close_idx` + `return_1d` through; `fast_ingest` upserts instead of skipping, so it can repair damaged dates | `sector_ingest_service.py`, `fast_ingest.py`, migration 11 |
+| P0-3 | `SectorAggregate.basket_return` — the split-safe weighted mean of constituent returns. `close_idx` remains a raw price sum and must not be used for returns | `analysis/flow_aggregation.py` |
+| P0-4 | Backtest replays published `sector_signals` by default (`strategy="signals"`), with `flow_z` and legacy `flow_raw` baselines for comparison; benchmark is VNINDEX per §11, labelled when it falls back | `services/backtest_service.py` |
+| P0-6 | Purged/embargoed CV — embargo = horizon + 2 sessions (§18.3/13, was BLOCKER). Metrics replaced with `top1_excess_hit` (vs. median sector), `decile_monotonic` (§18.7) and `ndcg_at_3` | `models/rotation_ranker.py` |
+| P1-2 | The mean-flow fallback is flagged `is_degraded` and announced loudly instead of shipping as "ranker-gated" | `rotation_ranker.py`, `sector_signal_service.py` |
+| P1-5 | §16.9 ACCUMULATE cap (4) and 30-session auto-exit, §18.4/20 `TRADING_HALT` kill-switch, and `ALLOW_SHORT_SIGNALS` to retire the cash-leg short per §18.2/12 | `config.py`, `services/sector_signal_service.py` |
+| P1-6 | `utils/clock.py` — one market-local definition of "today". `config.TIMEZONE` was declared and used nowhere | new module + call sites |
+| P2-1 | `require_api_key` is wired to every router behind `API_REQUIRE_KEY`; the slowapi limiter is finally attached to the app; the inert `"https://*.ngrok-free.app"` CORS entries are gone | `api/main.py`, `config.py` |
+| P3-1 | `AGENTS.md` reduced to a pointer — one source of truth again | `AGENTS.md` |
+| P3-3 | `.env.example` regenerated from `config.py` | `.env.example` |
+| P3-4 | `rollup_to_daily` no longer loads the whole `sector_flow_ts` table; `_stealth_sectors()` N+1 collapsed to one query | ingest + signal services |
+| P3-5 | ruff config in `pyproject.toml`; 666 findings → 30, all of them real | `pyproject.toml` + call sites |
+
+**Defaults chosen to preserve live behaviour:** `API_REQUIRE_KEY=0`,
+`ALLOW_SHORT_SIGNALS=1`, `TRADING_HALT=0`. Nothing in the daily email changes
+until you flip these. `MAX_ACCUMULATE_SECTORS=4` and the 30-session release
+DO change behaviour — they implement §16.9, which was never enforced.
+
+### 20.3 Still open — needs a decision, not just code
+
+| Id | Question |
+|---|---|
+| P0-5 | `foreign_net` is **zero across the entire history** — `backfill_sector` passes an empty map and `price_board` only exposes today. The "killer VN signal" (§4) has never contributed anything, and three `FEATURE_COLS` entries are constant. Source a historical series (§18.4/17 proposes CafeF/SSI), or drop the features and amend the doctrine. |
+| P1-1 | Reconcile §16.1's thresholds with what `analysis/stealth.py` ships. |
+| P1-3 | Breadth over 5 names takes 6 discrete values (§18.1/6, still open). |
+| P1-4 | Regime labels are back-painted — Viterbi re-decodes the whole history each run, so yesterday's label can change. Use the filtered posterior for the last bar. |
+| P2-2 | Two rate-limit buckets in one process: `utils/vnstock_gate` and `picks_universe_service._kbs_throttle`. `/insight/refresh` takes no `job_lock` at all, so a UI refresh overlapping the intraday job runs at 2× the KBS ceiling. |
+| P2-3 | The "intraday" job fetches `interval="1D"` and re-downloads 120 days every 15 minutes (~3,750 calls/day against an 18/min gate). Either fetch real 15m bars or admit it is an EOD pipeline and fix §4/§8. |
+| P3-2 | `generate_report.py` is 1,629 module-level lines with zero tests, and it is the one output read every day. Extract the decision layer. |
+
+### 20.4 Doctrine drift to close
+
+`CODE_REVIEW_2026-08-22.md` carries a "plan vs. code" table of ten places where
+this document describes a system different from the one running. Per §18.8,
+each needs either a code change or a doctrine amendment — not silence.
+
+
+## 21. Naming — no version suffixes (2026-08-22)
+
+Tom's directive: version numbers do not belong in names. A file called
+`generate_secv5.py` tells you there were four before it and nothing about what
+it does, and it forces a rename every time it changes.
+
+| was | now |
+|---|---|
+| `generate_secv5.py` | `generate_report.py` |
+| `report/report_template_secv5.html` | `report/report_template.html` |
+| `report/secv5_<date>.{html,pdf}` | `report/daily_report_<date>.{html,pdf}` |
+| `scripts/register_secv5_task.ps1` | `scripts/register_report_task.ps1` |
+| `scripts/pause_secv3_secv4_email.ps1` | `scripts/pause_legacy_email_task.ps1` |
+| model_name `rotation_ranker_v0` | `rotation_ranker` |
+| `models/saved/rotation_ranker_v0.pkl` | `rotation_ranker.pkl` |
+| model_version `hmm_v0` | `hmm` |
+| env `SECV3_DB_PATH` | `REPORT_DB_PATH` (old name still honoured) |
+
+Dates are NOT versions and were left alone: `MODIFICATION_LOG.md`,
+`CODE_REVIEW_2026-08-22.md` and the dated post-mortems keep their names,
+because a dated record is supposed to say when it was written.
+
+**Consequence to know about:** renaming `model_name` orphans the 74 existing
+`model_runs` rows from the active-model lookup. That is intentional -- every
+one of them was a degraded mean-flow fallback (see section 20 / P0-8), so
+none was worth keeping. The next `--train` writes the first real one.

@@ -14,6 +14,408 @@
 
 ---
 
+## 2026-08-23 (afternoon) -- Seven-item work order: the -1.00 was the data, not the signal
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `services/foreign_flow.py` (new), `utils/vn_api.py` (new),
+  `services/sector_ingest_service.py`, `services/flow_feature_service.py`,
+  `services/macro_service.py`, `services/picks_news.py`,
+  `services/picks_universe_service.py`, `data/data_fetcher.py`,
+  `generate_report.py`, `api/routers/flow.py`,
+  `scripts/tasks/fix_task_schedules.ps1` (new), `tests/test_fixes_20260618.py`,
+  `tests/test_review_20260822.py`, `_audit/*` (probes), `.env` (agent transport)
+- Reason: Tom handed back the seven follow-ups from the Bench report as a work order.
+
+### 1. 450 fabricated rows deleted, panel re-backfilled
+  `_audit/clean_fabricated.py` (dry-run by default, `--apply` to act, takes a timestamped
+  `.db` backup first). It removes two classes of row: any whose `net_dollar_flow` is identical
+  to the previous session for that sector in a run of >= 2, and any dated on a weekend or
+  published holiday.
+  - **390 repeated-bar rows** (26 per sector x 15, 2026-07-20 -> 2026-08-21)
+  - **150 weekend/holiday rows** across 10 dates, going back to 2026-04-06
+  - After deletion the panel ended at **2026-06-22** -- the last two months had been
+    *entirely* fabricated, which also explains why `foreign_net` appeared to "stop" that day.
+  - `main.py --backfill --years 1` refilled it: ~266 rows per sector, panel now runs to
+    2026-08-20 with **no repeated consecutive values in any sector**.
+
+### 2. foreign_net: the source was never down
+  Probed live (`_audit/probe_foreign.py`): VNDirect `/v4/foreigns` returned 60 sessions through
+  2026-08-21 without complaint. The failure was entirely ours, and it was two failures:
+  - The **scheduled** path read vnstock `price_board`. KBS exposes `foreign_buy_volume` /
+    `foreign_sell_volume` (share counts, e.g. 527,101) but no `*_value` column. The parser was
+    meant to convert volume x price -- its price lookup matched none of KBS's column names, so
+    `price` stayed `None`, the conversion never ran, and `buy or 0.0` produced **0.0**. Result:
+    0 non-zero foreign rows in `sector_flow_ts`, out of 12,175, ever.
+  - The **working** path (VNDirect) lived only in `fast_ingest`, which runs on a UI button. So
+    `foreign_net` stopped on the day of the last manual Refresh, not the day the data stopped.
+  Fixed by `services/foreign_flow.py`: VNDirect primary (VND values directly, plus history),
+  price_board as fallback with a much broader price search, and -- the part that matters --
+  it **raises `ForeignFlowUnavailable` instead of returning a zero it cannot stand behind**.
+  `backfill_sector` now passes real per-date foreign values instead of an empty map.
+
+### 3. rs_vnindex_5d / rs_vnindex_20d
+  NULL on all 13,140 rows since inception, which is what typed them `object` and knocked
+  LightGBM into the fallback. They are derivable from `close_idx`, so `FlowFeatureService`
+  computes them rather than waiting on an ingest change -- that backfills the whole history for
+  free. Benchmark is VNINDEX from `macro_anchors` when it covers >80% of the panel, otherwise the
+  equal-weighted cross-sector composite; `rs_benchmark` records which was used.
+
+### 4. Task schedules -- script written, needs one UAC click
+  All 8 tasks were registered with **Daily** triggers, which is why they fired on Saturday
+  2026-08-22 with the market shut. `Set-ScheduledTask` returns "Access is denied" from a normal
+  shell because they run at RunLevel=Highest, so `scripts/tasks/fix_task_schedules.ps1`
+  self-elevates. It moves the six section-8 `1-5` jobs to weekly Mon-Fri and deliberately leaves
+  `macro_ingest` and `rotation_train` every-day. Dry-run verified; **not yet applied.**
+
+### 5. Re-measured -- and the answer changes
+
+  | metric | on the dirty panel | after cleaning |
+  |---|---|---|
+  | `decile_monotonic` | **-1.000** | **+0.500** |
+  | `ndcg_at_3` | 0.505 | 0.522 |
+  | `top1_excess_hit` | 0.531 | 0.524 |
+  | backend | lightgbm | lightgbm |
+
+  **So the -1.00 was the 450 fabricated rows, not an inverted signal.** The sign flips once they
+  are gone. Do not go looking for a sign error -- there isn't one.
+
+  Read the new number carefully though: +0.50 across five buckets is one swap away from noise,
+  the quintile means are a flat smear (-1.80% .. -1.46%), and `top1_excess_hit` 0.524 sits
+  barely above the 0.50 no-skill line. The honest statement is **"not inverted, and no
+  demonstrated edge yet"** -- not "fixed".
+
+### 6. Migrated off the deprecated vnstock client
+  `Vnstock().stock()/.fx()/...` was retired 2025-08-31 and the banner was in every job log. The
+  call was spread across 8 files, each constructing the client its own way, which is why nobody
+  fixed it. `utils/vn_api.py` is now the single adapter (`quote_history` / `price_board` /
+  `listing` / `company_news`), using `vnstock.api` with the legacy class only as an ImportError
+  fallback. Probed first so the adapter is written against what is installed:
+  `Quote(symbol=, source=).history(start=, end=, interval=)` etc. -- shape-compatible, so this
+  is an adapter, not a rewrite. A test scans the tree and fails if any module constructs the old
+  class directly.
+
+### 7. /api/flow/series trimmed
+  Default `lookback` was **400 sessions x 15 sectors**. Measured before/after on the running
+  server: **3,338 ms / 1.19 MB -> 1,299 ms / 303 KB**. Values are rounded on the way out
+  (float64 repr was spending ~17 characters per number on noise below display precision).
+  `?lookback=400` still works for anyone who wants the long window.
+
+### Also, unplanned: the trader agent works again
+  Tom supplied a key that 401'd against Anthropic, Z.ai, OpenRouter and DeepSeek. It belongs to
+  **9Router**, which runs as a LOCAL OpenAI-compatible proxy on `:20128` (dashboard at
+  `http://localhost:20128/dashboard`) -- there is no public endpoint, hence the 401s. That is
+  exactly what `AGENT_PROVIDER=local` is for. Configured in `.env` (gitignored, never committed):
+  base URL `http://localhost:20128/v1`, model `claude-opus-5`, timeout 90 s.
+  Verified end to end: `/v1/models` -> 200 with 227 models, and a real `TraderAgent` call
+  returned `is_valid=True` in **17.7 s** with structured Vietnamese output. It had been failing
+  since the agent switched to Ollama, which was never running.
+
+- Verified: **150 pytest pass on Tom's machine** (Python 3.13) after all of the above; ruff clean
+  of F401/F821/E9; `main.py --train` writes `backend: lightgbm` as `rotation_ranker` id=77;
+  panel has no repeated-bar runs left.
+- Not done / needs Tom: run `scripts\tasks\fix_task_schedules.ps1` (one UAC click). Until then
+  the jobs still fire at weekends and will keep manufacturing weekend rows -- though the P0-1 fix
+  from 2026-08-22 means they can no longer be mis-dated, only redundant.
+- Note: `.env` now carries a live third-party API key. It was pasted into a chat, so rotating it
+  at 9Router is worth doing.
+
+---
+
+## 2026-08-23 — Live run on the real machine: two new bugs, LightGBM finally trains, version suffixes dropped
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `generate_secv5.py` -> `generate_report.py`, `services/picks_scoring.py`,
+  `services/flow_feature_service.py`, `services/rotation_model_service.py`,
+  `models/rotation_ranker.py`, `database/models.py`, `main.py`, `utils/clock.py`,
+  `services/unified_picks.py`, `services/picks_universe_service.py`,
+  `scripts/jobs/job_sector_signal_publish.bat`, `CLAUDE.md` (section 21), `ARCHITECTURE.md`,
+  `tests/test_review_20260822.py`, `_audit/audit_model.py`, `_audit/audit_gaps.py` (new),
+  plus renames listed below.
+- Reason: Tom asked for the components to be exercised for real rather than read, for a concrete
+  assessment of model and refresh performance, for dead scheduled jobs to be removed, and for
+  version numbers to be dropped from names.
+- Method: Desktop Commander gave a real `powershell.exe` on this box, so everything below was
+  measured by running it, not inferred. Full write-up: **Sector Flow Bench** artifact.
+
+### What running it found that reading it did not
+
+  1. **The ranker has never trained.** 74 nightly `model_runs`, every one
+     `mean_flow_fallback`. Root cause measured on the live DB: `rs_vnindex_5d` and
+     `rs_vnindex_20d` are **100% NULL** -- nothing has ever written them -- so pandas types the
+     columns `object` and LightGBM rejects the whole frame. `train_ranker` does `fillna(0.0)` on
+     exactly those columns, but fillna on an object column returns an object column, so it never
+     helped. The published "ranker score" was raw net_dollar_flow all along (visible in
+     `sector_signals`: 6.03e+07). One `pd.to_numeric` in `FlowFeatureService.build()` fixes it.
+     Verified: `main.py --train` now writes `backend: lightgbm`, 7,318 train / 2,042 test, 2.5 s.
+     The ranking changes materially -- RETAIL falls from rank 3 (BUY) to 10, STEEL rises 9 -> 2.
+  2. **The R:R floor rejects the picks it just repaired.** `compute_stop_target_rr` stretches the
+     target so reward/risk lands exactly on `MIN_RR`, then rounds stop/target to 2dp;
+     `is_valid_long_pick` recomputes the ratio from those rounded numbers, gets 1.4999... and
+     drops the pick with the self-contradictory reason `r_r 1.50 < 1.5`. Every pick that needs the
+     stretch is guaranteed to die. Cost yesterday: 5 BUY picks (SSI, SHS, DGW, FPT, PNJ) silently
+     removed from the daily email. Fixed by rounding the stretched target UP to the cent and
+     comparing at the precision the numbers are carried at.
+  3. **390 fabricated rows, exact window.** Every one of the 15 sectors carries a 26-day run of
+     identical `net_dollar_flow`, spanning **2026-07-19 -> 2026-08-21** -- precisely the ingest
+     outage in the entry below. Ingest was fixed; nobody noticed `rollup_to_daily` had been
+     stamping the same frozen bar as a new session for 26 consecutive days. Those rows are still
+     in the DB and still feed the model, the stealth z-scores and the backtest.
+  4. **ACCUMULATE has never fired.** `accumulation_age` is zero on all 13,140 rows across 876
+     dates, and `sector_signals` over its whole history is HOLD 435 / BUY 83 / SELL 52 /
+     **ACCUMULATE 0**. The entire section-16 doctrine has produced no signals. Also: only 38
+     publish dates exist since 2026-04-09 out of ~95 sessions, and 52 SELLs were published for a
+     market that cannot short.
+  5. **The scheduled tasks ignore the Mon-Fri cron.** 2026-08-22 was a Saturday; all 8 tasks ran
+     anyway, and `sector_flow_daily` now holds a Saturday row built from Friday's bar.
+  6. **vnstock deprecation.** Every job log carries it: the `Vnstock()` class this codebase uses
+     everywhere was retired 2025-08-31 in favour of `vnstock.api`.
+
+### Measured performance
+  - **Ranker, out-of-sample, 22-session embargo:** `top1_excess_hit` 0.531 (0.50 = no skill),
+    `ndcg_at_3` 0.505, **`decile_monotonic` -1.000**. Quintile mean 20d return runs
+    +0.79% / +0.21% / -0.07% / -0.22% / -1.26% -- perfectly inverted. Section 18.7 demands this be
+    positive. Caveat: measured on the corrupted panel above, so it is a symptom, not a verdict.
+  - **Refresh button:** `POST /api/insight/refresh` took **291 s** end to end, and the progress
+    payload reports `{done:0,total:0,pct:null}` the whole time, so the bar never moves.
+  - **API:** all 30 GET routes return 200. Worst: `/api/flow/series` **3,338 ms / 1.19 MB**;
+    `/api/flow/sector/BANK` 780 ms / 464 KB; `/api/sectors/risk/stoploss` 630 ms to return 2 bytes.
+    Everything else sits at 10-200 ms.
+  - **Daily Insight narrative is degenerate:** all three deltas are the same sector, all
+    "+0.00 -> 0.00", with one line claiming it both rose and fell the most.
+
+### Correction to the 2026-08-22 review
+  **P0-5 was overstated.** `foreign_net` is NOT empty across history: `sector_flow_daily` has
+  11,851 non-zero rows from 2023-03-13, but the series **stops dead on 2026-06-22**. It is
+  `sector_flow_ts` that is 100% zero (12,175 of 12,175). So the action changes from "find
+  historical data" to "find out what broke on 2026-06-22, and why the intraday table never
+  received any". P1-3 is confirmed but the number is 9 distinct breadth values, not 6.
+
+### Naming -- version suffixes dropped (section 21 of CLAUDE.md)
+  `generate_secv5.py` -> `generate_report.py`; `report_template_secv5.html` ->
+  `report_template.html`; `report/secv5_<date>.*` -> `report/daily_report_<date>.*` (4 existing
+  files renamed); `register_secv5_task.ps1` -> `register_report_task.ps1`;
+  `pause_secv3_secv4_email.ps1` -> `pause_legacy_email_task.ps1`; model_name
+  `rotation_ranker_v0` -> `rotation_ranker`; `rotation_ranker_v0.pkl/.json` ->
+  `rotation_ranker.*`; model_version `hmm_v0` -> `hmm`; env `SECV3_DB_PATH` -> `REPORT_DB_PATH`
+  (old name still honoured). `report_template_secv3/secv4.html` moved to
+  `backup/legacy-templates/`. Dates were deliberately left alone -- a dated record should say when
+  it was written. Renaming `model_name` orphans the 74 old `model_runs` from the active lookup,
+  which is intentional: every one was a degraded fallback.
+
+### Scheduled tasks -- nothing was deleted
+  Tom authorised removing dead jobs. There are none. All 8 `\SectorFlow\` tasks are Ready, all
+  point at `.bat` files that exist, and no task anywhere on the machine references a deleted file;
+  the old SecV2/3/4 entries are already gone. The real problem is the opposite -- they run at
+  weekends.
+
+- Verified: 142 pytest pass **on this machine** (Python 3.13, `uv run --with pytest`); all 7 `.ps1`
+  parse under PowerShell 5.1; `create_desktop_shortcut.ps1` ran against the real Desktop, swept 1
+  of 22 shortcuts and left `TradingBackup.lnk` and the game `.url` files untouched;
+  `generate_report.py` ran end to end after the rename and produced
+  `daily_report_2026-08-23.html` (789 KB) + `.pdf` (1.22 MB).
+  **Not verified:** the frontend (vitest not run) and real email delivery (every run used
+  `--no-email`).
+- Note: `pytest` is not in `pyproject.toml`, so `uv sync` gives you no test runner. Worth adding a
+  dev dependency group.
+- Follow-ups, in order:
+  1. Delete the 390 fabricated rows (2026-07-19 -> 2026-08-21, all 15 sectors) and re-backfill.
+     Until they are gone no model number means anything, including the -1.00 above.
+  2. Find out why `foreign_net` died on 2026-06-22 and why `sector_flow_ts` never received it.
+  3. Populate `rs_vnindex_5d/20d` or drop them from `FEATURE_COLS`.
+  4. Fix the task schedules back to Mon-Fri.
+  5. Re-measure `decile_monotonic` after 1-3. If it stays negative, the signal is being used with
+     the wrong sign -- that is a finding, not a bug.
+  6. Migrate to `vnstock.api`.
+  7. Window `/api/flow/series` instead of shipping 1.19 MB per call.
+
+---
+
+## 2026-08-22 (hotfix) — Every .ps1 in the repo was unrunnable on Windows PowerShell 5.1
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `create_desktop_shortcut.ps1`, `tests/Test-ShortcutSweep.ps1`,
+  `scripts/cleanup_scheduled_tasks.ps1`, `scripts/tasks/register_tasks.ps1`,
+  `scripts/jobs/apply_hidden_jobs.ps1`, `scripts/pause_secv3_secv4_email.ps1`,
+  `scripts/register_secv5_task.ps1`
+- Reason: `powershell -ExecutionPolicy Bypass -File create_desktop_shortcut.ps1` died with
+  `The string is missing the terminator: '.` at line 235 plus four cascading
+  `Missing closing '}'` errors.
+- Root cause: **file encoding, not syntax.** Windows PowerShell 5.1 (`powershell.exe`) decodes a
+  BOM-less `.ps1` using the system ANSI codepage, not UTF-8. On this Vietnamese Windows that is
+  CP1258. An em dash stored as UTF-8 (`E2 80 94`) therefore comes back as three characters ending
+  in **U+201D**, and the PowerShell tokenizer treats a curly double quote as a *string delimiter*.
+  That closed a double-quoted string 40 lines early, the parser desynchronised, and the error
+  surfaced far from the actual character. PowerShell 7 (`pwsh`) assumes UTF-8 and parses the same
+  file perfectly, which is why it passed review.
+- Fix, applied to every `.ps1` in the repo:
+  1. **Pure ASCII** — em dash to `--`, section sign to `section `, smart quotes to straight. No
+     codepage can now change what the file means.
+  2. **UTF-8 BOM + CRLF** — so 5.1 decodes as UTF-8 even if a non-ASCII character creeps back.
+- **Two other scripts were already broken the same way and nobody had hit it yet:**
+  - `scripts/tasks/register_tasks.ps1` — the script that registers all 8 scheduled jobs.
+    Failed at line 60, `Missing expression after ','.`
+  - `scripts/cleanup_scheduled_tasks.ps1` — the one CLAUDE.md section 2 tells you to run to evict
+    the stale SecV2 task. Failed at line 163, `Unexpected token 'bat'.`
+- Verified: every `.ps1` now parses clean under **both** decode paths — read as UTF-8, and read as
+  CP1258 with the BOM stripped (the 5.1 worst case). The original failure was first reproduced
+  byte-for-byte in the review environment (same line 235 col 63, same cascade) before fixing, then
+  confirmed gone. `tests/Test-ShortcutSweep.ps1` is now 13 checks: 11 sweep-rule cases plus two
+  permanent guards asserting the installer stays ASCII-only and BOM'd.
+- Lesson for future .ps1 work in this repo: write ASCII + BOM, and test with `powershell` (5.1),
+  not only `pwsh` (7). The two parsers disagree on exactly this.
+
+---
+
+## 2026-08-22 (late) — Desktop shortcut rebuilt; stale launchers swept
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `create_desktop_shortcut.ps1` (rewritten), `tests/Test-ShortcutSweep.ps1` (new),
+  `frontend/public/favicon.ico` (new), `frontend/index.html`,
+  `Trading Dashboard.url` + `Trading API Docs.url` (deleted by the script on first run)
+- Reason: Tom asked for a fresh startup shortcut and for the old ones to be removed.
+- Summary:
+  - The old script only ever created `VN Trading.lnk` and overwrote it in place, so every earlier
+    launcher survived — renamed copies, shortcuts left pointing at the pre-2026-07-19 project path,
+    and the two loose `.url` files that had sat in the project root since April.
+  - The rewrite sweeps first. A shortcut is only deleted if it resolves back to **this** project:
+    its target, working directory or arguments sit under the project path; or it is named
+    `VN Trading.lnk`; or it launches `start-dev.bat`; or it is an internet shortcut aimed at
+    :5173/:8000. Name alone is deliberately never enough. It lists every match with its target and
+    the reason before touching anything, and asks for confirmation unless `-Force`. `-DryRun` shows
+    the plan and changes nothing. Public Desktop is swept too. No admin rights needed.
+  - **NEW** `tests/Test-ShortcutSweep.ps1` — 11 cases pinning the delete-or-keep rule, run with
+    `pwsh -NoProfile -File tests/Test-ShortcutSweep.ps1`. It loads the real functions out of the
+    installer via AST rather than re-deriving them, so the test cannot drift from the code.
+  - The test caught a live bug during development: the naive `[Regex]::Escape($ProjectDir)` match
+    also matched **sibling folders whose name merely starts with the project's** —
+    `TradingBackup`, `Trading_old`, `Trading2` — so their shortcuts would have been deleted.
+    `Get-ProjectPathPattern` now appends a path-boundary lookahead.
+  - **NEW** `frontend/public/favicon.ico` (7 sizes, 16→256). The old script referenced this path and
+    the file never existed, so the shortcut always fell back to `shell32.dll,13`. `index.html` now
+    uses it too, so the browser tab and the Desktop icon match.
+- Verified: PowerShell 7.4.6 — script parses clean; the 11 sweep tests pass; and a full end-to-end
+  dry run against a simulated Desktop (COM stubbed) removed exactly the 5 intended entries and left
+  `My Journal.lnk`, `TradingBackup.lnk` and `Vietstock.url` untouched. **Not verified on Windows** —
+  no Windows host in the review environment; the COM and Desktop-path calls are the untested parts.
+- Follow-ups:
+  - The two `.url` files are git-tracked, so after the first run `git status` will show them as
+    deletions. Commit that.
+  - Run once as: `powershell -ExecutionPolicy Bypass -File create_desktop_shortcut.ps1`
+    (add `-DryRun` first if you want to see the list before anything is removed).
+
+---
+
+## 2026-08-22 (evening) — Full code review + P0 fixes; CLAUDE.md/AGENTS.md deduplicated
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `CODE_REVIEW_2026-08-22.md` (new), `CLAUDE.md` §16.1/§19/§20, `AGENTS.md`, `config.py`,
+  `.env.example`, `pyproject.toml`, `api/main.py`, `api/auth.py`, `analysis/flow_aggregation.py`,
+  `analysis/regime.py`, `analysis/stealth.py`, `database/models.py`, `database/migrations.py`
+  (migration 11), `database/__init__.py`, `models/rotation_ranker.py`,
+  `services/sector_ingest_service.py`, `services/fast_ingest.py`, `services/backtest_service.py`,
+  `services/sector_signal_service.py`, `services/unified_picks.py`, `utils/clock.py` (new),
+  `tests/test_review_20260822.py` (new), `tests/test_fixes_20260618.py`, `tests/conftest.py`
+- Reason: Tom asked for a review of the whole project and for the P0 defects to be fixed.
+- Summary: 22 findings (6 P0 / 6 P1 / 4 P2 / 6 P3). Full write-up in `CODE_REVIEW_2026-08-22.md`.
+
+  **The central defect (P0-2).** One causal chain ran through most of the P0s. The 16:00 EOD job
+  wrote `sector_flow_daily` rows with **no `close_idx`**. The only path that writes `close_idx` —
+  `services/fast_ingest.py`, reachable solely from `POST /api/flow/ingest` — computed
+  `new_dates = all_dates - existing_dates` and therefore skipped any date the scheduler had already
+  claimed. So each date was permanently locked in a price-less state. `scripts/backfill_close_idx.py`,
+  `scripts/fix_close_idx.py` and the `STEALTH_SYNTHETIC_CLOSE` flag all exist only to work around
+  this. Since `close_idx` feeds the ML target, stealth condition 5 and the whole backtest P&L, every
+  number the system produced rested on that table.
+
+  **P0-1.** `rollup_to_daily()` took each sector's newest `sector_flow_ts` row and wrote it under
+  *today's* date without checking the row's own timestamp. On a rate-limited or holiday run the prior
+  session was re-stamped as a new one; a repeated flat value collapses the rolling std in
+  `_rolling_z`, inflates `flow_z20` and fires stealth triggers that never happened. The row's own
+  timestamp now decides its date, and passing an explicit date skips sectors that have no bar for it.
+
+  **P0-3.** `close_idx` is a raw weighted **sum of prices** with `w = 1/n` (market-cap weights were
+  never passed). A 2:1 split halves a sector "index" overnight → fake `return_1d`, fake target, fake
+  backtest loss. Added `SectorAggregate.basket_return`, the mean of each constituent's own 1-day
+  return, which no corporate action can distort. Migration 11 adds `close_idx` + `basket_return` to
+  `sector_flow_ts` so the scheduled rollup has something to carry.
+
+  **P0-4.** The backtest ranked by raw `net_dollar_flow` and never read `sector_signals` — so every
+  success criterion in §16.11 / §18.7 was measured against a strategy nobody trades. And because raw
+  VND is un-normalised, "top 3 by flow" is structurally "the 3 largest sectors": a near-static
+  portfolio dressed as rotation. `run(strategy=...)` now defaults to `"signals"` (replays published
+  ACCUMULATE/BUY), with `"flow_z"` (cross-sectional z-score) and `"flow_raw"` (legacy) baselines for
+  comparison. Benchmark is VNINDEX per §11 — it was the equal-weighted mean of 15 sector returns.
+
+  **P0-6.** Ranker CV had no purge/embargo, so with a 20-day forward target the last 20 training
+  dates carried labels from inside the test window (§18.3/13, marked BLOCKER). Embargo is now
+  horizon + 2. Also replaced `top1_hit_rate` — which counted "was the forward return positive", ~60%
+  for a coin flip in a bull market — with `top1_excess_hit` (vs. the median sector, 0.5 = no skill),
+  `decile_monotonic` (§18.7) and `ndcg_at_3`.
+
+  **P1-2 / P1-5 / P1-6 / P2-1.** The mean-flow fallback (effectively "sort sectors by size") used to
+  activate silently and still ship as "ranker-gated"; it is now flagged `is_degraded` and announced.
+  Added the three safety rails the plan promised and the code never had: §16.9 ACCUMULATE cap of 4,
+  §16.9 30-session auto-exit, §18.4/20 `TRADING_HALT`. `utils/clock.py` gives one market-local
+  definition of "today" (`config.TIMEZONE` was declared and used nowhere). `require_api_key` — which
+  existed since March with **no router using it** — is wired behind `API_REQUIRE_KEY`, the slowapi
+  limiter is finally attached to the app, and the inert `"https://*.ngrok-free.app"` CORS entries
+  (a literal `*` matches nothing in Starlette) are gone.
+
+  **Housekeeping.** `AGENTS.md` was a 26 KB copy of `CLAUDE.md` that had already drifted in five
+  passages — reduced to a pointer. `.env.example` regenerated from `config.py` (it still said
+  `DATA_SOURCE=VCI` and was missing 17 variables). ruff config added: 666 findings → 30, all real.
+- Behaviour preserved on purpose: `API_REQUIRE_KEY=0`, `ALLOW_SHORT_SIGNALS=1`, `TRADING_HALT=0`.
+  Nothing in the daily email changes until those are flipped. `MAX_ACCUMULATE_SECTORS=4` and the
+  30-session release DO change behaviour — they implement §16.9, which was never enforced.
+- Verified: 138 backend tests pass (110 before, +28 new — one guard per finding) in a Linux venv
+  built for this review; `.venv` in the repo is a Windows build and could not be used. Migration 11
+  applies cleanly on a fresh DB; all modules import; `main.py --eod-rollup` on an empty DB now skips
+  loudly instead of writing 15 phantom rows. **Not verified: any live vnstock path, `generate_secv5.py`
+  end-to-end, or the frontend** — no market access from the review environment.
+- Follow-ups (in the order they should be done):
+  1. **Run `python main.py --backfill` after this lands**, so history is rebuilt with `close_idx`
+     and `basket_return` populated. Until then the historical hole stays.
+  2. **Decide `foreign_net`'s fate (P0-5).** This confirms the 2026-04-16 follow-up carried in the
+     entry below: it is zero for **every row ever written**, because `backfill_sector` passes an
+     empty map and `price_board` only exposes today. It is not a parser bug — there is no history to
+     parse. Three `FEATURE_COLS` entries are constant zero and stealth cond2 is auto-dropped.
+     Source a series (§18.4/17 suggests CafeF/SSI) or remove the features and amend §16.1.
+  3. **Reconcile §16.1 (P1-1)** — code ships N=3 / bottom 60%, doctrine says N=5 / bottom 40%.
+  4. **P2-3** — the "intraday" job fetches `interval="1D"` and re-downloads 120 days every 15 min
+     (~3,750 calls/day against an 18/min gate). This is the root cause `vnstock_gate` is holding
+     back. Either fetch real 15m bars or make it a once-daily EOD job and fix §4/§8.
+  5. **P2-2** — `picks_universe_service` keeps its own rate-limit bucket and `/insight/refresh`
+     takes no `job_lock`, so a UI refresh overlapping the intraday job still runs at 2× the ceiling.
+  6. **P3-2** — extract a tested decision layer out of `generate_secv5.py` (1,629 lines, 0 tests,
+     and it is the one output read every day).
+
+---
+
+## 2026-07-20 — TraderAgent: local (Ollama) transport becomes the default; SDK made optional
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `config.py`, `services/trader_agent.py`, `tests/test_trader_agent.py`, `specs/trader_agent.md`, `CLAUDE.md`
+- Reason: Tom asked whether a lighter model could run on his own machine instead of a paid API, and authorised replacing `claude_agent_sdk` since it is only used by this one agent. Hardware audited: **i7-12700K (12c/20t), 32GB RAM, RTX 3050 6GB VRAM, 235GB free**. Self-hosting GLM-5.2 was priced first and rejected — it is MIT open-weight (753B MoE) but needs ~8×H200 (~$320–420K on-prem, or $19–36K/month rented); break-even vs the Z.ai API sits near 4.3B output tokens/month, while this agent makes **1 call/day**.
+- Summary:
+  - New provider `local` (now the **default** for `AGENT_PROVIDER`): plain `httpx` POST to an OpenAI-compatible `/chat/completions` endpoint (`LOCAL_BASE_URL`, default `http://localhost:11434/v1`). Works with Ollama, LM Studio and llama.cpp's server. No API key, no per-call cost, no internet egress, no CLI subprocess. `cost_usd` is reported as 0.0.
+  - `claude_agent_sdk` import is now **soft** (try/except → `_SDK_IMPORT_ERROR`). A local-only box no longer needs the ~80MB wheel, and `import api.routers.insight` no longer hard-fails without it. Providers `glm` / `claude` still use the SDK and return a clear error if it is absent. Justified: the agent is one-turn, no-tools, no-thinking, so the SDK was pure overhead on the local path.
+  - `<think>` stripping in `_parse_response`: local reasoning models (Qwen3 family) emit a monologue that routinely contains braces, which poisoned the no-fence `{...}` fallback. Both terminated and unterminated (truncated-output) blocks are now removed before matching. Applies to all providers.
+  - Friendly transport errors: connection refused → "is Ollama running? (`ollama serve`)"; HTTP 4xx/5xx → status + body + "is model '<tag>' pulled? check `ollama list`". Previously these surfaced as raw httpx traces on the Daily Insight page.
+  - `AGENT_MODEL` default is now provider-derived via `_DEFAULT_MODEL_BY_PROVIDER`: `local`→`LOCAL_MODEL` (default `qwen3:8b`), `glm`→`glm-5.2`, `claude`→`haiku`. GLM path from the earlier entry today is unchanged and still one env var away.
+  - Tests: +4 (local POST body/URL/parse; connect-error message; `<think>` strip terminated + unterminated). Existing hard-timeout test pinned to `AGENT_PROVIDER=glm` since the default moved. Backend suite **105 passed**.
+- Follow-ups:
+  - Tom must install Ollama and pull a model before the first local run: `ollama pull qwen3:8b` (~5GB, fits the 3050's 6GB fully on-GPU). Verify the exact tag with `ollama list` — set `LOCAL_MODEL` if it differs.
+  - Quality check: an 8B is materially weaker than GLM-5.2 at VN financial reasoning. If the VN narrative reads poorly, the upgrade path on this box is an MoE with small active params (e.g. Qwen3.6 35B-A3B, ~3B active) at Q3/Q4 with CPU-expert offload into the 32GB RAM — community reports ~30 tok/s on 6GB VRAM. Raise `AGENT_TIMEOUT_SEC` if so.
+  - Live smoke test `POST /api/insight/refresh` once a model is pulled — the transport is only covered manually (§19).
+  - `pyproject.toml` still pins `claude-agent-sdk>=0.1.0`. Left in place deliberately (glm/claude paths still work); drop it only if Tom commits to local-only.
+
+## 2026-07-20 — TraderAgent provider switch: GLM-5.2 becomes the default model
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `config.py`, `services/trader_agent.py`, `tests/test_trader_agent.py`, `specs/trader_agent.md`, `CLAUDE.md`
+- Reason: Tom asked to replace the Claude-backed Daily Insight agent with GLM-5.2.
+- Summary:
+  - New config knobs: `AGENT_PROVIDER` (default `glm`; set `claude` to revert to the Claude Code subscription path), `GLM_BASE_URL` (default `https://api.z.ai/api/anthropic` — Z.ai's Anthropic-compatible endpoint), `GLM_API_KEY` (read from `.env`, empty default). `AGENT_MODEL` default is now `glm-5.2` when provider=glm (`haiku` otherwise).
+  - `TraderAgent.analyze()` keeps the same `claude_agent_sdk` transport but, under provider=glm, injects `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN` into the SDK subprocess env (`ClaudeAgentOptions.env`, SDK 0.1.63) so the CLI talks to GLM instead of Anthropic. No new dependency; timeout guard, JSON parsing, cache, and tests all unchanged in behaviour.
+  - Missing-key guard: provider=glm with empty `GLM_API_KEY` returns a graceful invalid `AgentReport` (clear error surfaced on the Daily Insight page) instead of stalling on an SDK auth failure.
+  - Tests: +3 (missing-key guard; env+model routing under glm; no env override under claude). Existing hard-timeout test updated to stub a key. Suite: 101 backend tests pass.
+- Follow-ups:
+  - Tom must add `GLM_API_KEY=<key>` to `Trading/.env` (get it from the Z.ai console). Mainland endpoint users: set `GLM_BASE_URL=https://open.bigmodel.cn/api/anthropic`.
+  - Live smoke test `POST /api/insight/refresh` after the key is in place (per §19 — the SDK transport path is only covered manually). Verify `cost_usd` rendering: Z.ai may not return `total_cost_usd`, header will show n/a.
+
 ## 2026-06-19 — Page-load perf root-cause + macro/regime fix + ohlcv_fail metric split + anti-blank-page guard
 - Author: Claude (Cowork) on behalf of Tom
 - Files: `start-dev.bat`, `services/picks_universe_service.py`, `services/macro_service.py`, `services/rotation_model_service.py`, `frontend/src/pages/DailyInsightPage.tsx`
@@ -913,3 +1315,43 @@
   - Still open from 2026-04-21: nightly `sqlite3 .backup` to a timestamped local-disk file as insurance against virtiofs truncations.
   - Still open from 2026-04-21: script the manual rename step on the Windows side (now optional given today's successful copy-back, but still useful as a safety net).
   - Investigate why the LightGBM ranker scored REAL #1 with flow_z20=-3.276 today — check feature importances and whether macro/regime features are dominating in `chop` regimes.
+
+
+---
+
+## 2026-08-22 — scheduled-job triage: console popups, UTF-8 crash, rate-limit storm
+
+- Reason: user reported terminal windows popping up at random on the Windows host. Traced to this project's own `\SectorFlow\` scheduled tasks; three separate defects found behind it.
+- Root causes found:
+  - **Console popups** — all 8 tasks registered as `cmd.exe /c "<job>.bat"` with `LogonType=Interactive`, `Hidden=False`, so Windows shows a console every firing. `scripts/jobs/run_hidden.vbs` already existed for exactly this purpose but was never wired into the task actions.
+  - **`'charmap' codec can't encode` on every symbol** — the job console defaulted to cp1258/cp437, so any vnstock row carrying Vietnamese text raised `UnicodeEncodeError` inside `_fetch_constituent_daily`'s `except BaseException`. Every symbol was swallowed → `sector_flow_ts rows: 0`. **`sector_flow_ts` has no rows between 2026-04-29 and 2026-08-21 — roughly four months of missing intraday history.**
+  - **Rate-limit storm** — `ingest_intraday_now` paced with `time.sleep(INGEST_SLEEP=3.2)` per SYMBOL while spending TWO calls per symbol (`quote.history` + `trading.price_board`), i.e. ~37 calls/min against a KBS guest tier of ~20/min. On a 429 vnstock raises `SystemExit`; the handler swallowed it and moved on, so a rate-limited run sprinted through all 75 symbols at full speed and wrote nothing. Overlapping processes made it worse: a slow intraday run was still going when the next 15-minute firing (plus the hourly macro job) started, and each assumed it owned the whole quota.
+- Changes landed:
+  - `scripts/jobs/_env.bat` — sets `PYTHONUTF8=1` + `PYTHONIOENCODING=utf-8`; adds log rotation (roll at 5 MB, keep one `.log.1` generation) because `sector_intraday_flow.log` had grown to 6.5 MB of repeated identical errors.
+  - **NEW** `utils/vnstock_gate.py` — single choke point for outbound vnstock calls. Token bucket paces by CALL (`VNSTOCK_MAX_PER_MIN`, default 18); `call()` retries a 429 with 30/75/150 s backoff and returns `None` rather than letting `SystemExit` escape; `job_lock()` / `guarded()` give a cross-process mutex (OS file lock, auto-released if a job dies) so vnstock-spending jobs can never overlap.
+  - `services/sector_ingest_service.py` — both fetch paths now go through the gate; the per-symbol `time.sleep` is gone.
+  - `main.py` — `--macro`, `--intraday`, `--backfill` run under `guarded()`; a job that cannot get the lock logs and exits so the next firing picks the work up.
+  - **NEW** `scripts/jobs/run_hidden_wait.vbs` — like `run_hidden.vbs` but waits and returns the child exit code, so Task Scheduler still sees the real result and its "do not start a new instance" rule keeps working. `run_hidden.vbs` is fire-and-forget and would have silently disabled that protection.
+  - **NEW** `scripts/jobs/apply_hidden_jobs.ps1` + `.bat` — self-elevating one-shot that repoints the 8 task actions to `wscript.exe run_hidden_wait.vbs "<job>.bat"`. Not yet applied: `Set-ScheduledTask` needs elevation (tasks are `RunLevel=Highest`).
+  - **NEW** `tests/test_vnstock_gate.py` — 5 tests covering call-pacing, 429 retry, give-up-returns-None, non-429 errors not retried, and cross-process lock exclusion. All pass.
+- Verified after the fix (clean run 07:15–07:23, pre-market):
+  - `charmap` errors 0 (was: every symbol), ingest failures 0, gate backoff events 0.
+  - `[main] sector_flow_ts rows: 15` — full 15/15 sector coverage (was 0).
+  - Cross-process lock demonstrated live: a second `--intraday` started while the first was running printed `skipping intraday: vnstock busy, will retry next run` and exited.
+  - Run takes ~8 min at 18 calls/min, which fits inside the 15-minute slot.
+- Housekeeping: 157 MB moved to `_trash_2026-08-22/` (10 stale April DB snapshots kept only `healed_20260430`; FUSE remnants and old `dist-*` builds from `backup/attic`; pre-June dated reports; the 6.5 MB charmap log). 16 `__pycache__`/`.pytest_cache` dirs deleted. **Note:** `report/` is only partly gitignored, so the moved dated reports show as tracked deletions — `git checkout -- report/` restores them. `report_template_secv{3,4,5}.html` and `template.html` were caught by the date filter and put back immediately (`generate_secv5.py` reads `report_template_secv5.html`).
+- Follow-ups (new + carried forward):
+  - **NEW**: backfill the 2026-04-29 → 2026-08-21 hole in `sector_flow_ts` (`python main.py --backfill`; now safe to run unattended thanks to the gate, but it is a long job).
+  - **NEW**: confirm the popup fix once `apply_hidden_jobs.bat` has been run elevated.
+  - Still open from 2026-04-16: `foreign_net = 0` for **every timestamp ever written**, including before this outage — the 2026-06-18 volume×price fallback in `_parse_foreign_board` is evidently still not producing values. `cond2_foreign` therefore fails for all 15 sectors and `ACCUMULATE` can never fire. Worth re-testing during market hours before assuming the parser is at fault, since `price_board` may simply return zeros pre-open.
+
+### 2026-08-22 (later same day) — admin-free popup fix + report crash
+
+- **Popups fixed without elevation.** `Set-ScheduledTask` needs admin and the UAC consent click cannot be automated, so instead each `scripts/jobs/job_*.bat` now self-hides: if not called with the `_hidden_` marker it relaunches itself through `run_hidden.vbs` and returns immediately.
+  - `run_hidden.vbs` (fire-and-forget) is used deliberately, not `run_hidden_wait.vbs`. Measured: with the waiting launcher the console stayed **4.36 s** for a 4-second job — cmd.exe blocks until wscript returns, which for the intraday job would mean a window parked on screen for ~8 minutes. With fire-and-forget it is **0.60–0.66 s** regardless of job length.
+  - Losing Task Scheduler's "do not start a new instance" guard is safe now that `utils/vnstock_gate.job_lock()` enforces non-overlap across processes.
+  - Verified by `EnumWindows`: while the ~8-minute intraday job was running (2 python + 1 cmd wrapper alive), **zero** visible `ConsoleWindowClass` windows existed. The three visible terminals belong to WindowsTerminal pid 26668 — the `start-dev.bat` stack (FastAPI + frontend), started 2026-08-21 20:31 and unrelated to the scheduled jobs.
+  - Originals copied to `_trash_2026-08-22/job-bats-original/`. `apply_hidden_jobs.ps1` still works and now passes the `_hidden_` marker, so the two layers compose if it is ever run elevated.
+- **NEW bug found and fixed — the daily email had been dead since 2026-07-23.** `SectorFlow_sector_signal_publish` returned exit 1 every day: `generate_secv5.py::build_stealth_rows` crashed with `TypeError: unsupported format string passed to NoneType.__format__`. `z20` was the only column in that row builder without a None guard (`fh`/`br`/`st` all use `or 0`), and a sector qualifying on c2/c3 while `flow_z20` was still NULL hit it. Rendered as an em dash instead of `or 0`, so a data gap is not mistaken for a neutral z-score. Verified with `python generate_secv5.py --no-email`: `report/secv5_2026-08-22.{html,pdf}` generated — the first report since 2026-07-23.
+- Also seen in that log, not fixed (not a code defect): `trader_agent` cannot reach the local LLM at `http://localhost:11434` — Ollama is not running, so the agent section degrades to `is_valid=False`. Start `ollama serve` if that section is wanted.
+- Publish output is healthy again: 15 signals, **3 BUY** (TECH, BROK, RETAIL), rest HOLD — versus the all-HOLD runs recorded while ingestion was dead.
