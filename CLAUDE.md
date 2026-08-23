@@ -70,6 +70,22 @@ Benchmark VNINDEX B&H. Sharpe > 1.0, MaxDD < 15%, top-rank hit-rate > 55%.
 ## 12. Frontend
 Replace 9 symbol pages with 5 sector pages: Flow Dashboard, Rotation Ranking, Regime Monitor, Sector Backtest, Risk.
 
+> **2026-08-23 — reconciled with what actually shipped.** Four of the five
+> pages above (Ranking, Regime, Backtest, Risk) had been *built and working*
+> for months but had no `<Route>`, so the only way to reach them was to edit
+> the source. They are wired now, lazily, under a second nav group
+> ("Ra quyết định"). The nav is:
+>
+> | Theo dõi | Ra quyết định |
+> |---|---|
+> | Daily Insight · Money Flow Monitor · Rotation Map · Stealth Watch · Flow Pulse | Xếp hạng ngành · Trạng thái thị trường · Rủi ro & Vị thế · Backtest |
+>
+> Twelve page components were deleted rather than wired: nine were one-line
+> stubs, and `FlowPage`, `BriefingPage` and `AccumulationPage` were superseded
+> (by FlowMonitorPage, by the in-page trader agent, and by StealthWatchPage
+> respectively — and `/accumulation` would have rendered permanently empty
+> since `accumulation_age` is zero on every row).
+
 ## 13. Migration Order (execution sequence)
 1. Freeze legacy tables with `_legacy_` prefix.
 2. Migration 8: add new schema.
@@ -87,7 +103,7 @@ Replace 9 symbol pages with 5 sector pages: Flow Dashboard, Rotation Ranking, Re
 - Proxy basket size: **top 5 by market cap** per sector.
 - Backfill depth: **5 years** (or max vnstock available).
 - Execution universe: **top-3 constituents basket** (ETF liquidity in VN is thin).
-- OpenClaw agent Trung: **retired 2026-04-18** — replaced by `services.trader_agent.TraderAgent` ("Minh"). **2026-07-20: default provider is now `local`** — plain HTTP to an OpenAI-compatible server on this box (`LOCAL_BASE_URL`, default Ollama `http://localhost:11434/v1`; `LOCAL_MODEL` default `qwen3:8b`), no API key, no cost, no `claude_agent_sdk`. Alternatives via `AGENT_PROVIDER`: `glm` (Z.ai Anthropic-compatible endpoint, model `glm-5.2`, needs `GLM_API_KEY`) or `claude` (Claude Code subscription). The SDK is imported lazily, so a local-only install does not need it. Invoked from `POST /api/insight/refresh`. Output rendered inline on the Daily Insight page.
+- OpenClaw agent Trung: **retired 2026-04-18** — replaced by `services.trader_agent.TraderAgent` ("Minh"). **2026-07-20: default provider is now `local`** — plain HTTP to an OpenAI-compatible `/chat/completions` endpoint, no `claude_agent_sdk`. **2026-08-23: `local` names the transport, not where the model runs.** It points at 9Router (`LOCAL_BASE_URL` default `http://localhost:20128/v1`, dashboard `http://localhost:20128/dashboard`), a local router fronting hosted Claude models; `LOCAL_MODEL` default `claude-opus-5`. The previous Ollama defaults (`:11434`, `qwen3:8b`) were dropped — Ollama was never running on this box, so the agent had been failing on every run. Alternatives via `AGENT_PROVIDER`: `glm` (Z.ai Anthropic-compatible endpoint, model `glm-5.2`, needs `GLM_API_KEY`) or `claude` (Claude Code subscription). The SDK is imported lazily, so a local-only install does not need it. Invoked from `POST /api/insight/refresh`. Output rendered inline on the Daily Insight page.
 - Frontend: **feature flag** during shadow run, hard-cut after.
 
 Change any of these by editing this file and logging in `MODIFICATION_LOG.md`.
@@ -363,3 +379,52 @@ because a dated record is supposed to say when it was written.
 `model_runs` rows from the active-model lookup. That is intentional -- every
 one of them was a degraded mean-flow fallback (see section 20 / P0-8), so
 none was worth keeping. The next `--train` writes the first real one.
+
+
+## 22. Frontend flow audit — 2026-08-23
+
+Every route and every endpoint behind it was exercised against the running
+server. Full numbers in the **Sector Flow Bench** artifact.
+
+### 22.1 Flows that render nothing
+These return HTTP 200 with an empty collection, so the page draws an empty
+state. They are not broken code — they are correct code with no data:
+
+| surface | endpoint | why it is empty |
+|---|---|---|
+| Stealth Watch | `/api/stealth/active`, `/api/stealth/history` | `accumulation_age` is 0 on all 13k rows; §16 has never fired |
+| Rotation Map | `/api/rotation/pairs` | no pair clears the 1.5 threshold on the current panel |
+| Flow Pulse | `/api/pulse/exposure` | no positions are tracked |
+
+Fixing these means fixing §16 (see §20.3), not the UI.
+
+### 22.2 Client code pointing at deleted routes
+`agentApi.briefing()` and `agentApi.stoplossAlerts()` called `/api/agent/*`,
+which was removed from the backend on 2026-04-18 when OpenClaw was replaced by
+`services.trader_agent`. Both returned 404 for four months. Removed, along with
+`BriefingPage`, which was their only caller.
+
+### 22.3 Performance
+- `flowApi.series` and `flowApi.sector` hard-coded `lookback = 400` in the
+  **client**, so lowering the backend default to 120 changed nothing until the
+  client changed too. Now 120 both ends: **2.8 s / 1.0 MB → 1.3 s / 303 KB**.
+- Wiring the four pages eagerly took the main bundle from 372 kB to 732 kB,
+  because `BacktestPage` imports recharts. They are `React.lazy` now: main
+  bundle 376 kB, recharts in a 346 kB chunk that only loads when you open
+  Backtest.
+
+### 22.4 Dev server bound to every adapter
+`vite.config.ts` had `host: true`, which binds 0.0.0.0 and advertises every
+network adapter — including `172.20.16.1`, the Hyper-V vEthernet switch WSL and
+Docker Desktop create, which nothing outside the machine can reach. Now
+`host: 'localhost'`; use `npm run dev:lan` when you want it on the LAN. That is
+also the safer default while `API_REQUIRE_KEY=0`: the Vite proxy fronts the
+trading API, so putting the dev server on the LAN puts the API there too.
+
+### 22.5 The frontend test suite was red, and §19 said it was green
+8 of the 13 vitest tests failed with `TypeError: React.act is not a function`.
+React 19.2 ships `act` only in its development build, and Vitest runs with
+`NODE_ENV=test`, so Vite resolved React's production entry and
+`@testing-library/react` fell back to the removed `react-dom/test-utils.act`.
+Fixed in `vitest.config.ts` by asking the resolver for the `development`
+condition. **13/13 pass now** — the count in §19 is finally true.
