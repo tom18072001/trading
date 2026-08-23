@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # register_secv5_task.ps1 -- register (or refresh) the single
 # Windows Task Scheduler task that runs the SecV5 daily email job.
 #

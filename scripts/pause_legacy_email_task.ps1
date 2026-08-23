@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # pause_secv3_secv4_email.ps1 -- retire any scheduled task that
 # still sends the SecV3 / SecV4 daily briefing email.
 #

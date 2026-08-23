@@ -1,5 +1,5 @@
 """
-SecV5 — Unified Picks Briefing (replaces SecV4 as of 2026-04-23)
+Daily Unified Picks Briefing
 =====================================================================
 Motivation: SecV4 and the Daily Insight page were recommending
 different stocks because:
@@ -7,7 +7,7 @@ different stocks because:
     snapshot.top_sells directly (no ranker gate).
   - SecV4 email filtered picks through the ranker gate and dropped
     everything when the ranker emitted no BUY/ACCUMULATE that day.
-SecV5 unifies the two into a single list per Tom's directive
+This generator unifies the two into a single list per Tom's directive
 (2026-04-23):
 
   * UNIFIED picks list = UNION(snapshot.top_buys, ranker-gated buys),
@@ -23,15 +23,24 @@ SecV5 unifies the two into a single list per Tom's directive
     hill.nguyen.1373@gmail.com (REPORT_EMAIL_TO env override still
     works).
 
-Outputs:  report/secv5_<date>.html and report/secv5_<date>.pdf
+Outputs:  report/daily_report_<date>.html and .pdf
 Emails:   PDF + HTML + plain-text summary to the 3 recipients.
 
 Usage:
-    python generate_secv5.py              # today (local TZ)
-    python generate_secv5.py 2026-04-23   # specific date
-    python generate_secv5.py --no-email   # skip email
+    python generate_report.py              # today (local TZ)
+    python generate_report.py 2026-04-23   # specific date
+    python generate_report.py --no-email   # skip email
 """
-import os, sys, io, sqlite3, subprocess, smtplib, base64, shutil, tempfile, json, datetime as dt
+import os
+import sys
+import io
+import sqlite3
+import subprocess
+import smtplib
+import base64
+import shutil
+import tempfile
+import datetime as dt
 from pathlib import Path
 from collections import defaultdict
 from email.mime.multipart import MIMEMultipart
@@ -67,10 +76,12 @@ REPORT_DATE = args[0] if args else dt.date.today().isoformat()
 SEND_EMAIL = "--no-email" not in flags
 RECENT_DAYS = 5
 PRIOR_DAYS  = 10
-TEMPLATE_PATH = ROOT / "report" / "report_template_secv5.html"
-OUT_HTML = ROOT / "report" / f"secv5_{REPORT_DATE}.html"
-OUT_PDF  = ROOT / "report" / f"secv5_{REPORT_DATE}.pdf"
-DB_PATH  = os.environ.get("SECV3_DB_PATH") or str(ROOT / "vnstock_market.db")
+TEMPLATE_PATH = ROOT / "report" / "report_template.html"
+OUT_HTML = ROOT / "report" / f"daily_report_{REPORT_DATE}.html"
+OUT_PDF  = ROOT / "report" / f"daily_report_{REPORT_DATE}.pdf"
+DB_PATH  = (os.environ.get("REPORT_DB_PATH")
+            or os.environ.get("SECV3_DB_PATH")   # legacy name, still honoured
+            or str(ROOT / "vnstock_market.db"))
 
 # Dashboard link used inside the email + memo so readers can jump straight to
 # the Daily Insight page for the live view.
@@ -79,7 +90,7 @@ DASHBOARD_URL = os.environ.get(
     "http://localhost:5173/insight/daily",
 )
 
-print(f"[secv5] date={REPORT_DATE} db={DB_PATH}")
+print(f"[report] date={REPORT_DATE} db={DB_PATH}")
 
 # ========== STYLE ==========
 DARK_BG, CARD_BG, GRID_CLR, TEXT_CLR = "#0f172a", "#1e293b", "#334155", "#e2e8f0"
@@ -113,7 +124,7 @@ def _open_db(path):
     try:
         c = sqlite3.connect(path); c.execute("SELECT 1").fetchone(); return c
     except sqlite3.OperationalError:
-        tmp = Path(tempfile.gettempdir()) / "secv3_vns.db"
+        tmp = Path(tempfile.gettempdir()) / "vn_report_db.sqlite"
         shutil.copyfile(path, tmp)
         return sqlite3.connect(str(tmp))
 
@@ -127,11 +138,11 @@ con = _open_db(DB_PATH); con.row_factory = sqlite3.Row; cur = con.cursor()
 from config import SECTORS  # noqa: E402
 from services.picks_universe_service import get_picks_universe  # noqa: E402
 _universe_snap = get_picks_universe().get_snapshot()
-print(f"[secv5] universe snapshot as_of={_universe_snap.as_of} tickers={len(_universe_snap.tickers)} "
+print(f"[report] universe snapshot as_of={_universe_snap.as_of} tickers={len(_universe_snap.tickers)} "
       f"is_valid={_universe_snap.is_valid}")
 if not _universe_snap.is_valid:
-    print(f"[secv5] STALE snapshot — errors: {_universe_snap.freshness.errors}")
-    print(f"[secv5] STALE snapshot — warnings: {_universe_snap.freshness.warnings}")
+    print(f"[report] STALE snapshot — errors: {_universe_snap.freshness.errors}")
+    print(f"[report] STALE snapshot — warnings: {_universe_snap.freshness.warnings}")
 
 # Adapter layer: re-materialize the legacy `sym_price`, `sym_daily_prices`,
 # `feats`, `sym_sector` dicts that downstream code still consumes.
@@ -168,7 +179,7 @@ for _sym, _tr in _universe_snap.tickers.items():
     }
 
 # ========== TRADER AGENT (Minh) — Claude Agent SDK ==========
-# secv4 upgrade: inject agent analysis at the top of the email. Agent reads
+# Inject agent analysis at the top of the email. Agent reads
 # the snapshot's top_buys/top_sells + sector context and returns narrative
 # + conviction-rated picks + avoid list. Report still renders if agent fails.
 from services.trader_agent import get_trader_agent  # noqa: E402
@@ -216,12 +227,12 @@ try:
             for r in _aflow
         },
     }
-    print("[secv5] trader_agent: invoking Minh...")
+    print("[report] trader_agent: invoking Minh...")
     _agent_report = get_trader_agent().analyze_sync(_snap_dict, _agent_ctx)
-    print(f"[secv5] trader_agent done: is_valid={_agent_report.is_valid} "
+    print(f"[report] trader_agent done: is_valid={_agent_report.is_valid} "
           f"dur={_agent_report.duration_ms}ms cost=${_agent_report.cost_usd}")
 except BaseException as _e:
-    print(f"[secv5] trader_agent FAILED (non-fatal): {type(_e).__name__}: {_e}")
+    print(f"[report] trader_agent FAILED (non-fatal): {type(_e).__name__}: {_e}")
     _agent_report = None
 
 # ========== SECTOR STATS (from persisted sector_flow_daily) ==========
@@ -340,16 +351,16 @@ try:
                 _sig_action_by_code[r.sector_code] = (r.action or "HOLD").upper()
     finally:
         _ssess.close()
-    # Flip code -> VN name (sym_sector in secv3 uses VN names)
+    # Flip code -> VN name (sym_sector uses VN names)
     sig_action_by_vn: dict[str, str] = {
         vn: _sig_action_by_code.get(code, "HOLD")
         for code, vn in _SECTOR_CODE_NAME.items()
     }
     ranker_in  = {vn for vn, a in sig_action_by_vn.items() if a in ("BUY", "ACCUMULATE")}
     ranker_out = {vn for vn, a in sig_action_by_vn.items() if a == "SELL"}
-    print(f"[secv5] ranker align: BUY/ACCUMULATE={sorted(ranker_in) or 'none'}  SELL={sorted(ranker_out) or 'none'}")
+    print(f"[report] ranker align: BUY/ACCUMULATE={sorted(ranker_in) or 'none'}  SELL={sorted(ranker_out) or 'none'}")
 except Exception as _e:  # pragma: no cover — safety net, never block the report
-    print(f"[secv5] ranker align skipped ({_e}); falling back to flow_delta")
+    print(f"[report] ranker align skipped ({_e}); falling back to flow_delta")
     ranker_in, ranker_out = set(), set()
     sig_action_by_vn = {}
 
@@ -453,7 +464,7 @@ def make_mini_chart(sym, daily_prices):
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     return fig_to_base64(fig, dpi=110)
 
-print("[secv5] rendering charts...")
+print("[report] rendering charts...")
 chart_flow_delta  = make_sector_flow_chart(sector_stats)
 chart_sector_perf = make_sector_aggregate_chart(sector_stats)
 chart_correlation = make_correlation_heatmap(sector_daily_flow, all_dates_sorted)
@@ -610,7 +621,7 @@ def build_sector_prediction_rows():
             if fh >= 0.6: score += 1; drivers.append(f"FrgHit {fh*100:.0f}%")
             elif fh <= 0.4: score -= 1; drivers.append(f"FrgHit {fh*100:.0f}%")
         if s["breadth_rsi"] >= 50: score += 1; drivers.append(f"RSI breadth {s['breadth_rsi']:.0f}%")
-        elif s["breadth_rsi"] <= 10: score -= 1; drivers.append(f"RSI breadth low")
+        elif s["breadth_rsi"] <= 10: score -= 1; drivers.append("RSI breadth low")
         st = fd.get("stealth_score") or 0
         if st >= 0.8: score += 1; drivers.append(f"stealth={st:.2f}")
         if sig and sig["action"] == "BUY" and sig.get("persistence_ok"): score += 2; drivers.append(f"rank#{sig['rank']} BUY")
@@ -675,7 +686,13 @@ def build_stealth_rows():
             status, sclass = "early signal", "tag tag-hold"
         rows.append(
             f"<tr><td class='sym'>{nm}</td>"
-            f"<td>{z20:+.2f}</td>"
+            # 2026-08-22: z20 was the only column here without a None guard,
+            # so a sector that qualified on c2/c3 while flow_z20 was still
+            # NULL crashed the whole report with
+            # "unsupported format string passed to NoneType.__format__"
+            # and the daily email never went out. Render missing as a dash
+            # rather than `or 0`, so a gap is not read as a neutral z-score.
+            f"<td>{'—' if z20 is None else format(z20, '+.2f')}</td>"
             f"<td>{(fh or 0)*100:.0f}%</td>"
             f"<td>{(br or 0)*100:.0f}%</td>"
             f"<td>{(st or 0):+.2f}</td>"
@@ -802,7 +819,7 @@ for b in buy_cands:
         break
 buys = _valid_buys
 if _rejected_buys:
-    print(f"[secv5] validity gate filtered {len(_rejected_buys)} buys: "
+    print(f"[report] validity gate filtered {len(_rejected_buys)} buys: "
           + ", ".join(f"{s} ({r})" for s, r in _rejected_buys[:10]))
 
 buy_rows_html  = "".join(buy_row(b) for b in buys) or "<tr><td colspan='11' class='mut'>No qualifying BUY setups today.</td></tr>"
@@ -813,9 +830,8 @@ watch_rows_html= "".join(pick_row(w, "tag-watch","WATCH", watch_thesis(w)) for w
 def fetch_vnstock_news(sym, lookback_days=3):
     """Try vnstock company news; fall back silently."""
     try:
-        from vnstock import Vnstock  # type: ignore
-        v = Vnstock().stock(symbol=sym, source="VCI")
-        df = v.company.news()
+        from utils.vn_api import company_news  # type: ignore
+        df = company_news(sym, source="VCI").news()
         if df is None or len(df) == 0: return []
         # Pick most recent N
         items = []
@@ -927,7 +943,7 @@ def sec_row(s):
 sec_table_rows = "".join(sec_row(s) for s in sector_stats)
 
 
-# ---------- secv4: agent + snapshot-driven picks renderers ----------
+# ---------- agent + snapshot-driven picks renderers ----------
 
 def _esc(s):
     """Minimal HTML-escape for snippets rendered from agent / news text."""
@@ -1061,7 +1077,7 @@ SNAP_SELLS_GRID  = render_snapshot_picks("SELL")
 
 # ========== SECV5: UNIFIED PICKS (Daily Insight ∪ Ranker BUY) ==========
 # The Daily Insight page renders snapshot.top_buys / top_sells without a
-# ranker gate. SecV4 rendered only ranker-gated picks. SecV5 unifies both
+# ranker gate. SecV4 rendered only ranker-gated picks. This generator unifies both
 # sources into a single list, de-duped by symbol, each entry tagged with
 # its origin (BOTH / DAILY_INSIGHT / RANKER). This is the single source of
 # truth surfaced in the email, the HTML, and the PDF.
@@ -1203,11 +1219,11 @@ def build_unified_list(kind):
 
 UNIFIED_BUYS  = build_unified_list("BUY")
 UNIFIED_SELLS = build_unified_list("SELL")
-print(f"[secv5] unified: {len(UNIFIED_BUYS)} BUY / {len(UNIFIED_SELLS)} SELL")
+print(f"[report] unified: {len(UNIFIED_BUYS)} BUY / {len(UNIFIED_SELLS)} SELL")
 _src_counts = {"BOTH": 0, "DAILY_INSIGHT": 0, "RANKER": 0}
 for p in UNIFIED_BUYS:
     _src_counts[p["source"]] = _src_counts.get(p["source"], 0) + 1
-print(f"[secv5] unified BUY sources: {_src_counts}")
+print(f"[report] unified BUY sources: {_src_counts}")
 
 
 # -------- HTML rendering for the unified picks grid -----------------------
@@ -1433,7 +1449,7 @@ EXPERT_MEMO = build_expert_memo()
 
 def build_plain_text_body():
     lines = []
-    lines.append(f"📊 SecV5 — Unified Picks Briefing — {REPORT_DATE}")
+    lines.append(f"📊 Unified Picks Briefing — {REPORT_DATE}")
     lines.append("=" * 60)
     lines.append("")
     lines.append(f"Regime: {REGIME_LABEL} (confidence {regime.get('confidence', 0):.2f})")
@@ -1500,7 +1516,7 @@ def build_plain_text_body():
     lines.append(f"Dashboard (Daily Insight): {DASHBOARD_URL}")
     lines.append("File đính kèm: PDF + HTML đầy đủ (charts, stealth watch, risk notes).")
     lines.append("")
-    lines.append("— Trading System · SecV5 (replaces SecV4 2026-04-23) · Not investment advice.")
+    lines.append("— VN Sector Money-Flow · Not investment advice.")
     return "\n".join(lines)
 
 
@@ -1539,19 +1555,19 @@ replacements = {
     "{{SECTOR_TABLE_ROWS}}": sec_table_rows,
     "{{RISK_NOTES}}": RISK_NOTES,
     "{{GAME_PLAN}}": GAME_PLAN,
-    # secv4 legacy additions
+    # agent + snapshot sections
     "{{AGENT_SECTION}}": AGENT_SECTION,
     "{{SNAP_BUYS_GRID}}": SNAP_BUYS_GRID,
     "{{SNAP_SELLS_GRID}}": SNAP_SELLS_GRID,
     "{{AGENT_GIST}}": _esc(_agent_report.gist) if (_agent_report and _agent_report.is_valid) else "",
-    # secv5 additions (unified picks + expert trader memo)
+    # unified picks + expert trader memo
     "{{EXPERT_MEMO}}": EXPERT_MEMO,
     "{{UNIFIED_PICKS_GRID}}": UNIFIED_PICKS_GRID,
 }
 html = template_text
 for k, v in replacements.items(): html = html.replace(k, v)
 OUT_HTML.write_text(html, encoding="utf-8")
-print(f"[secv5] HTML: {OUT_HTML} ({len(html):,} bytes)")
+print(f"[report] HTML: {OUT_HTML} ({len(html):,} bytes)")
 
 # ========== PDF: Chrome headless then weasyprint fallback ==========
 def _render_pdf():
@@ -1567,21 +1583,21 @@ def _render_pdf():
         HTML(string=html, base_url=str(ROOT)).write_pdf(str(OUT_PDF))
         return "weasyprint"
     except Exception as e:
-        print(f"[secv5] PDF render failed: {e}")
+        print(f"[report] PDF render failed: {e}")
         return None
 
 renderer = _render_pdf()
 if renderer and OUT_PDF.exists():
-    print(f"[secv5] PDF via {renderer}: {OUT_PDF} ({OUT_PDF.stat().st_size:,} bytes)")
+    print(f"[report] PDF via {renderer}: {OUT_PDF} ({OUT_PDF.stat().st_size:,} bytes)")
 else:
-    print("[secv5] PDF not generated; email will attach HTML instead.")
+    print("[report] PDF not generated; email will attach HTML instead.")
 
 # ========== EMAIL ==========
 if SEND_EMAIL:
     FROM = os.environ.get("REPORT_EMAIL_FROM")
     PW   = os.environ.get("REPORT_EMAIL_PASSWORD")
     # REPORT_EMAIL_TO supports a comma-separated list (multiple recipients in TO header).
-    # SecV5 default recipients — 3 people per Tom's directive 2026-04-23.
+    # Default recipients — 3 people per Tom's directive 2026-04-23.
     # REPORT_EMAIL_TO env var still overrides for local testing.
     TO_RAW = os.environ.get(
         "REPORT_EMAIL_TO",
@@ -1590,12 +1606,12 @@ if SEND_EMAIL:
     TO_LIST = [e.strip() for e in TO_RAW.split(",") if e.strip()]
     TO_HEADER = ", ".join(TO_LIST)
     if not (FROM and PW):
-        print("[secv5] SMTP creds missing — skipping email (set REPORT_EMAIL_FROM/PASSWORD in .env).")
+        print("[report] SMTP creds missing — skipping email (set REPORT_EMAIL_FROM/PASSWORD in .env).")
     else:
         msg = MIMEMultipart("mixed")
         msg["From"] = FROM; msg["To"] = TO_HEADER
         _stale_prefix = "[STALE] " if not _universe_snap.is_valid else ""
-        msg["Subject"] = f"{_stale_prefix}[SecV5] Unified Picks Briefing — {REPORT_DATE}"
+        msg["Subject"] = f"{_stale_prefix}Unified Picks Briefing — {REPORT_DATE}"
         # Plain-text body = unified picks + reasons + links (built above).
         msg.attach(MIMEText(PLAIN_TEXT_BODY, "plain", "utf-8"))
         # Attach HTML for inline view too
@@ -1615,9 +1631,9 @@ if SEND_EMAIL:
         msg.attach(part)
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
             s.login(FROM, PW); s.sendmail(FROM, TO_LIST, msg.as_string())
-        print(f"[secv5] [SENT] {TO_HEADER}")
+        print(f"[report] [SENT] {TO_HEADER}")
 else:
-    print("[secv5] --no-email flag set — skipping send.")
+    print("[report] --no-email flag set — skipping send.")
 
 con.close()
-print("[secv5] done")
+print("[report] done")
