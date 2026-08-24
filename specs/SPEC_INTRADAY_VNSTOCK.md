@@ -1,5 +1,21 @@
 # SYSTEM PROMPT: Intraday vnstock Upgrade (1m/5m/15m/1H)
 
+> **Status: NOT IMPLEMENTED** (marked 2026-08-24). Nothing in this file has
+> shipped. It is kept because it specifies a problem that is still open, not
+> because it describes the system.
+>
+> The gap it addresses is `CLAUDE.md` §20.3 **P2-3**: the job called
+> `sector_intraday_flow` fetches `interval="1D"` and re-downloads 120 days
+> every 15 minutes — roughly 3,750 calls/day against an 18/min gate. So the
+> "intraday" pipeline is an EOD pipeline wearing an intraday name, and §4/§8 of
+> `CLAUDE.md` describe a cadence the code does not run. P2-3's decision is
+> binary: build this, or rename the job and fix the doctrine. Neither has been
+> done.
+>
+> Related and also unbuilt: §18.5/23's `morning_share` (institutions trade the
+> 09:15–10:30 window; retail dominates the afternoon) needs real 15m bars,
+> which is this spec.
+
 ## OBJECTIVE
 Upgrade the Trading system from daily-only data to multi-timeframe intraday data (1m, 5m, 15m, 1H, 1D) using vnstock API. Minimize token usage — work incrementally, one module at a time.
 

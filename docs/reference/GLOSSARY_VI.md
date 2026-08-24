@@ -14,7 +14,18 @@
 
 Các regime khác thường thấy: `TREND_UP`, `TREND_DOWN`, `RISK_OFF`.
 
-**Confidence 0.50**: Độ tin cậy của model về regime hiện tại (0–1). 0.5 nghĩa là model chỉ "hơi nghiêng" về CHOP, chưa chắc chắn.
+**Confidence 0.50**: **Không phải** "model chắc bao nhiêu %". Từ 2026-08-24
+(`CLAUDE.md` §25.2) nó là **xác suất nhãn regime này còn giữ trong 5 phiên tới**
+— posterior đã lọc, nhân qua ma trận chuyển trạng thái. Khoảng thực tế 0.46–0.91.
+
+Trước đó nó là posterior trạng thái và **luôn hiển thị 1.00**, không phải vì
+model tự tin mà vì model **sập**: feature chưa chuẩn hoá nên 3/4 state chạm trần
+covariance, chỉ còn một state sống → posterior 1.0 theo định nghĩa.
+
+Đọc thế nào: dưới **0.55** thì con số này **nói quá** — đo trên 900 phiên, mức
+"0.49" thực tế chỉ giữ được ~0.37. Đầu cao thì khớp (0.895 dự báo / 0.906 thực).
+Câu chữ trên báo cáo do `analysis.regime.confidence_phrase()` sinh, ví dụ
+"~65% khả năng giữ 5 phiên tới".
 
 ---
 
@@ -28,7 +39,21 @@ Mục tiêu của trader: **phát hiện dấu vết âm thầm này TRƯỚC kh
 
 ### 5 Điều kiện Stealth (§16.1 — "Tom's doctrine")
 
-Một ngành chỉ được gọi là **STEALTH ACCUMULATION** khi đồng thời thỏa **cả 5**:
+> **Sửa 2026-08-23: không còn là "cả 5".** Yêu cầu đủ 5 điều kiện cùng lúc là
+> **bất khả thi** trên dữ liệu thật — đo trên 13.470 dòng (2023-03 → 2026-08),
+> cả 5 chỉ đúng ở **0,3%** số dòng, và chuỗi liên tiếp dài nhất trong 3,5 năm là
+> **2 phiên** trong khi luật đòi 3. Vì vậy `accumulation_age` bằng 0 ở **mọi**
+> dòng từng ghi. Nay là **điểm**: đạt **≥ 4 trong 5** điều kiện trong ≥ 3 phiên.
+> Điều kiện không đánh giá được thì bị loại khỏi **cả tử số lẫn mẫu số**, nên
+> thiếu dữ liệu không âm thầm nâng chuẩn. Kết quả: 23 event / 11 ngành.
+>
+> **Nhưng gate này chưa có edge đo được** (§16.14). So với việc **không lọc gì**,
+> 20 lần nó bắn ra lại breakout *ít* hơn, *muộn* hơn và vào giá *tệ* hơn một
+> ngày-ngành lấy ngẫu nhiên. Coi `ACCUMULATE` hiện tại là **watchlist, không
+> phải lệnh mua**, và đừng dùng sizing §16.9 (1.5× vol target, stop 2.5×ATR)
+> trên nó.
+
+Năm điều kiện:
 
 | Điều kiện | Ý nghĩa |
 |---|---|
@@ -48,13 +73,21 @@ Là **điểm tổng hợp số học (composite score)** đo mức độ ngành
 
 ### 3 trạng thái Stealth trong bảng watchlist
 
-- **PRE-STEALTH (watch)**: Đạt một phần điều kiện, đang theo dõi (Hóa chất, Thủy sản, Điện, Dệt may)
+- **PRE-STEALTH (watch)**: Đạt một phần điều kiện, đang theo dõi
 - **early signal**: Mới chớm tín hiệu, chưa đủ chín
-- **STEALTH (đầy đủ)**: Đủ 5/5 điều kiện → vào lệnh "mua gốc"
+- **STEALTH**: Đạt ngưỡng `min_conditions` (mặc định ≥4/5) đủ số phiên
 
-> Báo cáo hôm nay nói rõ: **"chưa sector nào đạt đủ 5 điều kiện §16.1"** → giữ tiền mặt, không mua mới.
+**Accum. Age**: Số phiên liên tiếp ngành giữ được ngưỡng. Càng cao → tín hiệu
+càng "trưởng thành". Trước 2026-08-23 cột này bằng 0 ở mọi dòng — xem cảnh báo
+ở trên.
 
-**Accum. Age**: Số ngày liên tiếp ngành duy trì trạng thái stealth. Càng cao → tín hiệu càng "trưởng thành" (mature).
+**3 preset trên trang Stealth Watch** (§24.2) — tên là **Chặt / Vừa / Rộng**:
+
+| preset | ngưỡng | là gì |
+|---|---|---|
+| Chặt | 5/5, N=5 | doctrine gốc, **giữ lại để bạn thấy nó trả về 0** |
+| Vừa | ≥4/5, N=3 | đang chạy — 23 event / 11 ngành trong 3,5 năm |
+| Rộng | ≥3/5, N=1 | dò "ngành nào gần đạt", **không phải danh sách mua** |
 
 ---
 
@@ -131,11 +164,11 @@ Là **điểm tổng hợp số học (composite score)** đo mức độ ngành
 
 | Thuật ngữ | Giải thích |
 |---|---|
-| **T+2.5 Settlement** | Cổ phiếu mua hôm nay chỉ bán được sau 2.5 ngày → mọi backtest Sharpe phải trừ lag này |
+| **T+2 Settlement** | Mua hôm nay, bán được sau **2 phiên giao dịch** (không phải 2 ngày dương lịch — nghỉ lễ và cuối tuần không tính). Backtest khoá vốn đúng 2 phiên (§18.2/7); sổ lệnh trả `sellable_on` tính qua `utils/clock.next_trading_day` nên đã trừ lịch nghỉ HOSE. §18 gọi là "T+2.5" vì tiền về trong ngày T+2 chứ không phải đầu phiên |
 | **Fees** | 15bps phí + 10bps thuế = ~40bps round-trip (1bp = 0.01%) |
 | **Price band** | Biên độ giá: HOSE ±7%, HNX ±10%, UPCoM ±15%. Chạm trần → skip fill |
 | **ATR stops** | Stop loss = giá - 1.8×ATR20 (BUY) hoặc 2.5×ATR20 (ACCUMULATE) |
-| **Kill-switch** | Nếu sector_risk_sentinel kích hoạt 3 lần/phiên → dừng toàn bộ lệnh ACCUMULATE mới |
+| **Kill-switch** | **Thủ công, không tự động.** Bật từ `/positions?tab=risk` (hoặc biến môi trường `TRADING_HALT`) → `SectorSignalService.publish()` phát toàn HOLD. Hai nguồn OR với nhau: env là khoá cứng trình duyệt không gỡ được (§22.10) |
 | **ETF rebalance mask** | Ngày HOSE/ETF review → bỏ qua tín hiệu foreign_net để tránh nhiễu |
 | **Vol-target sizing** | Size lệnh tỷ lệ nghịch với volatility (mã biến động cao → mua ít hơn) |
 | **Max concurrent** | Tối đa 4 ACCUMULATE + 3 BUY + short qua VN30F1M only |
@@ -157,7 +190,9 @@ Là **điểm tổng hợp số học (composite score)** đo mức độ ngành
 
 ## 10. Khác
 
-- **OpenClaw bot**: Bot tự động crawl tin từ vnstock, CafeF, VietstockFinance
+- **TraderAgent ("Minh")**: Agent LLM in-process (`services/trader_agent.py`)
+  viết phần bình luận trên Daily Insight và trong email. Thay bot OpenClaw
+  ("Trung") đã ngừng 2026-04-18.
 - **vnstock**: API/thư viện dữ liệu chứng khoán Việt Nam phổ biến
 - **Catalyst**: Yếu tố xúc tác (tin tức, sự kiện) có thể đẩy giá
 
@@ -165,9 +200,14 @@ Là **điểm tổng hợp số học (composite score)** đo mức độ ngành
 
 ## Tóm gọn triết lý báo cáo
 
-> Trong **CHOP regime** → **không gồng lệnh, chỉ "mua gốc" khi STEALTH chín đủ 5/5 điều kiện**.
+> Trong **CHOP regime** → không gồng lệnh, giảm size, chỉ vào khi tín hiệu chất
+> lượng cao.
 >
-> Hôm nay 16/04/2026 chưa có ngành nào đạt → **giữ tiền mặt là thượng sách**, chỉ có 1 lệnh BUY nhỏ NVL với stop sát.
+> Với stealth, tính đến 2026-08-24: gate §16.1 **chưa thắng được base rate**
+> (§16.14), nên `ACCUMULATE` đọc như danh sách theo dõi. Điều kiện duy nhất từng
+> thắng base rate trong thử nghiệm là `foreign_streak ≥ 3` — khối ngoại mua ròng
+> **liên tiếp**, không phải "60% số phiên" — và nó cũng chưa ship vì hiệu ứng
+> nằm hết ở giai đoạn trước 2026 (§16.11).
 
 ---
 

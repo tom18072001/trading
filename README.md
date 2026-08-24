@@ -4,7 +4,9 @@ Hệ thống tracking **dòng tiền theo 15 ngành VN** và dự đoán **xoay 
 
 ## Yêu cầu
 
-- Python 3.11, Node 20 (cho frontend)
+- Python ≥ 3.11 (máy production chạy 3.13 qua `uv`), Node 20+ (cho frontend)
+- [`uv`](https://docs.astral.sh/uv/) — **không phải tuỳ chọn**: `scripts/jobs/_env.bat`
+  gọi `uv run python`, nên môi trường job production do `uv.lock` quyết định
 - Windows cho Task Scheduler (pipeline production chạy trên máy Tom)
 - Tài khoản Gmail có App Password (cho email report)
 
@@ -12,10 +14,7 @@ Hệ thống tracking **dòng tiền theo 15 ngành VN** và dự đoán **xoay 
 
 ```bash
 git clone … Trading && cd Trading
-python -m venv .venv
-.venv\Scripts\activate         # Windows
-# source .venv/bin/activate    # Linux/macOS
-pip install -r requirements.txt
+uv sync                        # tạo .venv theo uv.lock — dùng đúng bản production đang chạy
 
 # Frontend
 cd frontend && npm install && cd ..
@@ -23,6 +22,30 @@ cd frontend && npm install && cd ..
 # Cấu hình
 cp .env.example .env           # điền DATA_SOURCE, REPORT_EMAIL_*
 ```
+
+> `requirements.txt` **đã xoá** (2026-08-24). Nó thiếu `hmmlearn` và
+> `matplotlib`, nên máy nào cài theo nó thì regime classifier và report render
+> đều chết — mà lỗi chỉ hiện lúc job 17:00 chạy. Một repo hai manifest lệch
+> nhau thì manifest không được dùng là manifest sai. `pyproject.toml` +
+> `uv.lock` là nguồn duy nhất.
+
+## Chạy trên máy mới — bước dễ quên
+
+`uv sync` xong app **chạy được nhưng rỗng**: `vnstock_market.db` (~22 MB) bị
+`.gitignore`, và `models/saved/*.pkl` cũng vậy. Không có hai thứ đó thì UI mở
+lên trắng và `--publish` chết.
+
+```bash
+uv run python main.py --init                 # tạo schema + seed 15 ngành
+uv run python main.py --backfill --years 5   # ~30-60 phút, gọi vnstock thật
+uv run python main.py --train                # ranker đầu tiên
+uv run python main.py --publish              # kiểm tra: phải in bảng 15 ngành
+```
+
+Nhanh hơn: copy `vnstock_market.db` từ máy cũ sang, rồi chỉ chạy `--train`.
+
+Không có `.env` thì `.env.example` đủ để chạy phần đọc dữ liệu; chỉ email và
+trader agent cần khoá thật.
 
 Biến môi trường quan trọng (xem `.env`):
 - `DATABASE_PATH` — mặc định `vnstock_market.db` ở root

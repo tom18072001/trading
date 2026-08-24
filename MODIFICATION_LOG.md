@@ -14,6 +14,219 @@
 
 ---
 
+## 2026-08-24 (13) — the repo installs the way production installs
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `.github/workflows/ci.yml` — **new**
+  - `.devcontainer/devcontainer.json` — **new**
+  - `requirements.txt` — **deleted**
+  - `pyproject.toml` — `[dependency-groups] dev`, header rewritten
+  - `uv.lock` — regenerated
+  - `README.md` — install via `uv sync`, new "Chạy trên máy mới" section
+  - `frontend/thamkhao/README.md` — status banner
+- Reason: Tom — *"sửa github, local phải được clone từ github"*. Plan Phase 4.2.
+- Summary:
+  - **Two manifests that disagreed.** `requirements.txt` was a strict subset of
+    `pyproject.toml`, missing `hmmlearn` and `matplotlib` — so a machine that
+    followed the README could neither classify regime nor render the report, and
+    found out only when the 17:00 job ran. Production installs through
+    `uv run` (`scripts/jobs/_env.bat`), i.e. from `pyproject.toml` + `uv.lock`.
+    Deleted the one nothing installs from; `pyproject.toml`'s header had already
+    called it a "human-readable mirror", which is what every stale manifest is
+    called right before it drifts.
+  - **pytest and ruff were undeclared.** They were installed on Tom's machine
+    and nowhere in the project, so `uv sync` on a fresh clone produced a repo
+    whose tests could not run. Now a `dev` dependency group. CI is what forced
+    the question — this is exactly the class of defect it exists to catch.
+  - **CI runs `uv`, not `pip`**, for the same reason: a workflow that installs
+    differently from production tests a build nobody ships. `--frozen` so a
+    stale lockfile fails instead of silently resolving. Ruff is
+    `continue-on-error` — 65 known findings (§20.2) should not block every PR on
+    a backlog nobody agreed to clear this week.
+  - Frontend job runs `npm run build` as well as `npm test`: 13 tests would not
+    notice a type error in a page they never render, `tsc -b` would.
+  - **README's missing step.** `uv sync` leaves you with an app that runs and
+    shows nothing — `vnstock_market.db` (22 MB) and `models/saved/*.pkl` are
+    gitignored. The new section gives the four commands, and the devcontainer
+    comment says the same thing so nobody meets it as a surprise.
+  - `frontend/thamkhao/` (6 mockups, 224 KB) **kept**, with a banner: the design
+    shipped (§22.8/§22.9), the files record intent that tokens cannot, and where
+    they disagree with the app the app is right.
+- Verification: all four CI steps run locally first — `uv sync --frozen` clean,
+  `uv run pytest` **326 passed on 3.13** (the production interpreter; the suite
+  had only ever been run on the bare 3.11, the same split §19 records biting
+  once with hmmlearn), `uv run ruff check .` 65, `npm test` 13/13,
+  `npm run build` green.
+- Follow-ups: flip `continue-on-error` off once ruff reaches 0. CI does not
+  deploy — nothing to deploy to yet.
+
+---
+
+## 2026-08-24 (12) — `import generate_report` stops sending mail; and the test suite was overwriting the live model
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `services/report/{__init__,format,charts,data}.py` — **new package**
+  - `generate_report.py` — body wrapped in `main(argv=None)`; 113 module-level
+    statements → 4
+  - `tests/test_report_import.py` — **new**, 8 tests
+  - `tests/test_model_artifacts.py` — **new**, 3 tests
+  - `tests/conftest.py` — `_models_go_to_a_tmpdir` (autouse, session)
+  - `tests/test_module_boundaries.py` — `report` package assigned a layer
+- Reason: plan §2.3 / §20.3 P3-2. `generate_report.py` was 1,640 module-level
+  lines that **sent the daily email as a side effect of `import`**, which is why
+  it had zero tests and why `/api/state/report/send` has to shell out to a
+  subprocess (§24.3).
+- Summary:
+  - **Extract only what is pure.** `services/report/` takes the chart builders,
+    the six SQL reads and the two formatters. The reads previously closed over a
+    module-level `cur`; they take the cursor as an argument now, which is the
+    whole reason they are testable. `charts.py` sets `matplotlib.use("Agg")` at
+    import — mandatory, the job runs headless under Task Scheduler.
+  - **The HTML weave did not move, on purpose.** ~700 lines of `X = build_x()`
+    where each builder reads several others' globals; pulling it apart is a
+    rewrite, not an extraction, and the harm it caused is already gone once
+    `import` is inert. `ponytail:` in `services/report/__init__.py` names the
+    trigger — a second output format.
+  - Pre-flight for the wrap: **no `global`/`nonlocal` anywhere in the file**, so
+    module-scope → function-scope re-indent is behaviour-preserving.
+  - **Three dead locals fell out.** `sector_prior_dv` (never even written to),
+    `sector_stats_map`, `flow_in_secs` — each assigned once, never read. They
+    were invisible while they were module globals; ruff analyses function scope
+    properly. Deleted. Ruff **67 → 65**.
+  - **The defect this uncovered has nothing to do with the refactor.**
+    `main.py --publish` died with *"number of features in data (19) is not the
+    same as it was in training data (3)"*. `models/saved/rotation_ranker.json`
+    read `{"feature_names": ["f1","f2","all_null"]}` — a synthetic panel from
+    `test_review_20260822.py`. `RotationRanker.fit()` writes to
+    `config.SAVED_MODELS_DIR` unconditionally, six tests call it, and
+    `models/saved/` is gitignored. So **running pytest broke the 17:00 job**,
+    git could not show it, and nothing failed until the job ran. Fixed by an
+    autouse session fixture repointing the module global; autouse because an
+    opt-in fixture only protects the tests that remember to ask.
+- Verification:
+  - `python generate_report.py 2026-08-22 --no-email` → exit 0, HTML 694,033 B
+    (baseline 694,163), PDF 1,258,454 B (baseline 1,257,578). Not byte-identical
+    because each run re-invokes the trader agent and the memo prose differs;
+    −130 B on 694 kB is memo-sized. Same 5 BUY / 5 SELL, same ranker align.
+  - Module-level statements measured against the committed file: **113 → 4**, so
+    `test_the_work_lives_inside_main_not_at_module_level`'s `< 40` threshold
+    discriminates rather than passing by luck.
+  - Negative control on the model fixture: de-autoused it and 2 of the 3 guards
+    fail. That run also re-broke the live model, which is the bug reproducing
+    itself — retrained (`--train`, id=80, 19 features) and re-ran the suite to
+    confirm it now survives.
+  - `main.py --publish` green after the retrain. **326 passed**, ruff **65**.
+- Follow-ups:
+  - `fit(save_to=...)` so production names the path explicitly instead of the
+    tests dodging it (`ponytail:` in the fixture).
+  - `main.py` has **no `--dry-run`** — the plan's Phase 2 verification assumed
+    one. Ran the real `--publish` instead; it upserts, so it is idempotent.
+  - `/api/state/report/send` still shells out. It no longer has to, but changing
+    it is a behaviour change and belongs in its own commit.
+
+---
+
+## 2026-08-24 (11) — the service layer's arrows stop being folklore
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `tests/test_module_boundaries.py` — **new**, 42 tests (AST, no imports)
+  - `services/insight_refresh.py` — `set_payload_builder()`; stage 4 no longer
+    imports the router
+  - `api/routers/insight.py` — registers `insight_daily` as that builder
+  - `scripts/seed_data.py` — **deleted**
+  - `ARCHITECTURE.md` §4.1 — the layer table as a contract
+- Reason: Tom — *"làm microservice để khi cập nhật các tính năng và thay đổi
+  không bị biến dạng các phần còn lại"* / *"sau agent AI sửa cũng dễ dàng hơn"*.
+  Architecture chosen earlier: **hard boundaries, one process** — not process
+  splitting.
+- Summary:
+  - **Measured before moving anything, and the measurement changed the plan.**
+    The service graph is *already* a shallow DAG: 17 modules, max depth 2, and
+    every edge already legal under the proposed layer table. So the planned
+    reshuffle into `ingest/ features/ decide/ report/ book/ agent/` would have
+    moved 17 files, rewritten every import across `api/`, `main.py`,
+    `generate_report.py` and `scripts/`, and risked the exact failure
+    `MODIFICATION_LOG.md` 2026-07-19 already records (a path move leaving Task
+    Scheduler shortcuts pointing at a dead directory) — to arrive at the graph
+    that exists today. What the layer lacked was not structure; it was a way to
+    **stay** structured. The table is declared and enforced; no file moved.
+  - **The check found the one real violation, and it was a cycle.**
+    `insight_refresh` did `from api.routers.insight import insight_daily`
+    *inside* a function while `api.routers.insight` imports `insight_refresh` at
+    module level. Both ends lazy, so Python never complained — and the service's
+    own docstring said "this file deliberately has no dependency on FastAPI".
+    Inverted via `set_payload_builder()`: the router pushes down at import time.
+    Stage 4 with no builder returns the refresh block alone rather than raising,
+    which is what a unit test or a script importing the runner sees.
+  - **And a dead import ruff structurally cannot see.** `scripts/seed_data.py`
+    imported `services.data_service`, deleted 2026-04-22 (Phase 16) — broken for
+    four months because nothing runs it. `F401` flags imports that are *unused*;
+    nothing flagged one that is *unresolvable*. The script seeded the retired
+    170-symbol `stocks` table, so it was deleted, not repaired.
+  - **Function-local imports are counted deliberately.** Both defects were
+    invisible at module level. Deferring an import hides a dependency from the
+    reader without removing it.
+  - Two tests guard the table itself: a new module with no layer fails, and a
+    layer entry naming a module that no longer exists fails. Without the second,
+    the table slowly becomes a description of a repo that used to be.
+  - `test_the_book_layer_stays_dependency_free` is split out from the generic
+    check because its reason is operational: `trading_state` holds the
+    kill-switch and the scheduler reads it off disk with no HTTP client (§22.10).
+- Verification: `python -m pytest tests/ -q` → **307 passed** (265 + 42). Ruff
+  **68 → 67** (the deleted script carried one). Cycle fix confirmed live:
+  `ir._payload_builder is r.insight_daily` → True.
+- Follow-ups: `generate_report.py` (1,640 module-level lines, mails on import —
+  §20.3 P3-2) is **not** split. It is the one remaining structural offender and
+  wants its own commit; the boundary test does not cover it because it is not
+  under `services/`.
+
+---
+
+## 2026-08-24 (10) — a repo that can say what plan it is on
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `docs/PATCHES.md` — **new.** Two tables: "Đang làm" / "Đã xong"
+  - `CLAUDE.md` §22.7 — the four-document division of labour; the audit result
+  - `docs/reference/GLOSSARY_VI.md` — stealth gate, confidence, kill-switch,
+    T+2, stealth presets
+  - `specs/daily-insight.md`, `specs/trader_agent.md`,
+    `specs/SPEC_INTRADAY_VNSTOCK.md`, `specs/REDESIGN_PHASE15.md` — status
+    headers naming what shipped differently or never shipped
+- Reason: Tom — *"các tài liệu retired xóa đi, các plan mới nhớ ghi lại, plan
+  nào xong thì ghi lại vào 1 file update patch chung, plan cũ xóa đi, plan hiện
+  tại đang là gì"*.
+- Summary:
+  - **The gap was the unfinished plan, not the finished one.** A completed plan
+    already left two records (a log entry, a `CLAUDE.md` section). A plan *in
+    progress* left none — so "what is being worked on" lived only in
+    `~/.claude/plans/*.md`, outside the repo, where no reviewer or future agent
+    would look. `docs/PATCHES.md` is one line per plan with the commit hashes,
+    and it points at `MODIFICATION_LOG.md` for the reasoning rather than
+    repeating it. A patch index that grows into a second changelog is a second
+    changelog, and two changelogs disagree.
+  - **Most "retired" docs were not retired.** 19 of 23 stale-looking matches are
+    dated changelog lines recording that OpenClaw *was* replaced and the
+    170-symbol system *was* retired. §21 protects dated records; deleting them
+    erases the evidence the change happened. Left alone deliberately.
+  - **`GLOSSARY_VI.md` was the file actually carrying wrong instructions**, and
+    it is the one written for the reader who is not reading the code. Four
+    corrections, each of which would have changed how someone acted: the stealth
+    gate was taught as 5/5 (measured unreachable — 0.3% of rows, longest run 2
+    sessions against a 3-session rule); `confidence` was defined as model
+    certainty (it is P(label survives 5 sessions), and the 1.00 it used to print
+    was a *collapsed* HMM, not a confident one); the kill-switch was described
+    as firing automatically after three sentinel hits (it is manual, from
+    `/positions?tab=risk` or `TRADING_HALT`); and T+2.5 was stated in calendar
+    days when settlement counts trading days. Added the §16.14 warning that
+    `ACCUMULATE` has not beaten the base rate and reads as a watchlist.
+- Verification: `python -m pytest tests/ -q` → **265 passed**. Stale-doc grep
+  returns only §21-protected dated records plus four sentences whose subject
+  *is* the retirement. `git status --short | grep -Ei "\.env|\.db|\.bak"` empty.
+- Follow-ups: Phase 2 (module boundaries) and Phase 4.2 (CI + devcontainer) are
+  the two rows left in `PATCHES.md` → "Đang làm".
+
+---
+
 ## 2026-08-24 (9) — the book can follow a trade, not just record one
 - Author: Claude Code on behalf of Tom
 - Files:

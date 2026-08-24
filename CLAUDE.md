@@ -521,6 +521,30 @@ As of 2026-04-23:
 | Frontend (vitest) | 13 | `cd frontend && npm test` |
 | **Total** | **265** | — |
 
+> 2026-08-24 (12): +11, and one of them found a live production defect.
+> `tests/test_report_import.py` (+8) pins that `import generate_report` sends no
+> mail, opens no DB and writes no file — the property the §20.3 P3-2 split
+> exists for. Three of those are behavioural and one is structural
+> (`test_the_work_lives_inside_main_not_at_module_level`), because the first
+> three can pass by luck and the last cannot: measured against the pre-split
+> file it is 113 module-level statements versus 4, so the `< 40` threshold
+> discriminates. `smtplib.SMTP` is replaced with a raising bomb rather than a
+> recording mock — a mock lets the import finish and reports afterwards, which
+> is exactly the behaviour that shipped for months.
+>
+> `tests/test_model_artifacts.py` (+3) guards something worse and unrelated to
+> the refactor: **running pytest overwrote the production ranker.**
+> `RotationRanker.fit()` writes `rotation_ranker.pkl` to
+> `config.SAVED_MODELS_DIR` unconditionally, six tests call it with 2-3
+> synthetic features, and `models/saved/` is gitignored — so the 17:00 publish
+> job died with *"number of features in data (19) is not the same as it was in
+> training data (3)"*, `git status` was clean, and no test failed. A silent
+> suite that breaks production is the worst shape a defect can take.
+> `tests/conftest.py::_models_go_to_a_tmpdir` is autouse for the reason an
+> opt-in fixture would fail: the tests that forget to ask are the dangerous
+> ones. Verified by negative control — de-autousing it fails 2 of the 3 guards
+> (and re-broke the live model, which is the bug reproducing itself).
+>
 > 2026-08-24 (9): +13. `tests/test_position_track.py` — stop/target on the book
 > and the price path since entry (§22.10). The two that carry the feature are
 > `test_stop_and_target_survive_the_round_trip` (the defect itself: both numbers
@@ -702,6 +726,14 @@ daily table.
 > several later features landed, and nobody re-measured it — which is the
 > failure mode a hardcoded count in a document always has. Treat 66 as the
 > number a change must not grow, and re-measure rather than trusting this line.
+>
+> **65 as of 2026-08-24 (12)** — three `F841` dead locals in
+> `generate_report.py` (`sector_prior_dv`, never even written to;
+> `sector_stats_map`; `flow_in_secs`) fell out of the `main()` wrap. They were
+> not new: ruff analyses function scope properly and module scope barely, so
+> moving the body inside a function is what made them visible. That is worth
+> knowing before the next count moves — a refactor can raise this number without
+> breaking anything, and lower it without fixing anything.
 
 **Defaults chosen to preserve live behaviour:** `API_REQUIRE_KEY=0`,
 `ALLOW_SHORT_SIGNALS=1`, `TRADING_HALT=0`. Nothing in the daily email changes
@@ -718,7 +750,7 @@ DO change behaviour — they implement §16.9, which was never enforced.
 | ~~P1-4~~ | **CLOSED 2026-08-24** (§25.3). The published label is the filtered posterior of the last bar — `predict_proba(X[:t+1])[-1]`, which has no future to smooth over — so it no longer changes with hindsight. Found while chasing a different symptom: confidence pinned at 1.0. The back-painting was the *third* defect in that chain; the first was a collapsed fit that made the posterior 1.0 by construction. |
 | P2-2 | Two rate-limit buckets in one process: `utils/vnstock_gate` and `picks_universe_service._kbs_throttle`. `/insight/refresh` takes no `job_lock` at all, so a UI refresh overlapping the intraday job runs at 2× the KBS ceiling. |
 | P2-3 | The "intraday" job fetches `interval="1D"` and re-downloads 120 days every 15 minutes (~3,750 calls/day against an 18/min gate). Either fetch real 15m bars or admit it is an EOD pipeline and fix §4/§8. |
-| P3-2 | `generate_report.py` is 1,629 module-level lines with zero tests, and it is the one output read every day. Extract the decision layer. |
+| ~~P3-2~~ | **CLOSED 2026-08-24.** `import generate_report` is inert: 113 module-level statements → 4, everything else inside `main(argv=None)`. `services/report/` took the genuinely pure pieces — chart builders, the six SQL reads (which now take the cursor as an argument instead of closing over a module global, the actual reason nothing could be tested) and the two formatters. **The HTML weave deliberately did not move**: ~700 lines of `X = build_x()` where each builder reads several others' globals is a rewrite, not an extraction, and the harm was `import` sending mail — which is fixed. `ponytail:` in `services/report/__init__.py` names the trigger for finishing it (a second output format). `/api/state/report/send` still shells out; it no longer has to, and that is its own commit. |
 
 ### 20.4 Doctrine drift to close
 
@@ -844,6 +876,7 @@ had been running a file deleted on 2026-06-18. What survives:
 
 ```
 README.md · CLAUDE.md · ARCHITECTURE.md · MODIFICATION_LOG.md · AGENTS.md   ← root, entry points
+docs/PATCHES.md         ← plan lifecycle: what is running, what is done (2026-08-24)
 specs/                  ← one topic per file, referenced from 5 .py docstrings; untouched
 docs/reference/         ← ALGORITHM.md, GLOSSARY_VI.md
 docs/reviews/           ← the dated reviews (§21: dated records keep their names)
@@ -852,6 +885,45 @@ docs/reviews/           ← the dated reviews (§21: dated records keep their na
 **No Python file moved.** `scripts/jobs/*.bat` invoke `main.py` from the repo
 root under Task Scheduler, and `MODIFICATION_LOG.md` 2026-07-19 already records
 one path move that left shortcuts pointing at a dead directory.
+
+> **2026-08-24 (10) — the four documents now divide cleanly.** Tom asked for
+> "một file update patch chung" and for the repo to say **what the current plan
+> is**, which nothing did: a finished plan left a `MODIFICATION_LOG.md` entry
+> and a `CLAUDE.md` section, and an *unfinished* one left nothing at all. So
+> "what are we doing now" was only answerable by reading a plan file outside the
+> repo, in `~/.claude/plans/`, which no reviewer or agent would ever find.
+>
+> | file | answers | shape |
+> |---|---|---|
+> | `CLAUDE.md` | what the system **must** be | doctrine, amended in place |
+> | `ARCHITECTURE.md` | what the contracts **are** | layers + dated changelog |
+> | `MODIFICATION_LOG.md` | what **changed**, and why | append-only, one entry per change |
+> | `docs/PATCHES.md` | which plan is **running**, which is **done** | two tables, one line per plan |
+>
+> `PATCHES.md` deliberately holds **one line per plan** and points elsewhere for
+> the reasoning. A patch index that grows into a second changelog is a second
+> changelog, and two changelogs disagree — which is the exact failure §21 logged
+> for versioned filenames and §20.4 logged for plan-vs-code drift.
+>
+> **The audit that came with it found the retired docs were mostly not retired.**
+> Of 23 stale-looking matches, 19 are dated changelog entries in
+> `ARCHITECTURE.md` / `CLAUDE.md` / `ALGORITHM.md` recording that OpenClaw *was*
+> retired and the 170-symbol system *was* replaced — §21 protects those, and
+> rewriting them would erase the record that the change happened. The genuinely
+> wrong content was concentrated elsewhere and is fixed: two specs describing
+> things that never shipped or shipped differently (`SPEC_INTRADAY_VNSTOCK.md`,
+> `REDESIGN_PHASE15.md`), one spec carrying Ollama defaults dropped a day
+> earlier (`trader_agent.md`), one spec naming an endpoint that was never built
+> (`daily-insight.md` §4.4 `send-gmail`), and `GLOSSARY_VI.md`.
+>
+> **`GLOSSARY_VI.md` was the dangerous one**, because it is the file written for
+> the person who is not reading the code. It still taught the 5/5 stealth gate
+> (unreachable — §16.1), still defined `confidence` as "how sure the model is"
+> (it is P(label survives 5 sessions) — §25.2), described the kill-switch as
+> firing *automatically* after three sentinel hits (it is manual — §22.10), and
+> said T+2.5 in calendar days (it is 2 *sessions*, holiday-aware). Every one of
+> those would have led a reader to act. Corrected, each pointing at the section
+> that governs it.
 
 
 ### 22.8 One design system, one action vocabulary — 2026-08-23

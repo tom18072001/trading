@@ -3,12 +3,19 @@ name = "trading"
 version = "1.0.0"
 description = "VN Stock Market Analysis & Prediction System"
 requires-python = ">=3.11"
-# Single source of truth for deps (uv.lock is generated from this).
-# requirements.txt is kept only as a human-readable mirror; `uv sync`
-# is the install command. Includes packages the code imports that the
-# old requirements.txt missed (claude-agent-sdk, matplotlib, yfinance,
-# hmmlearn, requests). weasyprint is intentionally absent: its import
-# is guarded and PDF gen falls back to headless Chrome on Windows.
+# The only manifest. `uv sync` is the install command, and
+# scripts/jobs/_env.bat runs every scheduled job through `uv run`, so this
+# file plus uv.lock is literally what production executes.
+#
+# requirements.txt was deleted 2026-08-24. It was described here as a
+# "human-readable mirror" but had drifted into a strict subset missing
+# hmmlearn and matplotlib — i.e. the README's install command produced a
+# machine that could not classify regime or render the report, and said so
+# only when the 17:00 job ran. A second manifest nothing installs from is a
+# second manifest nobody updates.
+#
+# weasyprint is intentionally absent: its import is guarded and PDF gen falls
+# back to headless Chrome on Windows.
 dependencies = [
     "vnstock>=3.2.0",
     "pandas>=2.0.0",
@@ -32,6 +39,20 @@ dependencies = [
     "matplotlib>=3.8.0",
     "yfinance>=0.2.40",
     "claude-agent-sdk>=0.1.0",
+]
+
+# The suite and the linter were undeclared until 2026-08-24 — they happened to
+# be installed on Tom's machine, so `uv sync` on a fresh clone produced a repo
+# whose tests could not run. CI is what forced the question.
+#
+# `httpx` is here rather than above because only FastAPI's TestClient needs it;
+# nothing in the shipped code imports it.
+[dependency-groups]
+dev = [
+    "pytest>=9.0",
+    "anyio>=4.9",
+    "httpx>=0.28",
+    "ruff>=0.16",
 ]
 
 [tool.setuptools]

@@ -1,5 +1,13 @@
 # Phase 15 Redesign — Trader-First View Architecture
 
+> Status: **SHIPPED, then superseded by §22.9** (annotated 2026-08-24).
+> The 7→5 merge below happened, but not to the shape described here: the pages
+> were built, four of them shipped with no `<Route>` for months, all nine were
+> wired on 2026-08-23 and then merged back to **five nav items** the same day.
+> `CLAUDE.md` §22.9 is the current nav; the table below is the 2026-04-09
+> diagnosis of the legacy views, kept because it is the reasoning, not the
+> outcome (§21: a dated record says when it was written).
+>
 > Status: **APPROVED intent** (2026-04-09, confirmed by Tom).
 > This document is the **umbrella spec** for Phase 15. Individual features live in
 > sibling files: `flow-monitor.md`, `rotation-map.md`, `stealth-watch.md`,
