@@ -265,6 +265,37 @@ Anything worse than this means the thesis is still lagging — go back to featur
 > — `flow_price_divergence`, `foreign_streak`, `flow_leadtime_proxy` — are
 > computed and stored but are in **no** condition. That is the next experiment.
 
+> **The experiment was run — 2026-08-24 — and the suspect above was wrong.**
+> `scripts/stealth_leadtime_experiment.py` scores candidate condition sets over
+> the full panel. Every variant containing `flow_price_divergence` made lead
+> time **worse** (median 3 → 2-3 days, ≥10d share 20% → 4-17%) while inflating
+> the event count 20 → 38-77. It fires more often, not earlier.
+>
+> What moved was the condition §16.11 did not name: replacing **cond2's 20d hit
+> *rate*** with **`foreign_streak ≥ 3`** — consecutive sessions of net foreign
+> buying.
+>
+> | | events | breakout | ≥10d lead | med lead | med RC |
+> |---|---|---|---|---|---|
+> | shipped §16.1 | 20 | 75% | 20% | 3 | 0.940 |
+> | cond2 → `foreign_streak ≥ 3` | 16 | 88% | **50%** | **8** | 0.924 |
+>
+> This is §18.5/21's argument arriving from the other direction: a hit rate is
+> satisfiable by one block trade plus 19 quiet days, and one block trade is not
+> accumulation. **Persistence is the part that leads.**
+>
+> **Not shipped, on purpose.** n=16 over 3.5 years, and the year split puts the
+> entire effect before 2026: 2023-25 run 50-67% at ≥10d with median lead 10-14,
+> while 2026's three events are 0% / median 3 — the same collapse the shipped
+> gate shows in 2026 (0% at ≥10d on six events). Tightening to `streak ≥ 8`
+> gives 100% at ≥10d on n=2, which is not a result. Root capture stays ~0.92
+> against the 0.85 target either way, so no variant here earns the "gốc" claim.
+>
+> **The real question this surfaced:** both gates degrade sharply in 2026. A
+> defect common to two different condition sets is more likely data or regime
+> than condition choice — that is the next thing to look at, ahead of any
+> further condition tuning.
+
 ## 18. Trader-Lens System Review — APPROVED 2026-04-09
 
 > Reviewer stance: "if I had to trade this book tomorrow with my own money, what would break or bleed me?" Findings are grouped by severity. Items marked **[BLOCKER]** must ship before live paper-trade; **[EDGE]** items are alpha improvements; **[HYGIENE]** items are robustness.

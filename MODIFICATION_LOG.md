@@ -14,6 +14,43 @@
 
 ---
 
+## 2026-08-24 — §16.11's next experiment ran; the named suspect was wrong
+- Author: Claude Code on behalf of Tom
+- Files:
+  - new `scripts/stealth_leadtime_experiment.py` (bench only — writes nothing)
+  - `CLAUDE.md` §16.11 (result recorded)
+- Reason: §16.11 closed by naming an experiment — whether §16.2's leading
+  features (`flow_price_divergence`, `foreign_streak`, `flow_leadtime_proxy`),
+  computed and stored but used in no condition, can buy the lead time the gate
+  lacks (median 3 days against a ≥10-day target). §18.8 requires evidence, so
+  it is measured over the full 13,470-row panel rather than argued.
+- Summary:
+  - Six condition-set variants, scored on §16.11's three criteria at ≥4/5, N=3.
+  - **The doctrine's suspect was wrong.** Every variant containing
+    `flow_price_divergence` made lead time *worse* (median 3 → 2-3 days, ≥10d
+    share 20% → 4-17%) while inflating event count 20 → 38-77. It fires more
+    often, not earlier.
+  - **What moved:** replacing cond2's 20d hit *rate* with `foreign_streak ≥ 3`.
+    Events 20 → 16, breakout 75% → 88%, ≥10d share 20% → **50%**, median lead
+    3 → **8**, root capture 0.940 → 0.924. This is §18.5/21's argument arriving
+    from the other direction — a hit rate is satisfiable by one block trade plus
+    19 quiet days; persistence is the part that leads.
+  - **Not shipped.** n=16 over 3.5 years, and the year split puts the whole
+    effect pre-2026: 2023-25 run 50-67% at ≥10d (median lead 10-14), 2026's
+    three events 0% / median 3. `analysis/stealth.py` is unchanged; the shipped
+    gate stays as committed in `c96efc7`.
+- Follow-ups:
+  - **The 2026 collapse is the real finding.** Both gates degrade in 2026, so a
+    defect common to two condition sets is more likely data or regime than
+    condition choice. Look there before tuning further conditions.
+  - Re-run once 2026 has more events; if `foreign_streak` holds up out of
+    sample, the change is a one-line edit to `_conditions` in
+    `analysis/stealth.py` plus a §16.1 amendment.
+  - Root capture stays ~0.92 against §16.11's ≤0.85 on every variant — no
+    condition set here earns the "gốc" claim.
+
+---
+
 ## 2026-08-23 (late, 6) — §16.1 stealth gate: AND → score; §20.3 P0-5 and P1-1 closed
 - Author: Claude Code on behalf of Tom
 - Files:
