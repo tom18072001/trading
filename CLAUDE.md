@@ -312,6 +312,11 @@ Anything worse than this means the thesis is still lagging — go back to featur
 > fewer early signals, shorter lead. Of the six variants only
 > `foreign_streak` beats the base rate on any axis.
 >
+> **Every number in this section and §16.11 uses the old 1.15% bar — see
+> §16.15.** Re-measured under a horizon-consistent one, the base rate is 43%
+> breakout / 74% at ≥10d, and the shipped gate still fails to beat it. The
+> ranking of the variants does not change; the absolute levels do.
+>
 > **§16.11's three criteria cannot detect this**, which is the doctrine defect.
 > They are absolute thresholds ("≥60% at ≥10d", "RC ≤ 0.85", "FP ≤ 30%"), so a
 > gate posting a respectable-sounding 75% breakout reads as *underperforming a
@@ -399,6 +404,55 @@ Anything worse than this means the thesis is still lagging — go back to featur
 > the base rate says the signal is not yet a signal. Treat live `ACCUMULATE`
 > output as a watchlist, not an instruction, until a variant beats NO GATE
 > within-year.
+
+### 16.15 The breakout bar was 1.15%, not 8% — 2026-08-24 (5)
+
+§25.10 suspected §16.4's `2 × atr_pct` of **scaling with the tape it measures**:
+ATR rises in choppy markets, so the bar would rise exactly when the moves
+clearing it shrink. `scripts/stealth_leadtime_experiment.py --breakout` now
+scores four definitions so that could be tested rather than assumed.
+
+**The suspicion was wrong.** Sector ATR barely moves across years — median
+0.58 / 0.53 / 0.57 / 0.67% in 2023-26 — so `atr_now` (today's reading) and
+`atr_baseline` (the sector's trailing 2y median, no feedback) produce
+near-identical tables. The feedback is real in direction and negligible in size.
+
+**The actual defect is units.** `atr_pct` is a **daily** range, median 0.57%, so
+the bar is ~**1.15%**. Asking whether a **40-session forward maximum** ever
+exceeded 1.15% is not a breakout test — it is a liveness test, and **83% of all
+sector-days pass it**. Every §16.11 and §16.12 breakout number recorded so far
+was measured against that.
+
+`atr_scaled` = `2 × median ATR × √40` ≈ **7.2%** keeps §16.4's "two normal
+moves" intent while being horizon-consistent (a random walk's expected maximum
+grows with √n), stays sector-relative, and takes the trailing median so it has
+no feedback.
+
+| | events | breakout | ≥10d lead | med lead | med RC |
+|---|---|---|---|---|---|
+| NO GATE, old bar | 13,033 | 83% | 23% | 4 | 0.944 |
+| **NO GATE, `atr_scaled`** | 13,048 | **43%** | **74%** | **17** | 0.944 |
+| shipped §16.1, `atr_scaled` | 20 | 40% | 75% | 21 | 0.940 |
+| cond2 → `foreign_streak ≥ 3` | 16 | **62%** | **90%** | **34** | 0.924 |
+
+**§16.11's lead-time criterion does not survive this.** Under a real bar the
+unconditional base rate already clears "≥10d on ≥60%" — 74%, median lead 17
+sessions — which is not the system detecting anything, it is what "40 sessions
+to move 7%" mechanically implies. The criterion was satisfiable by noise and was
+never the right test. **Only the margin over NO GATE means anything**, which is
+what §16.12 already said and this makes unavoidable.
+
+What survives the change, unchanged: the shipped gate is still no better than no
+gate (40% vs 43%), `foreign_streak` is still the only variant clearly ahead on
+every axis, and **every variant still collapses in 2026** under every definition
+(shipped 0% at ≥10d on n=6; `foreign_streak` 33% breakout / 0% at ≥10d on n=3).
+So §25.9's "it is the tape" conclusion stands and §16.14's "no measurable edge"
+verdict stands. The bar being wrong was a second, independent defect.
+
+**Not shipped into the scanner.** `analysis/stealth.py` does not use a breakout
+definition — this is a measurement bench only, and no live signal changes.
+Root capture is untouched at ~0.94 either way, so no variant has earned the
+"gốc" claim.
 
 ## 18. Trader-Lens System Review — APPROVED 2026-04-09
 
@@ -1295,8 +1349,8 @@ in choppy tape, which it does. But it means:
 
 ### 25.10 Open
 - **A vol-conditioned `CONF_HORIZON`** (§25.9). Measured as needed, not shipped.
-- **§16.13's 2×ATR breakout definition scales with the tape it measures.** The
-  §16.11/16.12 numbers are all computed through it, so this is upstream of every
-  stealth result recorded so far.
+- ~~**§16.13's 2×ATR breakout definition scales with the tape it measures.**~~
+  **Measured 2026-08-24 (5) — the suspicion was wrong and the real defect is
+  worse. See §16.15.**
 - `CONF_HORIZON` should be re-measured when the panel grows; 900 bars split
   three ways is 300 per cell, and §25.9 now wants it split by vol as well.

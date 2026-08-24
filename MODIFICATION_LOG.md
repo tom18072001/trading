@@ -14,6 +14,51 @@
 
 ---
 
+## 2026-08-24 (8) — the breakout bar was 1.15%, not 8%
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `scripts/stealth_leadtime_experiment.py` — `BREAKOUT_DEFS` (four pluggable
+    definitions), `_score_event(..., bar=)` now stamps `year`, `run()` loops
+    definitions and prints a per-year table against the NO GATE base rate,
+    `--breakout` CLI flag
+  - `CLAUDE.md` — new §16.15; §16.12 and §25.10 amended
+- Reason: §25.10 listed §16.4's `2 × atr_pct` breakout test as suspect because
+  ATR sits in the threshold, so the bar should rise in exactly the choppy tape
+  where the moves clearing it shrink. Every §16.11/§16.12 number is computed
+  through that test, so it is upstream of every stealth result on record.
+- Summary:
+  - **The stated suspicion is falsified.** Sector ATR barely moves year to year
+    (median 0.58/0.53/0.57/0.67% in 2023-26), so `atr_baseline` — the trailing
+    2y median, which has no feedback at all — reproduces `atr_now` almost
+    exactly. The scaling is real in direction, negligible in size.
+  - **The real defect is units, and it is worse.** `atr_pct` is a *daily*
+    range, so the shipped bar is ~1.15%, applied to a 40-session forward
+    *maximum*. 83% of all sector-days clear it. §16.4 has been running a
+    liveness test wearing the name of a breakout test.
+  - `atr_scaled` = `2 × median ATR × √40` ≈ 7.2% fixes the units — a random
+    walk's expected maximum grows with √n — while keeping §16.4's "two normal
+    moves" intent, the sector-relative property, and no ATR feedback.
+  - Under it: base rate 43% breakout / 74% at ≥10d / median lead 17; shipped
+    §16.1 gate 40% / 75% / 21; `foreign_streak` swap 62% / 90% / 34.
+  - **§16.11's lead-time criterion is retired by this.** "≥10d lead on ≥60% of
+    signals" is cleared by the *unconditional* base rate (74%), so it was
+    satisfiable by noise. Only the margin over NO GATE counts — §16.12's rule,
+    now unavoidable.
+  - Conclusions that survive unchanged: the shipped gate is no better than no
+    gate, `foreign_streak` is the only variant ahead, every variant still
+    collapses in 2026 under every definition, root capture stays ~0.94. §16.14
+    and §25.9 stand.
+  - **No live signal changes.** `analysis/stealth.py` uses no breakout
+    definition; this is a measurement bench only.
+- Verification: 252 backend tests pass; ruff unchanged at 66; the four
+  definitions run end to end.
+- Follow-ups: `foreign_streak` still needs a within-year win in 2026 before it
+  can be shipped into §16.1 (n=3 there). §16.11's remaining two criteria
+  (root capture, false-positive rate) have not been re-derived against a base
+  rate — the lead-time one was the only one measured this pass.
+
+---
+
 ## 2026-08-24 (7) — the late-third degradation is volatility, not a defect
 - Author: Claude Code on behalf of Tom
 - Files:

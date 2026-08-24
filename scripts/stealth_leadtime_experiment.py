@@ -72,6 +72,48 @@
 # and require it to beat the NO GATE row *within* each year, not overall.
 # Until then §16.1 keeps cond2.
 #
+# ---------------------------------------------------------------------------
+# 2026-08-24 (5) — THE BREAKOUT BAR WAS 1.15%, NOT 8%.
+#
+# CLAUDE.md §25.10 suspected the 2xATR definition of scaling with the tape it
+# measures: ATR rises in choppy markets, so the bar rises exactly when the moves
+# clearing it shrink. `--breakout` now scores four definitions so that could be
+# tested instead of assumed.
+#
+# The suspicion was WRONG, and testing it found something worse. Sector ATR
+# barely moves across years (median 0.58/0.53/0.57/0.67% in 2023-26), so
+# `atr_now` and `atr_baseline` produce near-identical tables — the feedback
+# §25.10 worried about is real in direction and negligible in size.
+#
+# The actual defect is UNITS. `atr_pct` is a DAILY range, median 0.57%, so
+# §16.4's `2 x atr_pct` is a bar of ~1.15%. Asking whether a 40-session forward
+# MAXIMUM ever exceeded 1.15% is not a breakout test — it is a liveness test,
+# and 83% of all sector-days "pass" it. Every §16.11/§16.12 breakout number ever
+# recorded was measured against that.
+#
+# `atr_scaled` fixes it: 2 * median ATR * sqrt(40) ~ 7.2%, keeping §16.4's "two
+# normal moves" intent while making it horizon-consistent (a random walk's
+# expected max grows with sqrt(n)). What changes:
+#
+#   definition     base breakout   base >=10d   shipped gate   foreign_streak
+#   atr_now (old)        83%           23%       75% / 20%       88% / 50%
+#   atr_scaled           43%           74%       40% / 75%       62% / 90%
+#
+# The lead-time picture inverts. Under the old bar the median lead was 4 days
+# and §16.11's ">=10d on >=60%" looked far out of reach; under a real bar the
+# base rate ALREADY hits 74% at >=10d with median lead 17. That is not the
+# system detecting anything — it is what "40 sessions to move 7%" mechanically
+# implies. §16.11's lead-time criterion is therefore satisfiable by noise and
+# was never the right test; only the margin over NO GATE means anything.
+#
+# What survives the change: the shipped gate is still no better than no gate
+# (40% vs 43% breakout), and `foreign_streak` is still the only variant clearly
+# ahead (62% vs 43%, 90% vs 74% at >=10d, median lead 34 vs 17). The 2026
+# collapse also survives — every variant falls in 2026 under every definition —
+# so §25.9's "it is the tape" conclusion is unaffected. The bar being wrong was
+# a second, independent defect.
+# ---------------------------------------------------------------------------
+#
 # Usage:  python -m scripts.stealth_leadtime_experiment
 #         python -m scripts.stealth_leadtime_experiment --min-conditions 3
 #
@@ -97,10 +139,77 @@ from analysis.stealth import (
 from database.connection import SessionLocal
 from database.models import SectorFlowDaily
 
-# A "breakout" is §16.4's definition: forward max return over the window clears
-# 2x the sector's own ATR%. Using a fixed % here would flatter quiet sectors.
+# ---------------------------------------------------------------------------
+# What counts as a "breakout" — and why there is now more than one answer.
+#
+# §16.4 defines it as: forward max return clears 2x the sector's own ATR% at the
+# signal date. The intent is right — a fixed % bar would flatter quiet sectors —
+# but CLAUDE.md §25.10 caught the implementation scaling with the thing it
+# measures. ATR is in the *threshold*, and ATR rises in exactly the choppy tape
+# where the forward moves that must clear it shrink. So the bar gets harder
+# precisely when the market gets harder, and every §16.11/§16.12 number is
+# computed through it.
+#
+# The definitions below are alternatives, not replacements. `--breakout` picks
+# one; every table says which it used. The point is to find out whether §16's
+# 2026 collapse survives a definition that does not move with the tape — an
+# answer that has to be measured, because all three are defensible a priori.
 BREAKOUT_WINDOW = 40
 BREAKOUT_ATR_MULT = 2.0
+
+#: A fixed +8%. Immune to the ATR feedback by construction, and unfair to quiet
+#: sectors by exactly the amount §16.4 was worried about. Roughly the median
+#: 2xATR bar over the panel, so it is comparable in level.
+BREAKOUT_FIXED_PCT = 0.08
+
+
+def _bar_atr_now(atr: np.ndarray, i: int) -> float:
+    """§16.4 as shipped: 2x ATR measured at the signal date."""
+    return BREAKOUT_ATR_MULT * (atr[i] if np.isfinite(atr[i]) else 0.02)
+
+
+def _bar_atr_baseline(atr: np.ndarray, i: int) -> float:
+    """2x ATR, but the sector's own 2-year median rather than today's reading.
+
+    Keeps §16.4's intent — the bar is sector-relative, so a quiet sector is not
+    held to an energy sector's standard — while removing the feedback: a vol
+    spike in the week the signal fires no longer raises the bar it must clear.
+    """
+    hist = atr[max(0, i - 500): i + 1]
+    hist = hist[np.isfinite(hist) & (hist > 0)]
+    med = float(np.median(hist)) if len(hist) >= 20 else float("nan")
+    return BREAKOUT_ATR_MULT * (med if np.isfinite(med) else 0.02)
+
+
+def _bar_fixed(atr: np.ndarray, i: int) -> float:  # noqa: ARG001 - uniform signature
+    """A flat +8%, identical for every sector and every date."""
+    return BREAKOUT_FIXED_PCT
+
+
+def _bar_atr_scaled(atr: np.ndarray, i: int) -> float:
+    """2x ATR scaled to the horizon: 2 * ATR * sqrt(window).
+
+    This is the one that fixes the units. `atr_pct` is a DAILY range, so §16.4's
+    `2 x atr_pct` asks whether a 40-session forward maximum ever exceeded twice
+    a single day's normal move — a bar of ~1.15% on this panel, which 83% of
+    sector-days clear. That is not a breakout test, it is a liveness test.
+
+    Under a random walk the expected maximum over n days grows with sqrt(n), so
+    2*ATR*sqrt(40) ~ 7.2% keeps §16.4's "two normal moves" intent while making
+    it horizon-consistent. It stays sector-relative (a quiet sector gets a lower
+    bar, which is what §16.4 wanted) and uses the trailing median rather than
+    today's ATR, so it does not inherit the feedback of `atr_now`.
+    """
+    return _bar_atr_baseline(atr, i) * float(np.sqrt(BREAKOUT_WINDOW))
+
+
+BREAKOUT_DEFS = {
+    "atr_now": _bar_atr_now,
+    "atr_baseline": _bar_atr_baseline,
+    "atr_scaled": _bar_atr_scaled,
+    "fixed": _bar_fixed,
+}
+# ---------------------------------------------------------------------------
 
 
 def _load_panel() -> pd.DataFrame:
@@ -172,7 +281,7 @@ def _events(g: pd.DataFrame, keys: list[str], need: int, sessions: int) -> list[
     return [i for i in range(len(arr)) if arr[i] and (i == 0 or not arr[i - 1])]
 
 
-def _score_event(g: pd.DataFrame, i: int) -> dict | None:
+def _score_event(g: pd.DataFrame, i: int, bar=_bar_atr_now) -> dict | None:
     """§16.11 metrics for one event: did it break out, how early, how cheap."""
     close = g["close_idx"].to_numpy(dtype=float)
     atr = g["atr_pct"].to_numpy(dtype=float)
@@ -183,7 +292,7 @@ def _score_event(g: pd.DataFrame, i: int) -> dict | None:
     fwd = close[i + 1: i + 1 + BREAKOUT_WINDOW]
     if len(fwd) < 10:
         return None                      # not enough forward data to judge
-    thresh = entry * (1 + BREAKOUT_ATR_MULT * (atr[i] if np.isfinite(atr[i]) else 0.02))
+    thresh = entry * (1 + bar(atr, i))
     hit = np.nonzero(fwd >= thresh)[0]
 
     peak = float(np.nanmax(fwd))
@@ -194,6 +303,9 @@ def _score_event(g: pd.DataFrame, i: int) -> dict | None:
         # §16.6 root capture: entry price as a fraction of the eventual peak.
         # 1.0 = you bought the top.
         "root_capture": entry / peak if peak > 0 else None,
+        # Kept for the per-year split: the collapse §25.10 is chasing is a
+        # question about *when*, so every scored row has to carry its date.
+        "year": int(str(g["date"].iloc[i])[:4]),
     }
 
 
@@ -210,7 +322,7 @@ def _summarise(scored: list[dict]) -> tuple[float, float, float, float]:
     )
 
 
-def _baseline(feat: pd.DataFrame) -> list[dict]:
+def _baseline(feat: pd.DataFrame, bar=_bar_atr_now) -> list[dict]:
     """Score EVERY row, i.e. what you get with no gate at all.
 
     This row is the one the experiment was missing on its first run. §16.11's
@@ -223,13 +335,26 @@ def _baseline(feat: pd.DataFrame) -> list[dict]:
     for _, g in feat.groupby("sector_code", sort=False):
         g = g.reset_index(drop=True)
         for i in range(len(g)):
-            s = _score_event(g, i)
+            s = _score_event(g, i, bar)
             if s:
                 out.append(s)
     return out
 
 
-def run(need: int, sessions: int) -> None:
+def _scored_for(feat: pd.DataFrame, keys: list[str], need: int, sessions: int,
+                bar) -> tuple[list[dict], set[str]]:
+    scored, sectors = [], set()
+    for code, g in feat.groupby("sector_code", sort=False):
+        g = g.reset_index(drop=True)
+        for i in _events(g, keys, need, sessions):
+            s = _score_event(g, i, bar)
+            if s:
+                scored.append(s)
+                sectors.add(code)
+    return scored, sectors
+
+
+def run(need: int, sessions: int, defs: list[str]) -> None:
     panel = _load_panel()
     if panel.empty:
         print("no rows in sector_flow_daily")
@@ -237,40 +362,62 @@ def run(need: int, sessions: int) -> None:
     feat = compute_leading_features(panel)
     print(f"panel: {len(feat)} rows | {feat.sector_code.nunique()} sectors | "
           f"{feat.date.min()} -> {feat.date.max()}")
-    print(f"gate: >={need} conditions held >={sessions} sessions "
-          f"(breakout = +{BREAKOUT_ATR_MULT}xATR within {BREAKOUT_WINDOW}d)\n")
+    print(f"gate: >={need} conditions held >={sessions} sessions\n")
 
-    hdr = (f"{'variant':<28}{'events':>7}{'sectors':>8}{'breakout':>10}"
-           f"{'lead>=10d':>11}{'med lead':>10}{'med RC':>9}")
-    print(hdr)
-    print("-" * len(hdr))
+    blurb = {
+        "atr_now": "2xATR at the signal date -- the shipped one, scales with the tape",
+        "atr_baseline": "2x the sector's 2y median ATR -- sector-relative, tape-stable",
+        "atr_scaled": "2x median ATR x sqrt(40) -- the units fixed; ~7% typical bar",
+        "fixed": f"+{BREAKOUT_FIXED_PCT:.0%} flat -- immune to ATR, unfair to quiet sectors",
+    }
+    for dname in defs:
+        bar = BREAKOUT_DEFS[dname]
+        print(f"=== breakout = {dname} within {BREAKOUT_WINDOW}d ({blurb[dname]}) ===")
+        hdr = (f"{'variant':<28}{'events':>7}{'sectors':>8}{'breakout':>10}"
+               f"{'lead>=10d':>11}{'med lead':>10}{'med RC':>9}")
+        print(hdr)
+        print("-" * len(hdr))
 
-    base = _baseline(feat)
-    b_bo, b_early, b_lead, b_rc = _summarise(base)
-    print(f"{'NO GATE (base rate)':<28}{len(base):>7}{feat.sector_code.nunique():>8}"
-          f"{b_bo:>9.0%}{b_early:>10.0%}{b_lead:>10.0f}{b_rc:>9.3f}")
-    print("-" * len(hdr))
+        base = _baseline(feat, bar)
+        b_bo, b_early, b_lead, b_rc = _summarise(base)
+        print(f"{'NO GATE (base rate)':<28}{len(base):>7}{feat.sector_code.nunique():>8}"
+              f"{b_bo:>9.0%}{b_early:>10.0%}{b_lead:>10.0f}{b_rc:>9.3f}")
+        print("-" * len(hdr))
 
-    for name, keys in VARIANTS.items():
-        scored = []
-        sectors = set()
-        for code, g in feat.groupby("sector_code", sort=False):
-            g = g.reset_index(drop=True)
-            for i in _events(g, keys, need, sessions):
-                s = _score_event(g, i)
-                if s:
-                    scored.append(s)
-                    sectors.add(code)
-        if not scored:
-            print(f"{name:<28}{0:>7}{0:>8}{'-':>10}{'-':>11}{'-':>10}{'-':>9}")
-            continue
+        for name, keys in VARIANTS.items():
+            scored, sectors = _scored_for(feat, keys, need, sessions, bar)
+            if not scored:
+                print(f"{name:<28}{0:>7}{0:>8}{'-':>10}{'-':>11}{'-':>10}{'-':>9}")
+                continue
+            bo, early, lead, rc = _summarise(scored)
+            print(f"{name:<28}{len(scored):>7}{len(sectors):>8}"
+                  f"{bo:>9.0%}{early:>10.0%}{lead:>10.0f}{rc:>9.3f}")
 
-        bo, early, lead, rc = _summarise(scored)
-        print(f"{name:<28}{len(scored):>7}{len(sectors):>8}"
-              f"{bo:>9.0%}{early:>10.0%}{lead:>10.0f}{rc:>9.3f}")
+        # Per-year, and per-year for the BASE RATE too. §16.12: pooling let one
+        # strong stretch mask a recent one that matches random, so a variant is
+        # only ahead if it beats the base rate *within* the year.
+        years = sorted({s["year"] for s in base})
+        print("\n  by year, breakout% (>=10d lead%), n events")
+        print(f"  {'variant':<26}" + "".join(f"{y:>16}" for y in years))
+        by_year_base = {y: _summarise([s for s in base if s["year"] == y]) for y in years}
+        print(f"  {'NO GATE':<26}" + "".join(
+            f"{f'{by_year_base[y][0]:.0%} ({by_year_base[y][1]:.0%})':>16}" for y in years))
+        for name, keys in VARIANTS.items():
+            scored, _ = _scored_for(feat, keys, need, sessions, bar)
+            cells = []
+            for y in years:
+                sub = [s for s in scored if s["year"] == y]
+                if not sub:
+                    cells.append(f"{'-':>16}")
+                    continue
+                bo, early, _, _ = _summarise(sub)
+                # n is load-bearing: 100% on n=2 is not a result (see the header).
+                cells.append(f"{f'{bo:.0%} ({early:.0%}) n{len(sub)}':>16}")
+            print(f"  {name:<26}" + "".join(cells))
+        print()
 
     # ASCII only: Windows console is cp1252 and a section sign raises here.
-    print("\n16.11 targets: breakout lead >=10d on >=60% of signals | median RC <= 0.85 "
+    print("16.11 targets: breakout lead >=10d on >=60% of signals | median RC <= 0.85 "
           "| false positives <= 30%")
     print("Read every row against NO GATE, not against the targets alone: a variant "
           "that does not beat the base rate is not a signal.")
@@ -280,5 +427,8 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--min-conditions", type=int, default=STEALTH_MIN_CONDITIONS)
     ap.add_argument("--min-sessions", type=int, default=STEALTH_MIN_SESSIONS)
+    ap.add_argument("--breakout", nargs="+", default=list(BREAKOUT_DEFS),
+                    choices=list(BREAKOUT_DEFS),
+                    help="which breakout definition(s) to score. Default: all three.")
     a = ap.parse_args()
-    run(a.min_conditions, a.min_sessions)
+    run(a.min_conditions, a.min_sessions, a.breakout)
