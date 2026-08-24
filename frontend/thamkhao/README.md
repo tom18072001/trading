@@ -1,5 +1,11 @@
 # Handoff: VN Sector Flow — Front-end Redesign
 
+> **Status: SHIPPED, kept as reference (2026-08-24).** Bản redesign này đã
+> triển khai xong; 5 view dưới đây nay nằm trong 5 nav của `CLAUDE.md` §22.9,
+> và màu/khoảng cách đã thành token `@theme` (§22.8). Giữ lại vì nó ghi *ý đồ
+> thiết kế* — thứ token không nói được — **nhưng nó không còn là spec**: chỗ
+> nào file này khác app đang chạy thì app đúng.
+
 ## Overview
 Complete visual redesign of the **VN Sector Flow** trading terminal — a tool that tracks
 sector money-flow rotation on HOSE and produces a daily MUA/BÁN (buy/sell) decision list

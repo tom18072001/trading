@@ -14,6 +14,54 @@
 
 ---
 
+## 2026-08-24 (13) — the repo installs the way production installs
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `.github/workflows/ci.yml` — **new**
+  - `.devcontainer/devcontainer.json` — **new**
+  - `requirements.txt` — **deleted**
+  - `pyproject.toml` — `[dependency-groups] dev`, header rewritten
+  - `uv.lock` — regenerated
+  - `README.md` — install via `uv sync`, new "Chạy trên máy mới" section
+  - `frontend/thamkhao/README.md` — status banner
+- Reason: Tom — *"sửa github, local phải được clone từ github"*. Plan Phase 4.2.
+- Summary:
+  - **Two manifests that disagreed.** `requirements.txt` was a strict subset of
+    `pyproject.toml`, missing `hmmlearn` and `matplotlib` — so a machine that
+    followed the README could neither classify regime nor render the report, and
+    found out only when the 17:00 job ran. Production installs through
+    `uv run` (`scripts/jobs/_env.bat`), i.e. from `pyproject.toml` + `uv.lock`.
+    Deleted the one nothing installs from; `pyproject.toml`'s header had already
+    called it a "human-readable mirror", which is what every stale manifest is
+    called right before it drifts.
+  - **pytest and ruff were undeclared.** They were installed on Tom's machine
+    and nowhere in the project, so `uv sync` on a fresh clone produced a repo
+    whose tests could not run. Now a `dev` dependency group. CI is what forced
+    the question — this is exactly the class of defect it exists to catch.
+  - **CI runs `uv`, not `pip`**, for the same reason: a workflow that installs
+    differently from production tests a build nobody ships. `--frozen` so a
+    stale lockfile fails instead of silently resolving. Ruff is
+    `continue-on-error` — 65 known findings (§20.2) should not block every PR on
+    a backlog nobody agreed to clear this week.
+  - Frontend job runs `npm run build` as well as `npm test`: 13 tests would not
+    notice a type error in a page they never render, `tsc -b` would.
+  - **README's missing step.** `uv sync` leaves you with an app that runs and
+    shows nothing — `vnstock_market.db` (22 MB) and `models/saved/*.pkl` are
+    gitignored. The new section gives the four commands, and the devcontainer
+    comment says the same thing so nobody meets it as a surprise.
+  - `frontend/thamkhao/` (6 mockups, 224 KB) **kept**, with a banner: the design
+    shipped (§22.8/§22.9), the files record intent that tokens cannot, and where
+    they disagree with the app the app is right.
+- Verification: all four CI steps run locally first — `uv sync --frozen` clean,
+  `uv run pytest` **326 passed on 3.13** (the production interpreter; the suite
+  had only ever been run on the bare 3.11, the same split §19 records biting
+  once with hmmlearn), `uv run ruff check .` 65, `npm test` 13/13,
+  `npm run build` green.
+- Follow-ups: flip `continue-on-error` off once ruff reaches 0. CI does not
+  deploy — nothing to deploy to yet.
+
+---
+
 ## 2026-08-24 (12) — `import generate_report` stops sending mail; and the test suite was overwriting the live model
 - Author: Claude Code on behalf of Tom
 - Files:
