@@ -114,9 +114,17 @@ class RotationModelService:
 
         # The hourly macro_anchors vnindex column is sparse/unreliable here, so
         # the classifier kept falling back to a flat "chop/0.5". Anchor it on a
-        # real daily VNINDEX series from vnstock (returns-based, scale-agnostic)
-        # so the regime label is meaningful. (2026-06-19)
-        vn_daily = fetch_vnindex_daily(days=180)
+        # real daily VNINDEX series from vnstock so the label is meaningful.
+        # (2026-06-19)
+        #
+        # 2026-08-24: 180 -> 1500 days. 180 calendar days is ~111 usable bars
+        # for a 40-parameter HMM, and the fit collapsed on it: three of four
+        # states blew up to the hmmlearn ceiling covariance, every bar landed
+        # in the survivor, and the posterior was 1.0 by construction. That is
+        # where `confidence = 0.9999998` came from. 1500 days is ~1050 bars
+        # back to 2022 and spans more than one regime, which a regime model
+        # needs to see. analysis/regime.py now also refuses a collapsed fit.
+        vn_daily = fetch_vnindex_daily(days=1500)
         if not vn_daily.empty and vn_daily.notna().sum() > 5:
             macro_df = vn_daily.to_frame()  # date-indexed 'vnindex' column
 
