@@ -50,6 +50,12 @@ _DEFAULT: dict[str, Any] = {
     "watchlist": [],        # [symbol]
 }
 
+#: Fields a position row gained after rows had already been written. Merged on
+#: read (see _read) instead of migrated — same reason `closed` was: this is one
+#: JSON file for one operator, and a missing key is indistinguishable from a
+#: null one once it is filled.
+_POSITION_DEFAULT: dict[str, Any] = {"stop": None, "target": None, "thesis": ""}
+
 _lock = threading.Lock()
 
 
@@ -64,7 +70,14 @@ def _read() -> dict[str, Any]:
     except Exception as e:
         log.warning("[state] ignoring unreadable %s: %s", STATE_PATH, e)
         return dict(_DEFAULT)
-    return {**_DEFAULT, **raw}
+    s = {**_DEFAULT, **raw}
+    # _DEFAULT merges at the top level only, so a row written before stop /
+    # target existed has no such key at all — and `{**p}` then ships a JSON
+    # object the TS `Position` type says cannot exist. Fill per row, so every
+    # reader sees one shape and "not set" is null rather than absent.
+    for key in ("positions", "closed"):
+        s[key] = [{**_POSITION_DEFAULT, **p} for p in s[key]]
+    return s
 
 
 def _write(state: dict[str, Any]) -> None:
@@ -118,8 +131,16 @@ def set_capital(capital_mn: float) -> dict[str, Any]:
 
 def add_position(symbol: str, sector_code: str = "", side: str = "BUY",
                  entry_price: float | None = None, qty: float | None = None,
-                 note: str = "") -> dict[str, Any]:
-    """Idempotent on (symbol, side): re-marking a pick updates it, not duplicates."""
+                 note: str = "", stop: float | None = None,
+                 target: float | None = None, thesis: str = "") -> dict[str, Any]:
+    """Idempotent on (symbol, side): re-marking a pick updates it, not duplicates.
+
+    `stop` / `target` / `thesis` are the recommendation the pick was made on.
+    They were computed (services/picks_scoring.compute_stop_target_rr), carried
+    into the PickEntry and rendered on the card — and then dropped at the one
+    line that marked the position, so the book could not answer "is this trade
+    still valid" the day after. They are stored now.
+    """
     sym = symbol.strip().upper()
     if not sym:
         raise ValueError("symbol is required")
@@ -133,6 +154,9 @@ def add_position(symbol: str, sector_code: str = "", side: str = "BUY",
         "entry_price": float(entry_price) if entry_price is not None else None,
         "qty": float(qty) if qty is not None else None,
         "note": note.strip(),
+        "stop": float(stop) if stop is not None else None,
+        "target": float(target) if target is not None else None,
+        "thesis": thesis.strip(),
         "opened_at": today_str(),
     }
     with _lock:
@@ -147,7 +171,9 @@ def add_position(symbol: str, sector_code: str = "", side: str = "BUY",
 
 def update_position(symbol: str, side: str = "BUY", *,
                     entry_price: float | None = None, qty: float | None = None,
-                    note: str | None = None, opened_at: str | None = None) -> dict[str, Any]:
+                    note: str | None = None, opened_at: str | None = None,
+                    stop: float | None = None,
+                    target: float | None = None) -> dict[str, Any]:
     """Edit a position in place. Only the fields passed are touched.
 
     Deliberately NOT add_position(): that one stamps `opened_at` to today and
@@ -172,6 +198,10 @@ def update_position(symbol: str, side: str = "BUY", *,
                 p["entry_price"] = None if entry_price < 0 else float(entry_price)
             if qty is not None:
                 p["qty"] = None if qty < 0 else float(qty)
+            if stop is not None:
+                p["stop"] = None if stop < 0 else float(stop)
+            if target is not None:
+                p["target"] = None if target < 0 else float(target)
             if note is not None:
                 p["note"] = note.strip()
             if opened_at is not None:

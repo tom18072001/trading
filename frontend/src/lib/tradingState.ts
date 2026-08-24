@@ -47,7 +47,7 @@ const run = (p: Promise<{ data: TradingState }>) => p.then((r) => { set(r.data);
 export const tradingState = {
   setHalt: (halt: boolean, reason = '') => run(stateApi.setHalt(halt, reason)),
   setCapital: (mn: number) => run(stateApi.setCapital(mn)),
-  addPosition: (p: { symbol: string; sector_code?: string; side?: 'BUY' | 'SELL'; entry_price?: number | null; note?: string }) =>
+  addPosition: (p: { symbol: string; sector_code?: string; side?: 'BUY' | 'SELL'; entry_price?: number | null; note?: string; stop?: number | null; target?: number | null; thesis?: string }) =>
     run(stateApi.addPosition(p)),
   updatePosition: (symbol: string, side: 'BUY' | 'SELL', patch: PositionPatch) =>
     run(stateApi.updatePosition(symbol, side, patch)),

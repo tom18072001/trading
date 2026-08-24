@@ -521,6 +521,21 @@ As of 2026-04-23:
 | Frontend (vitest) | 13 | `cd frontend && npm test` |
 | **Total** | **265** | — |
 
+> 2026-08-24 (9): +13. `tests/test_position_track.py` — stop/target on the book
+> and the price path since entry (§22.10). The two that carry the feature are
+> `test_stop_and_target_survive_the_round_trip` (the defect itself: both numbers
+> were destroyed at the mark) and
+> `test_hit_stop_is_ever_touched_not_just_today`. Its mirror,
+> `test_a_breach_before_entry_is_not_your_breach`, is what stops the fix
+> over-firing on the 30-session tail that predates the trade.
+> `test_sellable_on_skips_holidays_too` pins the reason `next_trading_day`
+> exists at all rather than `setDate(+2)`.
+>
+> One fixture detail is the test: `_bars()` keys the date as `"time"`, because
+> that is what `picks_universe_service` writes and `generate_report.py:164` has
+> to rename. A test that used `"date"` would pass against code that never
+> matches a real bar.
+>
 > 2026-08-24 (3): +19. `tests/test_position_close.py` (+17) and two more in
 > `test_regime_confidence.py`.
 >
@@ -970,6 +985,47 @@ oversight.
 > `closed` is a key, not migration 12 — `_read()` merges `_DEFAULT`, so every
 > state file written before today loads unchanged. Still no partial exits: a
 > close takes the whole position (`ponytail:` in the source names the upgrade).
+
+> **2026-08-24 (9) — the book can now follow a trade, not only record one.**
+> Tom: *"chưa có view để … tiếp tục theo dõi các ngày sau đó."* The data existed
+> at every layer and was destroyed at exactly one line.
+> `picks_scoring.compute_stop_target_rr` computes a stop and a target,
+> `PickEntry` carries them, the Daily Insight card renders them and draws a
+> stop→target ladder — and the "Đã vào lệnh" button sent `entry_price` alone,
+> into a `trading_state` row with no field to receive them. **So the book could
+> not answer the one question worth asking the day after a buy: is this trade
+> still valid.** `stop` / `target` / `thesis` are stored now, and editable in
+> place on the same `NumCell` the entry price uses.
+>
+> `GET /positions/pnl` gained `path`, `hit_stop`, `hit_target`,
+> `dist_to_*_pct`, `sessions_held`, `sellable_on`. **No new endpoint on
+> purpose:** `/pnl` already read the book, already called `.peek()`, already
+> looped the positions, and `MyBookPanel` already called it — a second route is
+> two route-ordering tests and two places to drift. **No new data source
+> either:** the price path is `TickerRow.daily_prices`, 30 sessions the
+> snapshot already carries and already persists.
+>
+> Two definitions that are load-bearing rather than incidental:
+> - **`hit_stop` is "ever touched since entry"**, not "today's close is
+>   through the level". A stop breached on Tuesday and recovered by Friday is
+>   still a breach, and a book that forgets that tells you the trade is fine.
+> - **T+ counts sessions.** `tPlusDays()` used `setDate(+i)`, so a Thursday buy
+>   claimed a Sunday settlement; it is also T+**2** now, not T+3, matching
+>   `BACKTEST_SETTLEMENT_LAG` and §18.2/7. The book row takes the
+>   holiday-aware date from the new `utils/clock.next_trading_day`.
+>
+> Not migration 12 — but `_DEFAULT` merges at the *top level only*, so rows
+> written before today omitted the key entirely and shipped a shape the TS
+> `Position` type forbids. `_POSITION_DEFAULT` is merged per row in `_read()`.
+>
+> The sparkline is hand-rolled SVG: recharts sits in a 362 kB chunk that only
+> loads on the Backtest tab (§22.3), and a 64×22 polyline must not drag it onto
+> every page — the built chunk list is unchanged.
+>
+> **Deliberately not built** (Tom picked two of four): stop/target *alerts* and
+> a full T+ calendar panel. Both fields are computed already, so the UI is
+> cheap when wanted. `path` is closes only — `daily_prices` has no high/low — so
+> an intraday wick through a stop that closed back above does not register.
 
 ## 23. Backtest controls — and `flow_z` was `flow_raw` in disguise — 2026-08-23
 

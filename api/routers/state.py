@@ -29,6 +29,9 @@ class PositionBody(BaseModel):
     entry_price: float | None = None
     qty: float | None = None
     note: str = ""
+    stop: float | None = None
+    target: float | None = None
+    thesis: str = ""
 
 
 class PositionPatch(BaseModel):
@@ -37,6 +40,8 @@ class PositionPatch(BaseModel):
     qty: float | None = None
     note: str | None = None
     opened_at: str | None = None
+    stop: float | None = None
+    target: float | None = None
 
 
 class PositionClose(BaseModel):
@@ -75,6 +80,7 @@ def add_position(body: PositionBody):
         return trading_state.add_position(
             body.symbol, body.sector_code, body.side,
             body.entry_price, body.qty, body.note,
+            stop=body.stop, target=body.target, thesis=body.thesis,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
@@ -86,6 +92,7 @@ def update_position(symbol: str, body: PositionPatch, side: str = "BUY"):
         return trading_state.update_position(
             symbol, side, entry_price=body.entry_price, qty=body.qty,
             note=body.note, opened_at=body.opened_at,
+            stop=body.stop, target=body.target,
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
@@ -114,6 +121,69 @@ def remove_position(symbol: str, side: str = "BUY"):
     return trading_state.remove_position(symbol, side)
 
 
+#: T+2 cash settlement on HOSE — you may sell on the 2nd session after the buy.
+SETTLEMENT_SESSIONS = 2
+
+
+def _track(p: dict, daily: list[dict], last: float | None) -> dict:
+    """Everything the book needs to answer "is this trade still valid".
+
+    `daily` is the 30-session OHLCV tail PicksUniverseService already carries on
+    every TickerRow and already round-trips to disk — no new data source. It
+    keys the date as "time"; the rest of the API says "date", so the rename
+    happens here, once.
+
+    `hit_stop` / `hit_target` are EVER TOUCHED since entry, not "today's close
+    is through the level": a stop that was breached on Tuesday and recovered by
+    Friday is still a stop that was breached, and a book that forgets that is
+    telling you the trade is fine.
+    """
+    from utils.clock import next_trading_day, sessions_between, to_market_date
+
+    stop, target = p.get("stop"), p.get("target")
+    out: dict = {
+        "path": [], "hit_stop": False, "hit_target": False,
+        "dist_to_stop_pct": None, "dist_to_target_pct": None,
+        "sessions_held": None, "sellable_on": None,
+    }
+
+    opened = p.get("opened_at")
+    if opened:
+        try:
+            d0 = to_market_date(opened)
+            out["sessions_held"] = sessions_between(d0)
+            out["sellable_on"] = next_trading_day(d0, SETTLEMENT_SESSIONS).isoformat()
+        except (ValueError, TypeError):
+            pass   # a hand-edited opened_at must not 500 the whole book
+
+    for bar in daily:
+        d = bar.get("time") or bar.get("date")
+        if not d or (opened and str(d)[:10] < str(opened)[:10]):
+            continue
+        close = bar.get("close")
+        if close is None:
+            continue
+        out["path"].append({"date": str(d)[:10], "close": float(close)})
+
+    # ponytail: closes only — daily_prices carries open/close/volume, no high or
+    # low, so an intraday wick through the stop that closed back above it does
+    # not register. Widen the tail to OHLC in picks_universe_service if that
+    # matters; on a swing book judged on closes it does not.
+    closes = [b["close"] for b in out["path"]]
+    if closes:
+        if stop:
+            out["hit_stop"] = min(closes) <= stop
+        if target:
+            out["hit_target"] = max(closes) >= target
+
+    if last:
+        if stop:
+            out["dist_to_stop_pct"] = (last / stop - 1) * 100
+        if target:
+            out["dist_to_target_pct"] = (target / last - 1) * 100
+    return out
+
+
 @router.get("/positions/pnl")
 def positions_pnl():
     """The book marked to the last close the app already knows.
@@ -132,6 +202,7 @@ def positions_pnl():
     rows = state["positions"]
 
     prices: dict[str, float] = {}
+    paths: dict[str, list] = {}
     as_of = None
     try:
         from services.picks_universe_service import PicksUniverseService
@@ -140,6 +211,8 @@ def positions_pnl():
             as_of = str(snap.as_of)
             prices = {sym: t.close for sym, t in snap.tickers.items()
                       if getattr(t, "close", None)}
+            paths = {sym: (getattr(t, "daily_prices", None) or [])
+                     for sym, t in snap.tickers.items()}
     except Exception:  # noqa: BLE001 - a price lookup must never break the book
         log.exception("[state] price lookup failed; returning book unmarked")
 
@@ -148,7 +221,8 @@ def positions_pnl():
     for p in rows:
         last = prices.get(p.get("symbol", ""))
         entry, qty = p.get("entry_price"), p.get("qty")
-        row = {**p, "last": last, "pnl_pct": None, "pnl_vnd": None, "value": None}
+        row = {**p, "last": last, "pnl_pct": None, "pnl_vnd": None, "value": None,
+               **_track(p, paths.get(p.get("symbol", "")) or [], last)}
         if last and entry:
             # A SELL mark is a short in the book's own terms; VN cash cannot
             # short (§18.2/12), so this is really "I exited" — sign it anyway

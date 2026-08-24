@@ -261,6 +261,42 @@ function ExitCell({ suggested, onCommit, onCancel }: {
   );
 }
 
+/** The price path since entry, with the entry / stop / target levels drawn on.
+ *
+ *  Hand-rolled SVG, not recharts: recharts lives in a 346 kB chunk that only
+ *  loads when you open the Backtest tab (§22.3), and a 60x20 polyline is not
+ *  worth pulling it onto every page that shows the book.
+ */
+function Spark({ path, entry, stop, target }: {
+  path: { date: string; close: number }[];
+  entry: number | null; stop: number | null; target: number | null;
+}) {
+  if (path.length < 2) return <span className="text-lo text-[11px]">—</span>;
+  const W = 64, H = 22;
+  // Scale to the levels too, not just the closes: a chart whose stop line sits
+  // off-canvas is exactly the chart you cannot read at a glance.
+  const vals = [...path.map((p) => p.close),
+                ...[entry, stop, target].filter((v): v is number => v != null)];
+  const lo = Math.min(...vals), hi = Math.max(...vals);
+  const span = hi - lo || 1;
+  const y = (v: number) => H - ((v - lo) / span) * H;
+  const pts = path.map((p, i) => `${(i / (path.length - 1)) * W},${y(p.close).toFixed(1)}`).join(' ');
+  const rising = path[path.length - 1].close >= path[0].close;
+
+  return (
+    <svg width={W} height={H} className="inline-block align-middle overflow-visible">
+      {stop != null && <line x1="0" x2={W} y1={y(stop)} y2={y(stop)}
+        className="stroke-sell/40" strokeWidth="1" strokeDasharray="2 2" />}
+      {target != null && <line x1="0" x2={W} y1={y(target)} y2={y(target)}
+        className="stroke-buy/40" strokeWidth="1" strokeDasharray="2 2" />}
+      {entry != null && <line x1="0" x2={W} y1={y(entry)} y2={y(entry)}
+        className="stroke-line2" strokeWidth="1" />}
+      <polyline points={pts} fill="none" strokeWidth="1.4"
+        className={rising ? 'stroke-buy' : 'stroke-sell'} />
+    </svg>
+  );
+}
+
 export function MyBookPanel() {
   const s = useTradingState();
   const [sym, setSym] = useState('');
@@ -281,7 +317,7 @@ export function MyBookPanel() {
   };
 
   const marked = new Map((pnl?.positions ?? []).map((p) => [`${p.symbol}-${p.side}`, p]));
-  const patch = (p: Position, k: 'entry_price' | 'qty') => (v: number | null) =>
+  const patch = (p: Position, k: 'entry_price' | 'qty' | 'stop' | 'target') => (v: number | null) =>
     tradingState.updatePosition(p.symbol, p.side, { [k]: v });
 
   return (
@@ -343,6 +379,8 @@ export function MyBookPanel() {
               <th className="p-2.5 text-right">KL</th>
               <th className="p-2.5 text-right">Giá hiện tại</th>
               <th className="p-2.5 text-right">Lãi/lỗ</th>
+              <th className="p-2.5 text-right" title="Cắt lỗ / chốt lời đã đặt khi vào lệnh">Stop / Target</th>
+              <th className="p-2.5 text-center" title="Đường giá từ ngày vào lệnh">Diễn biến</th>
               <th className="p-2.5 text-right">Giá trị</th>
               <th className="p-2.5 text-right">Ngày</th>
               <th className="p-2.5 text-right"></th>
@@ -353,8 +391,13 @@ export function MyBookPanel() {
               const key = `${p.symbol}-${p.side}`;
               const m = marked.get(key);
               const up = (m?.pnl_pct ?? 0) >= 0;
+              // A stop that was breached and recovered is still a breach. The
+              // row says so until you act on it — that is the whole point of
+              // keeping stop/target on the book.
+              const flag = m?.hit_stop ? 'border-l-2 border-l-sell'
+                : m?.hit_target ? 'border-l-2 border-l-buy' : '';
               return (
-                <tr key={key} className="border-b border-line hover:bg-panel2/60">
+                <tr key={key} className={`border-b border-line hover:bg-panel2/60 ${flag}`}>
                   <td className="p-2.5 font-display font-bold text-hi">{p.symbol}</td>
                   <td className="p-2.5 font-mono text-[11px] text-mid">{p.sector_code || '—'}</td>
                   <td className={`p-2.5 font-semibold ${p.side === 'BUY' ? 'text-buy' : 'text-sell'}`}>{p.side}</td>
@@ -374,10 +417,36 @@ export function MyBookPanel() {
                       <div className="text-[10.5px] font-normal opacity-75">{fmtVnd(m.pnl_vnd)}</div>
                     )}
                   </td>
+                  <td className="p-1.5 text-right whitespace-nowrap">
+                    <div className="flex items-center justify-end gap-1">
+                      <NumCell value={p.stop} onCommit={patch(p, 'stop')}
+                        width="w-[62px]" placeholder="stop" />
+                      <span className="text-lo text-[11px]">/</span>
+                      <NumCell value={p.target} onCommit={patch(p, 'target')}
+                        width="w-[62px]" placeholder="tgt" />
+                    </div>
+                    {(m?.hit_stop || m?.hit_target) && (
+                      <div className={`text-[10px] font-semibold pr-1.5 ${
+                        m.hit_stop ? 'text-sell' : 'text-buy'}`}>
+                        {m.hit_stop ? '⚠ đã thủng stop' : '✓ đã chạm target'}
+                      </div>
+                    )}
+                  </td>
+                  <td className="p-2.5 text-center">
+                    <Spark path={m?.path ?? []} entry={p.entry_price}
+                      stop={p.stop} target={p.target} />
+                  </td>
                   <td className="p-2.5 text-right font-mono tabular text-mid">
                     {m?.value != null ? fmtVnd(m.value) : '—'}
                   </td>
-                  <td className="p-2.5 text-right font-mono tabular text-lo">{p.opened_at}</td>
+                  <td className="p-2.5 text-right font-mono tabular text-lo">
+                    {p.opened_at}
+                    <div className="text-[10px] text-lo/70">
+                      {m?.sessions_held != null && <>{m.sessions_held} phiên</>}
+                      {m?.sellable_on && m.sellable_on > (m.path.at(-1)?.date ?? '')
+                        && <> · bán từ {m.sellable_on.slice(5)}</>}
+                    </div>
+                  </td>
                   <td className="p-1.5 text-right whitespace-nowrap">
                     {closing === key ? (
                       <ExitCell

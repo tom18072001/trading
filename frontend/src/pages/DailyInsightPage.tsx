@@ -316,17 +316,29 @@ export function AgentReport({ report }: { report: any }) {
 // ===================================================================
 //  Pick cards  (Thẻ — default view): ladder + T+3 + sizing
 // ===================================================================
+/** T0..T+3 in SESSIONS, not calendar days.
+ *
+ *  It used to be `setDate(base.getDate() + i)`, so a Thursday buy claimed a
+ *  Sunday settlement. T+ is a count of trading days — that is what settlement
+ *  means — and the backend now returns `sellable_on` on the same basis
+ *  (utils/clock.next_trading_day) for positions already in the book.
+ *
+ *  ponytail: weekends only. VN holidays live in config.VN_MARKET_HOLIDAYS_2026
+ *  and are not worth a second copy in TypeScript for a 4-box preview; the book
+ *  row, which is the one you act on, gets the holiday-aware date from the API.
+ */
 function tPlusDays(date: string | undefined): { label: string; date: string; sub: string; state: 'now' | 'future' | 'sell' }[] {
   const base = date ? new Date(date) : new Date();
   const out: { label: string; date: string; sub: string; state: 'now' | 'future' | 'sell' }[] = [];
+  const d = new Date(base);
   for (let i = 0; i < 4; i++) {
-    const d = new Date(base);
-    d.setDate(base.getDate() + i);
+    if (i > 0) do { d.setDate(d.getDate() + 1); } while (d.getDay() === 0 || d.getDay() === 6);
     out.push({
       label: i === 0 ? 'T0' : `T+${i}`,
       date: `${d.getDate()}/${d.getMonth() + 1}`,
-      sub: i === 0 ? 'Mua' : i === 3 ? 'Bán được' : '',
-      state: i === 0 ? 'now' : i === 3 ? 'sell' : 'future',
+      // T+2: HOSE cash settlement, the same lag the backtest models (§18.2/7).
+      sub: i === 0 ? 'Mua' : i === 2 ? 'Bán được' : '',
+      state: i === 0 ? 'now' : i === 2 ? 'sell' : 'future',
     });
   }
   return out;
@@ -349,7 +361,12 @@ function PickActions({ p, kind, close }: { p: any; kind: 'BUY' | 'SELL'; close: 
       <button
         onClick={() => held
           ? tradingState.removePosition(sym, kind)
-          : tradingState.addPosition({ symbol: sym, sector_code: pSecCode(p), side: kind, entry_price: close })}
+          : tradingState.addPosition({
+              symbol: sym, sector_code: pSecCode(p), side: kind, entry_price: close,
+              // The card renders these two above; the book needs them to answer
+              // "is this trade still valid" tomorrow.
+              stop: p.stop, target: p.target, thesis: p.thesis,
+            })}
         className={`flex-1 px-3 py-2 rounded-lg text-[12px] font-bold transition border ${
           held
             ? 'bg-buy/[0.14] border-buy/40 text-buy hover:bg-buy/[0.2]'

@@ -14,6 +14,65 @@
 
 ---
 
+## 2026-08-24 (9) — the book can follow a trade, not just record one
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `services/trading_state.py` — `add_position` / `update_position` take
+    `stop` / `target` / `thesis`; `_POSITION_DEFAULT` merged per row in `_read`
+  - `api/routers/state.py` — `PositionBody` / `PositionPatch` fields;
+    `SETTLEMENT_SESSIONS`; new `_track()`; `/positions/pnl` returns `path`,
+    `hit_stop`, `hit_target`, `dist_to_stop_pct`, `dist_to_target_pct`,
+    `sessions_held`, `sellable_on`
+  - `utils/clock.py` — `next_trading_day()`, `sessions_between()`
+  - `frontend/src/api/client.ts`, `lib/tradingState.ts` — types
+  - `frontend/src/pages/DailyInsightPage.tsx` — the mark button sends the
+    levels; `tPlusDays()` counts sessions
+  - `frontend/src/components/KillSwitch.tsx` — `Spark`, Stop/Target column,
+    breach flag, sessions-held sub-line
+  - `tests/test_position_track.py` (new, 13)
+- Reason: Tom — *"chưa có view để khi đánh giá, chọn mua giá thì không có view
+  để xem được hay tiếp tục theo dõi các ngày sau đó."* The data existed at
+  every layer and was destroyed at exactly one line.
+- Summary:
+  - **The defect.** `picks_scoring.compute_stop_target_rr` computes a stop and
+    a target, `PickEntry` carries them, the card renders them and even draws a
+    stop→target ladder — and the "Đã vào lệnh" button sent `entry_price` alone,
+    into a `trading_state` row with no field to receive them. The book was
+    structurally incapable of answering *is this trade still valid* the day
+    after entry.
+  - **No new endpoint.** `/positions/pnl` already read the book, already called
+    `PicksUniverseService().peek()`, already looped the positions, and
+    `MyBookPanel` already called it. A second route would have been two
+    route-ordering tests and two places to drift.
+  - **No new data source.** The price path is `TickerRow.daily_prices` — 30
+    sessions of OHLCV the snapshot already carries and already persists to
+    disk. Its date key is `"time"`; the rename to `"date"` happens once, in
+    `_track`.
+  - **`hit_stop` is "ever touched since entry", not "today's close is
+    through"** — a stop breached Tuesday and recovered Friday is still a
+    breach, and a book that forgets it says the trade is fine.
+  - **T+ is a count of sessions.** `tPlusDays()` used `setDate(+i)`, so a
+    Thursday buy claimed a Sunday settlement; the ladder is also T+2 now, not
+    T+3, matching `BACKTEST_SETTLEMENT_LAG` and §18.2/7. The book row gets the
+    holiday-aware date from `utils/clock.next_trading_day`.
+  - **No migration**, same as `closed` on 2026-08-24 (3) — but `_DEFAULT`
+    merges at the top level only, so rows written before today omitted the key
+    entirely and shipped a shape the TS `Position` type forbids.
+    `_POSITION_DEFAULT` is merged per row on read.
+  - Sparkline is hand-rolled SVG: recharts lives in a 362 kB chunk that only
+    loads on the Backtest tab (§22.3), and a 64×22 polyline must not drag it
+    onto every page. Verified — the built chunk list is unchanged.
+- Verification: 265 backend pass (was 252), 13 vitest pass, ruff 66 (baseline,
+  §20.2), `tsc --noEmit` clean, production build clean. Live probe against the
+  running API: POST with `stop`/`target` round-trips, `sellable_on` = 2026-08-26
+  for a Monday entry, a pre-existing row without a stop returns
+  `dist_to_stop_pct: null` rather than 500.
+- Follow-ups: stop/target **alerts** and the full T+ calendar panel were the
+  two of four items Tom did not select — `hit_stop` and `sellable_on` are
+  computed already, so the UI for them is cheap. `path` is closes only (no
+  high/low in `daily_prices`), so an intraday wick through a stop that closed
+  back above does not register; `ponytail:` in the source names the upgrade.
+
 ## 2026-08-24 (8) — the breakout bar was 1.15%, not 8%
 - Author: Claude Code on behalf of Tom
 - Files:

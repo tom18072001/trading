@@ -65,6 +65,38 @@ def previous_trading_day(d: date | None = None) -> date:
     return probe
 
 
+def next_trading_day(d: date | None = None, n: int = 1) -> date:
+    """The n-th trading day strictly after `d`.
+
+    The mirror of previous_trading_day, and the reason it exists: T+2.5
+    settlement means "when can I sell this" is a count of SESSIONS, not of
+    calendar days. `DailyInsightPage.tsx` was doing `setDate(+3)`, so a Thursday
+    buy claimed a Sunday sell date.
+    """
+    d = d or today()
+    probe = d
+    for _ in range(n):
+        probe += timedelta(days=1)
+        for _ in range(14):         # a VN Tet break is at most ~9 days
+            if is_trading_day(probe):
+                break
+            probe += timedelta(days=1)
+    return probe
+
+
+def sessions_between(start: date, end: date | None = None) -> int:
+    """Trading days from `start` (exclusive) to `end` (inclusive). Never negative."""
+    end = end or today()
+    if end <= start:
+        return 0
+    n, probe = 0, start
+    while probe < end:
+        probe += timedelta(days=1)
+        if is_trading_day(probe):
+            n += 1
+    return n
+
+
 def to_market_date(value) -> date:
     """Coerce a datetime / date / 'YYYY-MM-DD' string to a market-local date.
 

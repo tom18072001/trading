@@ -167,6 +167,10 @@ export type Position = {
   qty: number | null;
   note: string;
   opened_at: string;
+  /** The recommendation this was entered on. Null on rows marked before 2026-08-24. */
+  stop: number | null;
+  target: number | null;
+  thesis: string;
 };
 
 export type PositionPatch = {
@@ -174,6 +178,8 @@ export type PositionPatch = {
   qty?: number | null;
   note?: string;
   opened_at?: string;
+  stop?: number | null;
+  target?: number | null;
 };
 
 /** One book row marked to the last known close. `last` is null on a cold cache. */
@@ -182,6 +188,16 @@ export type PnlRow = Position & {
   pnl_pct: number | null;
   pnl_vnd: number | null;
   value: number | null;
+  /** Closes since entry, from the picks snapshot's 30-session tail. */
+  path: { date: string; close: number }[];
+  /** Ever touched since entry, not just today — a breach that recovered still counts. */
+  hit_stop: boolean;
+  hit_target: boolean;
+  dist_to_stop_pct: number | null;
+  dist_to_target_pct: number | null;
+  sessions_held: number | null;
+  /** T+2: the first session this can be sold. Trading days, holidays excluded. */
+  sellable_on: string | null;
 };
 
 export type PnlResponse = {
