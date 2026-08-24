@@ -356,6 +356,29 @@ Anything worse than this means the thesis is still lagging — go back to featur
 > the market** — 50% vs a 68% base rate, 0% vs 18% at ≥10d. So regime explains
 > the level, not the shortfall. Both remain open; the tape is the larger term.
 
+> **"Flatter" was the wrong word — 2026-08-24 (4).** Measured directly
+> (`scripts/late_period_diagnosis.py`, check 2), 2026 is not flat, it is
+> **down, and more volatile than the two years before it**:
+>
+> | year | med fwd-40d | med fwd-40d **max** | % of fwd-40d positive | ann vol |
+> |---|---|---|---|---|
+> | 2023 | +3.9% | +7.1% | 70% | 0.89 |
+> | 2024 | +1.4% | +5.4% | 58% | 0.21 |
+> | 2025 | +3.6% | +7.9% | 63% | 0.29 |
+> | **2026** | **−7.6%** | **+2.9%** | **17%** | **0.42** |
+>
+> The `med fwd-40d max` column is what §16.13 was reading, and taken alone it
+> does look like a quiet tape. It is not: only the *max* compressed. The median
+> forward move went negative and vol went **up**. That distinction matters for
+> what to do next — a quiet tape argues for a more sensitive gate, a falling
+> one argues that a long-only breakout definition has little to find, which is
+> a different problem with a different fix.
+>
+> The 2×ATR breakout bar also moves with the tape it is measuring: ATR rose,
+> so the bar rose, while the moves it must clear shrank. A breakout definition
+> that gets harder exactly when the market gets choppier will show a collapse
+> in any year like this one, independent of the gate.
+
 ### 16.14 What this means for §16 as a whole
 
 > Stated plainly, so no later reader has to re-derive it: **as of 2026-08-24
@@ -1210,10 +1233,70 @@ that matches random.
 AUC is ~0.80 across H=1-13 and carries no opinion — it ranks, it does not
 calibrate, which is why skill is the deciding metric here.
 
-### 25.8 Open
-- The late-third degradation itself. Both the horizon sweep here and the stealth
-  gate (§16.13) get sharply worse over 2026. **A defect common to two unrelated
-  models is more likely the tape or the data than either model** — that is the
-  next thing to look at, ahead of tuning either.
+### 25.9 The late-third degradation — diagnosed 2026-08-24 (4)
+
+§25.8 flagged it as the highest-value open question: the horizon sweep here and
+the §16.1 stealth gate (§16.13) both fall apart over the same recent stretch,
+and *"a defect common to two unrelated models is more likely the tape or the
+data than either model."* `scripts/late_period_diagnosis.py` runs the four
+checks. Result: **it is the tape, and the calendar was a proxy for it.**
+
+**Not data.** Every 2026 quarter carries 15 sectors, ~0 missing `close_idx`,
+96-100% non-zero `foreign_net`. Coverage matches the years that work. The one
+thin quarter in the panel is 2023Q1 (36% missing closes), at the opposite end.
+
+**Not a stale transition matrix.** `transmat_` is fitted once over the whole
+panel, so it encodes average persistence — a plausible reason the late third
+overpredicts survival by +9.3pt (0.695 predicted vs 0.602 realised). Testing it
+by re-estimating transitions on a trailing window, emissions untouched:
+
+| window | late bias | late Brier | late AUC | Brier, all 900 |
+|---|---|---|---|---|
+| whole panel (shipped) | **+0.093** | 0.2266 | **0.678** | **0.1607** |
+| 250 bars | −0.045 | 0.2196 | 0.665 | 0.1916 |
+| 500 bars | **+0.018** | 0.2289 | 0.637 | 0.1887 |
+| 120 bars | −0.103 | 0.2615 | 0.583 | 0.2118 |
+
+A trailing window fixes the *bias* and costs *discrimination* and overall Brier.
+So the late failure is not miscalibration that a fresher matrix repairs — it is
+**lost discrimination**: late AUC 0.673 against 0.816/0.828 earlier. Nothing
+ships from this check; it is recorded so nobody re-runs it hoping.
+
+**It is volatility.** Bucketing all 900 bars by 20d VNINDEX vol, ignoring date:
+
+| vol tercile | n | base rate | AUC | share of rows in the late third |
+|---|---|---|---|---|
+| low | 298 | 0.836 | **0.827** | 0.12 |
+| mid | 298 | 0.735 | 0.790 | 0.46 |
+| high | 299 | 0.592 | **0.694** | 0.42 |
+
+Monotone, and the high-vol bucket is spread across periods rather than being a
+relabelling of "late". Crossed both ways, low-vol *late* bars still score 0.699
+while high-vol *early* bars score 0.619 — vol tracks the failure, the calendar
+does not. 2026 is simply where the high-vol bars concentrate (§16.13's amended
+table: ann vol 0.42 vs 0.21-0.29).
+
+**What this means, stated so it is not over-read.** A regime model is least
+certain when regimes are least stable, which is not a defect — it is the
+model reporting a harder problem. The honest response is to let confidence fall
+in choppy tape, which it does. But it means:
+
+- **`CONF_HORIZON` is not one number.** 5 is the longest horizon positive in all
+  three thirds *pooled across vol*; in the high-vol bucket even 5 is marginal.
+  A vol-conditioned horizon is the obvious next experiment and is **not** shipped
+  — it needs its own walk-forward, and §25.2 is the standing warning about
+  fitting a layer on a recent slice.
+- **§16's story is different from this one.** The stealth gate's 2026 collapse
+  shares a cause *class* (the tape) but not the mechanism: §16.13's breakout
+  test is pinned to 2×ATR, so a rising ATR raises the bar exactly when the moves
+  it must clear are shrinking. That is a definition that moves with what it
+  measures — a real defect in the metric, worth fixing on its own terms, and it
+  is not fixed by anything here.
+
+### 25.10 Open
+- **A vol-conditioned `CONF_HORIZON`** (§25.9). Measured as needed, not shipped.
+- **§16.13's 2×ATR breakout definition scales with the tape it measures.** The
+  §16.11/16.12 numbers are all computed through it, so this is upstream of every
+  stealth result recorded so far.
 - `CONF_HORIZON` should be re-measured when the panel grows; 900 bars split
-  three ways is 300 per cell.
+  three ways is 300 per cell, and §25.9 now wants it split by vol as well.

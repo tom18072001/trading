@@ -28,13 +28,17 @@
 #      is a statement about the fit, not about whether the regime call is worth
 #      acting on — 26 label flips per 260 sessions at "95% confidence".
 #
-# `confidence` now means **P(the label still holds in 5 sessions)**, computed
-# as the filtered posterior propagated through the transition matrix. Measured
-# over the last 300 sessions: predicted 0.69, realised 0.60, and calibrated
-# within a few points across the middle three buckets (the top bucket is
-# overconfident — 0.90 predicted vs 0.70 actual — so read >0.85 as "likely",
-# not "certain"). Range 0.46-0.91, which is the point: a confidence that never
-# leaves 1.0 carries no information.
+# `confidence` now means **P(the label still holds in CONF_HORIZON sessions)**,
+# computed as the filtered posterior propagated through the transition matrix.
+# Range 0.46-0.91, which is the point: a confidence that never leaves 1.0
+# carries no information.
+#
+# Calibration, over the full 900 walk-forward bars: the top bucket is good
+# (0.895 predicted vs 0.906 realised) and the BOTTOM is where it errs — below
+# 0.55 it predicts 0.487 against a realised 0.370. An earlier note here said
+# the opposite, on a 300-bar window that happened to cover only the stretch
+# where the model degrades. See `confidence_phrase` for why the hedge fires low
+# and why no calibrator ships.
 #
 # Filtered, not smoothed, also closes CLAUDE.md §20.3 P1-4: `predict_proba`
 # over the whole panel is forward-backward, so it re-decodes history with

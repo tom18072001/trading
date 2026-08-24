@@ -14,6 +14,58 @@
 
 ---
 
+## 2026-08-24 (7) — the late-third degradation is volatility, not a defect
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `scripts/late_period_diagnosis.py` (new)
+  - `analysis/regime.py` (module header — it still carried the retracted
+    300-bar calibration claim that `confidence_phrase()` corrects 40 lines below)
+  - `CLAUDE.md` §16.13 (amendment), §25.9 (new), §25.10 (replaces §25.8)
+- Reason: §25.8 named this the highest-value open question. Two unrelated models
+  — the §25.7 horizon sweep and the §16.1 stealth gate (§16.13) — degrade over
+  the same recent stretch, and a fault common to both points at the tape or the
+  data rather than at either model. Left unanswered, every subsequent tuning
+  pass on either model would be fitting to a cause nobody had identified.
+- Summary:
+  - **Not data.** Every 2026 quarter: 15 sectors, ~0 missing `close_idx`,
+    96-100% non-zero `foreign_net`. Coverage matches the years that work.
+  - **Not a stale transition matrix.** `transmat_` is fitted once over the whole
+    panel; re-estimating transitions on a trailing window (emissions untouched)
+    fixes the late +9.3pt survival bias and *costs* discrimination and overall
+    Brier (0.1607 → 0.1916 at W=250). So the late failure is lost discrimination
+    — late AUC 0.673 vs 0.816/0.828 earlier — not miscalibration. Nothing ships
+    from this check; it is recorded so nobody re-runs it hoping.
+  - **It is volatility.** Bucketing all 900 bars by 20d VNINDEX vol, ignoring
+    date: AUC 0.827 / 0.790 / 0.694 low→high, and the high-vol bucket is only
+    42% late-third. Crossed both ways, low-vol *late* bars beat high-vol *early*
+    ones. A regime model is least certain when regimes are least stable; that is
+    the model reporting a harder problem, not a bug.
+  - **§16.13's "2026 is a flatter tape" is wrong** and amended. Measured: median
+    forward-40d **−7.6%** with only 17% positive, and annualised vol **0.42**
+    against 0.21-0.29 in 2024-25. Only the forward-40d *max* compressed, which
+    is the single column §16.13 was reading. Down-and-volatile is a different
+    diagnosis from flat, and argues for a different fix.
+  - **New defect surfaced, not fixed:** the 2×ATR breakout test used throughout
+    §16.11/16.12 scales with the tape it measures — rising ATR raises the bar
+    exactly when the moves that must clear it are shrinking. Every stealth
+    result recorded so far is computed through it. Logged as §25.10.
+  - `analysis/regime.py`'s module header still asserted the calibration claim
+    §25.2 retracted on 2026-08-24 (3), directly contradicting the docstring 40
+    lines below it. Corrected; the dated records in `CLAUDE.md` and this log
+    keep the original wording, since each carries its retraction beneath.
+- Verification: `python scripts/late_period_diagnosis.py` reproduces all four
+  checks end to end. 252 backend tests green (unchanged — this pass adds a
+  diagnostic and no behaviour). ruff 66, unchanged; the new script is clean.
+- Follow-ups:
+  - A vol-conditioned `CONF_HORIZON`. In the high-vol bucket even H=5 is
+    marginal. Needs its own walk-forward; §25.2 is the standing warning about
+    fitting a layer on a recent slice.
+  - Fix the breakout definition before any further §16 condition tuning.
+  - Browser verification of the close flow (carried from entry 6 — both dev
+    servers run outside the preview harness on this box).
+
+---
+
 ## 2026-08-24 (6) — a sale stops being a delete; CONF_HORIZON stops being an assertion
 - Author: Claude Code on behalf of Tom
 - Files:
