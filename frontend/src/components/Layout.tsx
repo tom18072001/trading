@@ -1,5 +1,7 @@
-import { NavLink, Outlet } from 'react-router-dom';
-import type { ReactNode } from 'react';
+import { Link, NavLink, Outlet } from 'react-router-dom';
+import { useEffect, useState, type ReactNode } from 'react';
+import { useTradingState } from '../lib/tradingState';
+import { flowApi, type Freshness } from '../api/client';
 
 // ---- Inline stroke icons (18px) ----
 const ic = (paths: ReactNode) => (
@@ -53,26 +55,84 @@ const ICONS: Record<string, ReactNode> = {
   </>),
 };
 
-// Two groups, because they answer different questions. "Theo dõi" is what is
-// happening in the market right now; "Ra quyết định" is what the system thinks
-// you should do about it and what that would have cost you.
+// 2026-08-23 (review §C): nav merged 9 → 5. Nine doors for 15 sectors was
+// more navigation than data. What merged into what:
 //
-// The second group was wired on 2026-08-23. All four pages existed and worked;
-// none had a route. CLAUDE.md section 12 lists Rotation Ranking, Regime
-// Monitor, Sector Backtest and Risk as deliverables of this redesign.
+//   Dòng tiền        = Money Flow Monitor + Sector Detail  (tab, same page)
+//   Luân chuyển      = Stealth Watch + Rotation Map        (early vs. already moved)
+//   Rủi ro & Vị thế  = Risk + Flow Pulse                   (also kills the §A4 double exposure)
+//   Nghiên cứu       = Xếp hạng + Regime + Backtest        (not a daily job)
+//
+// The groups are gone with them: five items do not need headers, and the
+// "Theo dõi / Ra quyết định" split was describing the old nine.
 const nav = [
-  { to: '/insight', label: 'Daily Insight', icon: 'insight', end: false, group: 'Theo dõi' },
-  { to: '/flow', label: 'Money Flow Monitor', icon: 'flow', end: true, group: 'Theo dõi' },
-  { to: '/rotation', label: 'Rotation Map', icon: 'rotation', end: false, group: 'Theo dõi' },
-  { to: '/stealth', label: 'Stealth Watch', icon: 'stealth', end: false, group: 'Theo dõi' },
-  { to: '/pulse', label: 'Flow Pulse', icon: 'pulse', end: false, group: 'Theo dõi' },
-  { to: '/ranking', label: 'Xếp hạng ngành', icon: 'ranking', end: false, group: 'Ra quyết định' },
-  { to: '/regime', label: 'Trạng thái thị trường', icon: 'regime', end: false, group: 'Ra quyết định' },
-  { to: '/risk', label: 'Rủi ro & Vị thế', icon: 'risk', end: false, group: 'Ra quyết định' },
-  { to: '/backtest', label: 'Backtest', icon: 'backtest', end: false, group: 'Ra quyết định' },
+  { to: '/insight', label: 'Daily Insight', icon: 'insight', hint: 'Mở mỗi sáng' },
+  { to: '/flow', label: 'Dòng tiền', icon: 'flow', hint: '15 ngành + chi tiết' },
+  { to: '/rotation', label: 'Luân chuyển', icon: 'rotation', hint: 'Tiền đi đâu tiếp' },
+  { to: '/positions', label: 'Rủi ro & Vị thế', icon: 'risk', hint: 'Đang nắm gì' },
+  { to: '/research', label: 'Nghiên cứu', icon: 'backtest', hint: 'Backtest · xếp hạng · regime' },
 ];
 
-const navGroups = ['Theo dõi', 'Ra quyết định'] as const;
+/**
+ * §18.4/20 kill-switch banner. Deliberately app-wide and un-dismissable: a
+ * halt that you can only see on the page where you set it is a halt you will
+ * forget about, and forgetting means acting on picks the 17:00 job has already
+ * stopped publishing.
+ */
+function HaltBanner() {
+  const s = useTradingState();
+  if (!s.halt_effective) return null;
+  return (
+    <div className="shrink-0 bg-sell/[0.14] border-b border-sell/40 px-8 py-2 flex items-center gap-3">
+      <span className="w-1.5 h-1.5 rounded-full bg-sell animate-dot-pulse shrink-0" />
+      <span className="text-[12.5px] font-semibold text-sell">
+        TẠM DỪNG GIAO DỊCH — không phát tín hiệu mua mới
+      </span>
+      {s.halt_reason && <span className="text-[12px] text-sell/80">· {s.halt_reason}</span>}
+      {s.halt_env && (
+        <span className="text-[11px] font-mono text-sell/70">
+          · đặt bằng biến môi trường TRADING_HALT (không tắt được từ giao diện)
+        </span>
+      )}
+      <Link to="/positions?tab=risk"
+        className="ml-auto text-[11.5px] font-semibold text-sell hover:underline shrink-0">
+        Quản lý →
+      </Link>
+    </div>
+  );
+}
+
+/**
+ * Review §D — how old is what I am looking at?
+ *
+ * Every page rendered its own answer or none at all, so a stale DB looked
+ * identical to a fresh one on eight of nine routes. One strip, above every
+ * page, fetched once. Quiet when fresh — a bar that always shouts is a bar
+ * nobody reads; it only takes colour when the data is actually behind.
+ */
+function DataAgeBar() {
+  const [f, setF] = useState<Freshness | null>(null);
+  useEffect(() => {
+    flowApi.freshness().then((r) => setF(r.data)).catch(() => {});
+  }, []);
+  if (!f) return null;
+
+  const stale = !f.is_fresh && f.gap_days > 0;
+  return (
+    <div className={`shrink-0 px-8 py-1.5 border-b flex items-center gap-2 text-[11.5px] font-mono ${
+      stale ? 'bg-warn/[0.10] border-warn/35 text-warn' : 'border-line text-lo'}`}>
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${stale ? 'bg-warn' : 'bg-buy/70'}`} />
+      <span>Dữ liệu đến {f.latest_date || '—'}</span>
+      {stale ? (
+        <span className="font-semibold">
+          · chậm {f.gap_days} phiên so với {f.last_trading_day} — chạy lại job EOD trước khi ra quyết định
+        </span>
+      ) : (
+        <span>· phiên gần nhất {f.last_trading_day}{f.is_weekend && ' · cuối tuần'}</span>
+      )}
+    </div>
+  );
+}
 
 export default function Layout() {
   return (
@@ -100,39 +160,33 @@ export default function Layout() {
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 px-3 py-4 overflow-y-auto">
-          {navGroups.map((group) => (
-            <div key={group} className="mb-4 last:mb-0">
-              <div className="section-label px-2 mb-2">{group}</div>
-              <div className="space-y-1">
-                {nav.filter((item) => item.group === group).map((item) => (
-
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className={({ isActive }) =>
-                  `relative flex items-center gap-2.5 rounded-[9px] px-3 py-2.5 text-[13px] font-medium transition-all ${
-                    isActive
-                      ? 'text-acc border border-acc/[0.22]'
-                      : 'text-mid border border-transparent hover:bg-white/[0.04] hover:text-hi'
-                  }`
-                }
-                style={({ isActive }) =>
+        <nav className="flex-1 px-3 py-4 overflow-y-auto space-y-1">
+          {nav.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) =>
+                `relative flex items-center gap-2.5 rounded-[9px] px-3 py-2.5 text-[13px] font-medium transition-all ${
                   isActive
-                    ? {
-                        background: 'linear-gradient(90deg, rgba(70,201,230,.13), transparent)',
-                        boxShadow: 'inset 2.5px 0 0 0 #46C9E6',
-                      }
-                    : undefined
-                }
-              >
-                <span className="w-[18px] flex items-center justify-center">{ICONS[item.icon]}</span>
-                <span>{item.label}</span>
-              </NavLink>
-                ))}
-              </div>
-            </div>
+                    ? 'text-acc border border-acc/[0.22]'
+                    : 'text-mid border border-transparent hover:bg-white/[0.04] hover:text-hi'
+                }`
+              }
+              style={({ isActive }) =>
+                isActive
+                  ? {
+                      background: 'linear-gradient(90deg, rgba(70,201,230,.13), transparent)',
+                      boxShadow: 'inset 2.5px 0 0 0 #46C9E6',
+                    }
+                  : undefined
+              }
+            >
+              <span className="w-[18px] flex items-center justify-center shrink-0">{ICONS[item.icon]}</span>
+              <span className="leading-tight">
+                {item.label}
+                <span className="block text-[10px] text-lo font-normal">{item.hint}</span>
+              </span>
+            </NavLink>
           ))}
         </nav>
 
@@ -146,8 +200,12 @@ export default function Layout() {
         </div>
       </aside>
 
-      <main className="flex-1 overflow-auto bg-bg">
-        <Outlet />
+      <main className="flex-1 overflow-auto bg-bg flex flex-col">
+        <HaltBanner />
+        <DataAgeBar />
+        <div className="flex-1">
+          <Outlet />
+        </div>
       </main>
     </div>
   );

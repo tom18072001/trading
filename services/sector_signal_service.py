@@ -17,6 +17,7 @@ from config import (
 )
 from database.models import SectorFlowDaily, SectorSignal
 from services.rotation_model_service import RotationModelService
+from services import trading_state
 from utils.clock import today_str
 
 
@@ -99,8 +100,13 @@ class SectorSignalService:
             stealth = keep
 
         # §18.4/20 — global kill-switch. No new long exposure while set.
-        if TRADING_HALT:
-            print("[signals] *** TRADING_HALT set — no ACCUMULATE/BUY will be emitted ***")
+        # Two sources, OR'd: the TRADING_HALT env var (a hard override that a
+        # browser cannot un-set) and the runtime flag the operator toggles from
+        # /positions. Read once here so a mid-loop toggle cannot split the run.
+        halted = TRADING_HALT or trading_state.is_halted()
+        if halted:
+            print("[signals] *** TRADING HALT — no ACCUMULATE/BUY will be emitted "
+                  f"(env={TRADING_HALT}) ***")
 
         # P1-2 — surface a degraded ranker rather than shipping its output as
         # if it were ranker-gated.
@@ -115,7 +121,7 @@ class SectorSignalService:
             persistence = self._persistence_ok(row["sector_code"])
             code = row["sector_code"]
             # §16.3 action precedence: ACCUMULATE > BUY > SELL > HOLD
-            if TRADING_HALT:
+            if halted:
                 action = "HOLD"
             elif code in stealth:
                 action = "ACCUMULATE"

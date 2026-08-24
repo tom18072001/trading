@@ -136,6 +136,7 @@ con = _open_db(DB_PATH); con.row_factory = sqlite3.Row; cur = con.cursor()
 # services.picks_universe_service.PicksUniverseService, which discovers the
 # universe from vnstock HOSE Listing and computes indicators in-memory.
 from config import SECTORS  # noqa: E402
+from analysis.regime import confidence_phrase as conf_phrase  # noqa: E402
 from services.picks_universe_service import get_picks_universe  # noqa: E402
 _universe_snap = get_picks_universe().get_snapshot()
 print(f"[report] universe snapshot as_of={_universe_snap.as_of} tickers={len(_universe_snap.tickers)} "
@@ -493,8 +494,7 @@ def build_regime_banner():
     lab = (regime.get("regime_label") or "chop").lower()
     klass = lab if lab in REGIME_TEXT else "chop"
     narrative = REGIME_TEXT.get(klass, REGIME_TEXT["chop"])
-    conf = regime.get("confidence") or 0.5
-    narrative = f"Confidence {conf:.2f} • {narrative}"
+    narrative = f"{conf_phrase(regime.get('confidence'))} • {narrative}"
     return klass, klass.upper().replace("_", "-"), narrative
 
 REGIME_CLASS, REGIME_LABEL, REGIME_NARRATIVE = build_regime_banner()
@@ -1324,18 +1324,19 @@ def build_expert_memo():
     top_sells_for_memo = UNIFIED_SELLS[:3]
 
     # Opening paragraph — market view.
+    conf_txt = conf_phrase(regime_conf)
     if regime_label == "risk_on":
-        stance = ("Tape đang <b>risk-on</b> (HMM confidence {:.2f}). Ưu tiên long theo dòng tiền, "
-                  "chấp nhận size full trên consensus picks.").format(regime_conf)
+        stance = (f"Tape đang <b>risk-on</b> ({conf_txt}). Ưu tiên long theo dòng tiền, "
+                  "chấp nhận size full trên consensus picks.")
     elif regime_label == "risk_off":
-        stance = ("Tape đang <b>risk-off</b> (HMM confidence {:.2f}). Giảm gross exposure, "
-                  "ưu tiên bảo toàn vốn, chỉ nên giữ consensus picks với size nhỏ.").format(regime_conf)
+        stance = (f"Tape đang <b>risk-off</b> ({conf_txt}). Giảm gross exposure, "
+                  "ưu tiên bảo toàn vốn, chỉ nên giữ consensus picks với size nhỏ.")
     elif regime_label == "rotation":
-        stance = ("Tape đang <b>rotation</b> (HMM confidence {:.2f}). Tránh VNINDEX beta trần, "
-                  "chơi spread giữa sector inflow và outflow.").format(regime_conf)
+        stance = (f"Tape đang <b>rotation</b> ({conf_txt}). Tránh VNINDEX beta trần, "
+                  "chơi spread giữa sector inflow và outflow.")
     else:
-        stance = ("Tape đang <b>chop</b> (HMM confidence {:.2f}). Không có persistent edge; "
-                  "chỉ đánh stealth chất lượng và consensus picks với 0.5× size.").format(regime_conf)
+        stance = (f"Tape đang <b>chop</b> ({conf_txt}). Không có persistent edge; "
+                  "chỉ đánh stealth chất lượng và consensus picks với 0.5× size.")
 
     # Flow leaders / laggards.
     if sector_stats:
@@ -1452,7 +1453,7 @@ def build_plain_text_body():
     lines.append(f"📊 Unified Picks Briefing — {REPORT_DATE}")
     lines.append("=" * 60)
     lines.append("")
-    lines.append(f"Regime: {REGIME_LABEL} (confidence {regime.get('confidence', 0):.2f})")
+    lines.append(f"Regime: {REGIME_LABEL} ({conf_phrase(regime.get('confidence'))})")
     if sector_stats:
         lead = sector_stats[0]; lag = sector_stats[-1]
         lines.append(f"Lead sector: {lead['sector']} (Δflow {fmtM(lead['flow_delta'])})")

@@ -90,6 +90,7 @@ class SectorBacktestService:
             "date": r.date, "sector_code": r.sector_code,
             "close_idx": r.close_idx, "return_1d": r.return_1d,
             "net_dollar_flow": r.net_dollar_flow, "atr_pct": r.atr_pct,
+            "flow_z20": r.flow_z20,
         } for r in rows])
 
     def _load_signals(self, start: str, end: str) -> dict[str, list[str]]:
@@ -145,6 +146,14 @@ class SectorBacktestService:
         is structurally "rank by sector size" -- BANK/REAL/STEEL win nearly
         every day and the result is a near-static portfolio dressed up as
         rotation (review 2026-08-22, P0-4).
+
+        NOTE (2026-08-23): this does NOT fix that, and the "flow_z" strategy no
+        longer uses it. `(v - mean) / sd` is a positive affine map applied
+        within the same day the rows are then sorted in, and a positive affine
+        map preserves order -- so ranking by this z and ranking by raw VND are
+        the *identical permutation*, every day. Measured on 2026-04-09→08-23,
+        both produced -25.06% and the same 330 trades. Kept only because
+        `_persist` and the P0-4 tests refer to it.
         """
         v = pd.to_numeric(group[col], errors="coerce")
         sd = v.std(ddof=0)
@@ -164,6 +173,9 @@ class SectorBacktestService:
         end_date: str,
         initial_capital: float = BACKTEST_INITIAL_CAPITAL,
         strategy: str = "signals",
+        fee_bps: float | None = None,
+        sell_tax_bps: float | None = None,
+        settlement_lag: int | None = None,
     ) -> BacktestResult:
         """`strategy` selects what is being simulated:
 
@@ -174,6 +186,12 @@ class SectorBacktestService:
         "flow_raw" -- the pre-2026-08-22 behaviour, kept only so the two can
                       be compared. It ranks by un-normalised VND and is
                       effectively "hold the largest sectors".
+
+        `fee_bps` / `sell_tax_bps` / `settlement_lag` override the §18.2/7,10
+        config defaults for one run. They exist so a trader can price their own
+        broker instead of the 15/10/T+2 assumption -- the defaults are still
+        what the scheduled jobs use. Slippage and the ±7% band stay fixed:
+        they are market structure, not a negotiated rate.
         """
         panel = self._load_panel(start_date, end_date)
         if panel.empty:
@@ -189,9 +207,13 @@ class SectorBacktestService:
         max_positions = (MAX_LONG_SECTORS + MAX_ACCUMULATE_SECTORS
                          if strategy == "signals" else MAX_LONG_SECTORS)
 
-        fee = BACKTEST_FEE_BPS / 10_000.0
-        sell_tax = BACKTEST_SELL_TAX_BPS / 10_000.0
-        lag = int(BACKTEST_SETTLEMENT_LAG)
+        fee_bps = BACKTEST_FEE_BPS if fee_bps is None else max(0.0, float(fee_bps))
+        sell_tax_bps = (BACKTEST_SELL_TAX_BPS if sell_tax_bps is None
+                        else max(0.0, float(sell_tax_bps)))
+        lag = int(BACKTEST_SETTLEMENT_LAG if settlement_lag is None else settlement_lag)
+        lag = max(0, lag)
+        fee = fee_bps / 10_000.0
+        sell_tax = sell_tax_bps / 10_000.0
 
         dates = sorted(panel["date"].unique())
         by_date = {d: g.reset_index(drop=True) for d, g in panel.groupby("date")}
@@ -238,9 +260,15 @@ class SectorBacktestService:
                                .reindex([c for c in wanted if c in set(group["sector_code"])])
                                .reset_index())
             elif strategy == "flow_z":
+                # `flow_z20` is the per-sector z of its OWN 20d flow history --
+                # "is this sector unusually bought for itself", which is what
+                # §16.2 means by flow z and what makes a small sector reachable.
+                # The old cross-sectional z here could not do that: see the note
+                # on _cross_sectional_z. Sectors with no z yet sort last rather
+                # than ahead of a genuine +2σ.
                 g = group.copy()
-                g["_z"] = self._cross_sectional_z(g, "net_dollar_flow")
-                ranked = g.sort_values("_z", ascending=False)
+                g["_z"] = pd.to_numeric(g["flow_z20"], errors="coerce")
+                ranked = g.sort_values("_z", ascending=False, na_position="last")
             else:  # flow_raw — legacy behaviour, size-biased
                 ranked = group.sort_values("net_dollar_flow", ascending=False)
 
@@ -322,6 +350,16 @@ class SectorBacktestService:
             bench_ret = panel.groupby("date")["return_1d"].mean().fillna(0)
         bench_total = float((1 + bench_ret).prod() - 1) * 100
 
+        # Benchmark as a *curve*, not just a scalar. Only the total was returned
+        # before, so the chart had one line and "did it beat VNINDEX" was a
+        # subtraction the reader had to do in their head -- and it hid *when*
+        # the strategy lost, which is the whole point of looking at a chart.
+        # Rebased to the same initial capital so both lines share one axis.
+        bench_equity = (1.0 + bench_ret).cumprod() * initial_capital
+        for point in equity_curve:
+            b = bench_equity.get(point["date"])
+            point["benchmark"] = (None if b is None or pd.isna(b) else float(b))
+
         result = BacktestResult(
             name=name, start_date=start_date, end_date=end_date,
             initial_capital=initial_capital, final_capital=final_equity,
@@ -331,7 +369,7 @@ class SectorBacktestService:
             benchmark_return_pct=bench_total,
             equity_curve=equity_curve, trade_log=trades,
             long_only=BACKTEST_LONG_ONLY, settlement_lag=lag,
-            fee_bps=BACKTEST_FEE_BPS, sell_tax_bps=BACKTEST_SELL_TAX_BPS,
+            fee_bps=fee_bps, sell_tax_bps=sell_tax_bps,
             total_cost_pct=(total_cost / initial_capital) * 100 if initial_capital else 0.0,
             ceiling_floor_skips=ceiling_skips,
             root_capture_ratio=(float(np.median(root_caps)) if root_caps else None),

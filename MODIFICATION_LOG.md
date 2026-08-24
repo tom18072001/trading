@@ -14,6 +14,813 @@
 
 ---
 
+## 2026-08-24 (9) — the book can follow a trade, not just record one
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `services/trading_state.py` — `add_position` / `update_position` take
+    `stop` / `target` / `thesis`; `_POSITION_DEFAULT` merged per row in `_read`
+  - `api/routers/state.py` — `PositionBody` / `PositionPatch` fields;
+    `SETTLEMENT_SESSIONS`; new `_track()`; `/positions/pnl` returns `path`,
+    `hit_stop`, `hit_target`, `dist_to_stop_pct`, `dist_to_target_pct`,
+    `sessions_held`, `sellable_on`
+  - `utils/clock.py` — `next_trading_day()`, `sessions_between()`
+  - `frontend/src/api/client.ts`, `lib/tradingState.ts` — types
+  - `frontend/src/pages/DailyInsightPage.tsx` — the mark button sends the
+    levels; `tPlusDays()` counts sessions
+  - `frontend/src/components/KillSwitch.tsx` — `Spark`, Stop/Target column,
+    breach flag, sessions-held sub-line
+  - `tests/test_position_track.py` (new, 13)
+- Reason: Tom — *"chưa có view để khi đánh giá, chọn mua giá thì không có view
+  để xem được hay tiếp tục theo dõi các ngày sau đó."* The data existed at
+  every layer and was destroyed at exactly one line.
+- Summary:
+  - **The defect.** `picks_scoring.compute_stop_target_rr` computes a stop and
+    a target, `PickEntry` carries them, the card renders them and even draws a
+    stop→target ladder — and the "Đã vào lệnh" button sent `entry_price` alone,
+    into a `trading_state` row with no field to receive them. The book was
+    structurally incapable of answering *is this trade still valid* the day
+    after entry.
+  - **No new endpoint.** `/positions/pnl` already read the book, already called
+    `PicksUniverseService().peek()`, already looped the positions, and
+    `MyBookPanel` already called it. A second route would have been two
+    route-ordering tests and two places to drift.
+  - **No new data source.** The price path is `TickerRow.daily_prices` — 30
+    sessions of OHLCV the snapshot already carries and already persists to
+    disk. Its date key is `"time"`; the rename to `"date"` happens once, in
+    `_track`.
+  - **`hit_stop` is "ever touched since entry", not "today's close is
+    through"** — a stop breached Tuesday and recovered Friday is still a
+    breach, and a book that forgets it says the trade is fine.
+  - **T+ is a count of sessions.** `tPlusDays()` used `setDate(+i)`, so a
+    Thursday buy claimed a Sunday settlement; the ladder is also T+2 now, not
+    T+3, matching `BACKTEST_SETTLEMENT_LAG` and §18.2/7. The book row gets the
+    holiday-aware date from `utils/clock.next_trading_day`.
+  - **No migration**, same as `closed` on 2026-08-24 (3) — but `_DEFAULT`
+    merges at the top level only, so rows written before today omitted the key
+    entirely and shipped a shape the TS `Position` type forbids.
+    `_POSITION_DEFAULT` is merged per row on read.
+  - Sparkline is hand-rolled SVG: recharts lives in a 362 kB chunk that only
+    loads on the Backtest tab (§22.3), and a 64×22 polyline must not drag it
+    onto every page. Verified — the built chunk list is unchanged.
+- Verification: 265 backend pass (was 252), 13 vitest pass, ruff 66 (baseline,
+  §20.2), `tsc --noEmit` clean, production build clean. Live probe against the
+  running API: POST with `stop`/`target` round-trips, `sellable_on` = 2026-08-26
+  for a Monday entry, a pre-existing row without a stop returns
+  `dist_to_stop_pct: null` rather than 500.
+- Follow-ups: stop/target **alerts** and the full T+ calendar panel were the
+  two of four items Tom did not select — `hit_stop` and `sellable_on` are
+  computed already, so the UI for them is cheap. `path` is closes only (no
+  high/low in `daily_prices`), so an intraday wick through a stop that closed
+  back above does not register; `ponytail:` in the source names the upgrade.
+
+## 2026-08-24 (8) — the breakout bar was 1.15%, not 8%
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `scripts/stealth_leadtime_experiment.py` — `BREAKOUT_DEFS` (four pluggable
+    definitions), `_score_event(..., bar=)` now stamps `year`, `run()` loops
+    definitions and prints a per-year table against the NO GATE base rate,
+    `--breakout` CLI flag
+  - `CLAUDE.md` — new §16.15; §16.12 and §25.10 amended
+- Reason: §25.10 listed §16.4's `2 × atr_pct` breakout test as suspect because
+  ATR sits in the threshold, so the bar should rise in exactly the choppy tape
+  where the moves clearing it shrink. Every §16.11/§16.12 number is computed
+  through that test, so it is upstream of every stealth result on record.
+- Summary:
+  - **The stated suspicion is falsified.** Sector ATR barely moves year to year
+    (median 0.58/0.53/0.57/0.67% in 2023-26), so `atr_baseline` — the trailing
+    2y median, which has no feedback at all — reproduces `atr_now` almost
+    exactly. The scaling is real in direction, negligible in size.
+  - **The real defect is units, and it is worse.** `atr_pct` is a *daily*
+    range, so the shipped bar is ~1.15%, applied to a 40-session forward
+    *maximum*. 83% of all sector-days clear it. §16.4 has been running a
+    liveness test wearing the name of a breakout test.
+  - `atr_scaled` = `2 × median ATR × √40` ≈ 7.2% fixes the units — a random
+    walk's expected maximum grows with √n — while keeping §16.4's "two normal
+    moves" intent, the sector-relative property, and no ATR feedback.
+  - Under it: base rate 43% breakout / 74% at ≥10d / median lead 17; shipped
+    §16.1 gate 40% / 75% / 21; `foreign_streak` swap 62% / 90% / 34.
+  - **§16.11's lead-time criterion is retired by this.** "≥10d lead on ≥60% of
+    signals" is cleared by the *unconditional* base rate (74%), so it was
+    satisfiable by noise. Only the margin over NO GATE counts — §16.12's rule,
+    now unavoidable.
+  - Conclusions that survive unchanged: the shipped gate is no better than no
+    gate, `foreign_streak` is the only variant ahead, every variant still
+    collapses in 2026 under every definition, root capture stays ~0.94. §16.14
+    and §25.9 stand.
+  - **No live signal changes.** `analysis/stealth.py` uses no breakout
+    definition; this is a measurement bench only.
+- Verification: 252 backend tests pass; ruff unchanged at 66; the four
+  definitions run end to end.
+- Follow-ups: `foreign_streak` still needs a within-year win in 2026 before it
+  can be shipped into §16.1 (n=3 there). §16.11's remaining two criteria
+  (root capture, false-positive rate) have not been re-derived against a base
+  rate — the lead-time one was the only one measured this pass.
+
+---
+
+## 2026-08-24 (7) — the late-third degradation is volatility, not a defect
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `scripts/late_period_diagnosis.py` (new)
+  - `analysis/regime.py` (module header — it still carried the retracted
+    300-bar calibration claim that `confidence_phrase()` corrects 40 lines below)
+  - `CLAUDE.md` §16.13 (amendment), §25.9 (new), §25.10 (replaces §25.8)
+- Reason: §25.8 named this the highest-value open question. Two unrelated models
+  — the §25.7 horizon sweep and the §16.1 stealth gate (§16.13) — degrade over
+  the same recent stretch, and a fault common to both points at the tape or the
+  data rather than at either model. Left unanswered, every subsequent tuning
+  pass on either model would be fitting to a cause nobody had identified.
+- Summary:
+  - **Not data.** Every 2026 quarter: 15 sectors, ~0 missing `close_idx`,
+    96-100% non-zero `foreign_net`. Coverage matches the years that work.
+  - **Not a stale transition matrix.** `transmat_` is fitted once over the whole
+    panel; re-estimating transitions on a trailing window (emissions untouched)
+    fixes the late +9.3pt survival bias and *costs* discrimination and overall
+    Brier (0.1607 → 0.1916 at W=250). So the late failure is lost discrimination
+    — late AUC 0.673 vs 0.816/0.828 earlier — not miscalibration. Nothing ships
+    from this check; it is recorded so nobody re-runs it hoping.
+  - **It is volatility.** Bucketing all 900 bars by 20d VNINDEX vol, ignoring
+    date: AUC 0.827 / 0.790 / 0.694 low→high, and the high-vol bucket is only
+    42% late-third. Crossed both ways, low-vol *late* bars beat high-vol *early*
+    ones. A regime model is least certain when regimes are least stable; that is
+    the model reporting a harder problem, not a bug.
+  - **§16.13's "2026 is a flatter tape" is wrong** and amended. Measured: median
+    forward-40d **−7.6%** with only 17% positive, and annualised vol **0.42**
+    against 0.21-0.29 in 2024-25. Only the forward-40d *max* compressed, which
+    is the single column §16.13 was reading. Down-and-volatile is a different
+    diagnosis from flat, and argues for a different fix.
+  - **New defect surfaced, not fixed:** the 2×ATR breakout test used throughout
+    §16.11/16.12 scales with the tape it measures — rising ATR raises the bar
+    exactly when the moves that must clear it are shrinking. Every stealth
+    result recorded so far is computed through it. Logged as §25.10.
+  - `analysis/regime.py`'s module header still asserted the calibration claim
+    §25.2 retracted on 2026-08-24 (3), directly contradicting the docstring 40
+    lines below it. Corrected; the dated records in `CLAUDE.md` and this log
+    keep the original wording, since each carries its retraction beneath.
+- Verification: `python scripts/late_period_diagnosis.py` reproduces all four
+  checks end to end. 252 backend tests green (unchanged — this pass adds a
+  diagnostic and no behaviour). ruff 66, unchanged; the new script is clean.
+- Follow-ups:
+  - A vol-conditioned `CONF_HORIZON`. In the high-vol bucket even H=5 is
+    marginal. Needs its own walk-forward; §25.2 is the standing warning about
+    fitting a layer on a recent slice.
+  - Fix the breakout definition before any further §16 condition tuning.
+  - Browser verification of the close flow (carried from entry 6 — both dev
+    servers run outside the preview harness on this box).
+
+---
+
+## 2026-08-24 (6) — a sale stops being a delete; CONF_HORIZON stops being an assertion
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `services/trading_state.py` (`closed` key, `close_position()`, `realised_pnl()`)
+  - `api/routers/state.py` (`POST /positions/{symbol}/close`, `GET /positions/realised`)
+  - `frontend/src/api/client.ts`, `lib/tradingState.ts` (types + bindings)
+  - `frontend/src/components/KillSwitch.tsx` (`ExitCell`, `ClosedBookPanel`),
+    `pages/RiskPage.tsx`
+  - `tests/test_position_close.py` (new, +17)
+  - `analysis/regime.py` (`CONF_HORIZON` comment, `confidence_phrase()` hedge)
+  - `scripts/regime_horizon_experiment.py` (new)
+  - `tests/test_regime_confidence.py` (+2, now 15)
+  - `CLAUDE.md` §19, §22.10, §25.2, §25.6, §25.7 (new), §25.8;
+    `ARCHITECTURE.md` CHANGELOG + `state.py` router row
+- Reason: three items left open by entries (2)-(5), all of them fixable in code.
+  1. The book had **one verb for removing a row**. `remove_position()` deletes,
+     so "I mis-clicked" and "I sold at 28" were the same operation and both
+     destroyed the evidence — the app was structurally incapable of answering
+     whether its own picks made money. §22.10 called realised attribution "the
+     next thing to add"; this is it.
+  2. `CONF_HORIZON = 5` was asserted. Nothing measured said one trading week
+     was the right horizon for a regime call.
+  3. §25.7 recorded "the top confidence bucket needs isotonic calibration" as a
+     known defect, on the strength of a single 300-session window.
+- Summary:
+  - **`close_position()` is deliberately not `remove_position()`.** It moves the
+    row to a new `closed` list with realised P&L; `DELETE` still deletes, for
+    the mis-click. The UI gets "Đã bán" (asks for the fill price) and a smaller
+    ✕ beside it.
+  - Realised P&L is **net of the §18.2/10 costs**, imported from `config.py`
+    (`BACKTEST_FEE_BPS`×2 + `BACKTEST_SELL_TAX_BPS`, ≈0.40% round trip) rather
+    than retyped — a book quoting a gross number the backtest would call a loss
+    is worse than no book. `pnl_pct` is computed even without `qty` because
+    cost-in-percent is size-independent; `pnl_vnd` stays null rather than
+    invented.
+  - `closed` is a key, not migration 12: `_read()` merges `_DEFAULT`, so every
+    state file written before today loads unchanged (pinned by a test).
+  - `/positions/realised` is a literal sharing a prefix with
+    `/positions/{symbol}` — same route-ordering trap `/positions/pnl` already
+    documents, and pinned the same way.
+  - **`CONF_HORIZON` measured.** Pooled Brier skill over 900 walk-forward bars
+    picks H=13, and that answer is rejected: the entire H≥8 advantage comes from
+    the middle third, and on the last third every horizon above 5 goes negative
+    (H=20 at −0.166, AUC 0.510). H=5 is the only one positive in all three
+    thirds, so it stays — not as optimal, as the longest not shown to break.
+  - **A prior claim of mine was wrong and is corrected in place.** Over the full
+    900 bars the top confidence bucket is well calibrated (0.895 predicted vs
+    0.906 realised, n=406); the **bottom** is the biased end (0.487 vs 0.370),
+    and the gap widens toward today. The old figure was a 300-bar artefact that
+    read a period-specific miss as a level-specific one. The hedge in
+    `confidence_phrase()` moved from >0.85 to <0.55 and reversed direction — a
+    low reading *overstates* survival, which is the dangerous way to be wrong.
+  - **No calibrator ships.** Isotonic and Platt both fitted walk-forward lose to
+    raw on mean Brier (0.1464 raw vs 0.1540 / 0.1479). A calibrator that loses
+    out of sample is a fitted layer that costs money.
+- Verified: 252 backend (was 233) + 13 frontend green; `npx tsc --noEmit` clean;
+  ruff 66, unchanged from baseline.
+- Follow-ups:
+  - **The late-third degradation is now visible in two unrelated models** — the
+    horizon sweep here and the §16.13 stealth gate both fall apart over 2026. A
+    defect common to both is more likely the tape or the data than either model.
+    That is the next thing to look at, ahead of tuning either.
+  - No partial exits: a close takes the whole position (`ponytail:` in source).
+  - Browser verification of the close flow is still outstanding — both dev
+    servers run outside the preview harness on this box.
+
+## 2026-08-24 (5) — the report still called it "confidence"
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `analysis/regime.py` (new `confidence_phrase()`)
+  - `generate_report.py` (6 call sites: banner, 4 stance strings, plain-text body)
+  - `tests/test_regime_confidence.py` (+3, now 13)
+  - `CLAUDE.md` §25.6 (new, closes the follow-up), §25.7, §19 counts, §20.2 ruff note
+- Reason: entry (4) changed what `sector_regime.confidence` measures but not
+  what the daily email calls it. Six places rendered `"HMM confidence {:.2f}"`.
+  After the rewrite they printed 0.65 instead of 1.00 — the intended change,
+  and the one that needed the wording fixed most: the word "confidence" invites
+  a reader to size on the number, and it is no longer a confidence. It is
+  P(this label survives 5 sessions). The strings were written when the value
+  was always ~1.0 and never had to mean anything.
+- Summary:
+  - One renderer, in `analysis/regime.py` rather than in the report. The
+    sentence is a property of the formula — whoever changes what the number
+    means owns the words describing it. It is also the only way to test it:
+    `generate_report.py` sends mail on `import` (§20.3 P3-2), so nothing in it
+    is reachable from pytest.
+  - `Tape đang risk-on (HMM confidence 0.65)` → `Tape đang risk-on (~65% khả
+    năng giữ 5 phiên tới)`. The horizon is stated, not implied.
+  - Above 0.85 the phrase appends a hedge naming the miscalibration §25.2
+    measured (0.90 predicted vs 0.70 realised). Pinned by
+    `test_the_phrase_hedges_exactly_where_calibration_fails`, so it cannot be
+    removed without deleting the test that explains it.
+  - Verified against the live row (`risk_on 0.6472` → `~65% khả năng giữ 5
+    phiên tới`) and across the 0.46–0.91 range the formula actually produces.
+  - `CLAUDE.md` §20.2's "666 findings → 30" corrected: the ruff baseline is
+    **66**, measured, with the per-rule breakdown recorded so the next reader
+    re-measures instead of trusting a hardcoded count.
+- Follow-ups:
+  - `CONF_HORIZON = 5` is still asserted, not derived. The phrase now says "5
+    phiên" out loud, which makes the arbitrariness visible, not smaller.
+  - Isotonic calibration of the top bucket. Until then the hedge is a sentence,
+    not a correction.
+  - `generate_report.py` was compile-checked, not run: a full run sends mail.
+
+---
+
+## 2026-08-24 (4) — regime confidence was a collapsed HMM's posterior
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `analysis/regime.py` (rewritten)
+  - `services/rotation_model_service.py` (`classify_regime` history window)
+  - `services/macro_service.py` (both VNINDEX fetchers)
+  - new `tests/test_regime_confidence.py` (+10)
+  - `CLAUDE.md` §25 (new), §19 (counts)
+- Reason: Tom — *"do tin cay cua thi truong luon la 100% la sai / toi can cong
+  thuc tinh chuan hon (regime thi truong)"*. `sector_regime.confidence` read
+  0.9999998 on nearly every row while the label flipped risk_off → risk_on →
+  risk_off on consecutive days. A confidence that is always 1.0 carries no
+  information, and one attached to a label that flips weekly is actively
+  misleading.
+- Summary:
+  - **The reported symptom was the third defect, not the first.** The fit had
+    collapsed: features were fed raw, their scales differ ~6× (5d return sd
+    0.028 vs 20d vol sd 0.005), and diagonal Gaussian EM is not scale-invariant.
+    Three of four states blew up to hmmlearn's ceiling covariance of 1000 and
+    all 111 observations landed in the survivor. **With one live state the
+    posterior is 1.0 by construction** — the model was not confident, it was
+    degenerate. Standardising gives occupancy `[154 177 470 251]`, max
+    covariance 2.7.
+  - **Too little history.** 180 calendar days is ~111 bars for a 40-parameter
+    model. Now 1500 (~1050 bars, back to 2022), which spans more than one
+    regime — a model fitted inside a single regime cannot label regimes.
+  - **The number answered the wrong question.** Even after both fixes the state
+    posterior sits at ~0.95: a Gaussian HMM is near-certain *which state a bar
+    is in* whenever the states separate at all. That is a property of the fit,
+    not a reason to act. `confidence` now means **P(this label still holds in 5
+    sessions)** — the filtered posterior propagated through the transition
+    matrix. Measured over 300 sessions: predicted 0.69, realised 0.60,
+    calibrated within a few points across the middle three buckets; range
+    0.46–0.91. Live today: `risk_on 0.6472`.
+  - **Filtered, not smoothed — this closes §20.3 P1-4.** `predict_proba` over
+    the whole panel is forward-backward, so it re-decodes history with hindsight
+    and yesterday's published label could silently change. The last bar of a
+    prefix has no future to smooth over, so `predict_proba(X[:t+1])[-1]` is the
+    filtered posterior using public API only (hmmlearn 0.3.3 has no
+    `_do_forward_pass`).
+  - `fit()` now **refuses** a collapsed fit (>1 empty state) and falls back,
+    rather than publishing its 1.0.
+  - The heuristic fallback returned hardcoded 0.6/0.6/0.5/0.5 — made-up numbers
+    wearing the same field name as measured ones. It now reports the share of
+    the last 10 sessions carrying the same label: same semantics as the HMM
+    path, so the two are comparable and neither overstates itself.
+  - **Correction to an earlier claim in this session.** Mid-investigation I
+    reported that `config.DATA_SOURCE = KBS` answers "VNINDEX" with ~1.79 and
+    that this poisoned the classifier. Both halves were wrong, and the fix
+    docstrings said so before they were corrected. Measured: KBS returns 1784.24
+    and VCI 1784.29 for the same day **when given a date range**. And
+    `classify_regime` overwrites `macro_df` with `fetch_vnindex_daily()` before
+    use, so `macro_anchors.vnindex` never reached the classifier at all. The
+    real defect there is narrower: `MacroService._fetch_vnindex` asked for
+    `today..today`, one bad read on 2026-04-16 returned 1.82, and `ingest_now`'s
+    carry-forward — which cannot distinguish a *missing* value from a *wrong*
+    one — copied it into the next 613 rows. Fixed with a 10-day window plus a
+    `VNINDEX_MIN_PLAUSIBLE = 200.0` floor so a bad read returns None and
+    carry-forward keeps the last **good** value.
+  - The 613 existing rows are left as-is and marked `ponytail:` — nothing reads
+    that column, so a backfill would be tidying, not repair.
+- Verification: 217 backend tests pass (207 → +10). `python main.py --regime`
+  writes `risk_on conf=0.6472`; `GET /api/sectors/regime` returns it. ruff
+  unchanged at the 66-finding baseline.
+- Follow-ups:
+  - **`hmmlearn` was missing from the system interpreter that runs pytest**, so
+    every prior regime test had been exercising the heuristic while production
+    (which runs `uv run`, resolving `.venv`) ran the HMM. Installed, and the new
+    tests skip rather than silently pass when it is absent. Worth an environment
+    check in CI — a test suite that runs a different code path than production
+    is a suite that agrees with itself.
+  - The top confidence bucket is overconfident (0.90 predicted vs 0.70 actual).
+    Read >0.85 as "likely", not "certain". Isotonic calibration would fix it and
+    needs more history than 300 sessions to fit honestly.
+  - `CONF_HORIZON = 5` is asserted, not derived. Nothing measured says one
+    trading week is the right horizon for a regime call.
+  - §19's "~30 ruff findings" (§20.2 P3-5) is stale — the baseline is 66 now,
+    grown by later test files, not by this pass.
+
+## 2026-08-24 (3) — edit the entry price; mark the book to market
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `services/trading_state.py` (`update_position`)
+  - `api/routers/state.py` (`PATCH /positions/{symbol}`, `GET /positions/pnl`)
+  - `frontend/src/api/client.ts`, `frontend/src/lib/tradingState.ts`
+  - `frontend/src/components/KillSwitch.tsx`
+  - new `tests/test_position_edit.py` (+13)
+  - `CLAUDE.md` §22.10 (the "no P&L yet" note), §19 (counts)
+- Reason: Tom — *"toi thay muc daily insight co danh dau/vao lenh / can keep
+  track phan nay / cho toi sua gia vao lenh va man hinh kiem soat cac lenh da
+  vao"*. §22.10 shipped the book but stored no way to correct an entry price and
+  no current price, so the "control screen" was a list, not a control.
+- Summary:
+  - `update_position` is a **separate verb from `add_position` on purpose**:
+    `add_position` stamps `opened_at` to today and drops the symbol from the
+    watchlist, both wrong when you are only correcting a price you typed from
+    memory. The price stamped by "Đã vào lệnh" on Daily Insight is the previous
+    close, which is almost never your fill — that is the whole reason this
+    exists.
+  - Partial semantics: `None` means "leave alone", so a negative number is the
+    explicit clear. The alternative — omitted means clear — would silently wipe
+    `qty` on every price edit.
+  - `GET /positions/pnl` marks the book against `PicksUniverseService().peek()`,
+    **never `get_snapshot()`**: a cold cache must return in milliseconds, not
+    block for minutes behind the 18 req/min KBS throttle (the trap
+    `api/routers/insight.py` documents at `/daily`).
+  - It returns `priced` and `count` separately. A P&L computed over 1 of 3 rows
+    must not be readable as the book's P&L, and the header says so when they
+    differ.
+  - Inline cell editing (commit on blur/Enter, revert on Escape) rather than a
+    per-row save button: two editable numbers per row do not justify a form, and
+    commit-on-blur means the value you can see is the value on disk.
+  - `ponytail:` on the P&L handler — last close, not intraday, and no fees or
+    the §18.2/10 sell tax. It is a position tracker, not the backtest cost model.
+- Verification: 230 backend tests pass (217 → +13), `npx tsc --noEmit` clean,
+  13/13 vitest pass, ruff at baseline. Endpoints exercised against the live
+  server: `/api/state/positions/pnl` returns `priced: 1, count: 1` with
+  `as_of: 2026-08-24`.
+- Follow-ups:
+  - **Not verified in a browser.** Both dev servers were already running outside
+    the preview harness, so this pass is endpoint- and type-level only. The
+    inline-edit interaction wants a visual check.
+  - Still no exit price, so realised P&L does not exist — only unrealised. That
+    is the next thing to add if performance attribution is wanted.
+  - A pnl route test pins that `/positions/pnl` is not shadowed by
+    `/positions/{symbol}`; if a GET is ever added to the parameterised route,
+    order matters.
+
+## 2026-08-24 — §16.11's next experiment ran; the named suspect was wrong
+- Author: Claude Code on behalf of Tom
+- Files:
+  - new `scripts/stealth_leadtime_experiment.py` (bench only — writes nothing)
+  - `CLAUDE.md` §16.11 (result recorded)
+- Reason: §16.11 closed by naming an experiment — whether §16.2's leading
+  features (`flow_price_divergence`, `foreign_streak`, `flow_leadtime_proxy`),
+  computed and stored but used in no condition, can buy the lead time the gate
+  lacks (median 3 days against a ≥10-day target). §18.8 requires evidence, so
+  it is measured over the full 13,470-row panel rather than argued.
+- Summary:
+  - Six condition-set variants, scored on §16.11's three criteria at ≥4/5, N=3.
+  - **The doctrine's suspect was wrong.** Every variant containing
+    `flow_price_divergence` made lead time *worse* (median 3 → 2-3 days, ≥10d
+    share 20% → 4-17%) while inflating event count 20 → 38-77. It fires more
+    often, not earlier.
+  - **What moved:** replacing cond2's 20d hit *rate* with `foreign_streak ≥ 3`.
+    Events 20 → 16, breakout 75% → 88%, ≥10d share 20% → **50%**, median lead
+    3 → **8**, root capture 0.940 → 0.924. This is §18.5/21's argument arriving
+    from the other direction — a hit rate is satisfiable by one block trade plus
+    19 quiet days; persistence is the part that leads.
+  - **Not shipped.** n=16 over 3.5 years, and the year split puts the whole
+    effect pre-2026: 2023-25 run 50-67% at ≥10d (median lead 10-14), 2026's
+    three events 0% / median 3. `analysis/stealth.py` is unchanged; the shipped
+    gate stays as committed in `c96efc7`.
+- Follow-ups:
+  - **The 2026 collapse is the real finding.** Both gates degrade in 2026, so a
+    defect common to two condition sets is more likely data or regime than
+    condition choice. Look there before tuning further conditions.
+    → chased the same day; see the next entry.
+  - Re-run once 2026 has more events; if `foreign_streak` holds up out of
+    sample, the change is a one-line edit to `_conditions` in
+    `analysis/stealth.py` plus a §16.1 amendment.
+  - Root capture stays ~0.92 against §16.11's ≤0.85 on every variant — no
+    condition set here earns the "gốc" claim.
+
+---
+
+## 2026-08-24 (2) — the gate has no edge: base rate added to the bench
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `scripts/stealth_leadtime_experiment.py` (`_baseline`, `_summarise`,
+    NO GATE row, header RESULT block)
+  - `CLAUDE.md` new §16.12, §16.13, §16.14
+- Reason: chasing the 2026 collapse logged above. The check that settles it —
+  scoring **every** row, i.e. no gate — was missing from the bench, and adding
+  it changed the reading of every earlier measurement.
+- Summary:
+  - **NO GATE base rate: 83% breakout, 23% at ≥10d, median lead 4, RC 0.944**
+    over 13,033 scorable rows. The shipped §16.1 gate: 75% / 20% / 3 / 0.940.
+    **It is worse than not filtering.** Only `foreign_streak` beats it.
+  - **§16.11's criteria cannot detect this** — they are absolute thresholds, so
+    a worse-than-random gate reads as merely "under target". Amended in §16.12:
+    the three targets are necessary but not sufficient; a candidate must also
+    beat NO GATE **within each year**. Pooling is what let `foreign_streak`'s
+    pre-2026 strength mask a 2026 that matches random.
+  - **2026 collapse is mostly the market** (§16.13). Base breakout falls
+    88/84/86% → **68%**; median forward-40d max +7.1/5.4/7.9% → **+3.2%**.
+    Ruled out: data coverage (99-100% on every field the gate reads) and
+    right-censoring (1 of 7 events has <40 forward sessions). But the gate
+    degrades *faster* than the tape — 50% vs 68%, 0% vs 18% at ≥10d — so
+    regime explains the level, not the shortfall.
+  - §16.14 states the consequence plainly: **live `ACCUMULATE` output is a
+    watchlist, not an instruction**, and no §16.9 sizing rule should be trusted
+    on it until a variant beats NO GATE within-year.
+  - Correction made in-pass: I first read `breadth_sma20` as 76% covered in
+    2026. It is **100%** — zero NULLs since 2024; I had counted a legitimate
+    `0.0` as missing. The rising zero *rate* (16% → 24%) is the flat tape
+    showing up in breadth, not a gap. Recorded in §16.13 rather than silently
+    fixed, since the wrong number briefly justified a wrong suspect.
+- Follow-ups:
+  - `analysis/stealth.py` still unchanged — no shipped behaviour moved in this
+    entry. The decision it forces (retune, or demote ACCUMULATE in
+    `sector_signal_service`) is Tom's.
+  - The breakout definition is pinned to 2×ATR; in a flat tape ATR falls too,
+    so the bar is not fully regime-neutral. Worth testing an absolute-return
+    breakout as a robustness check on §16.13's headline.
+  - §18.5/22's distribution guard and §18.1/15's sector-specific quantiles are
+    both still open and both plausibly relevant to the edge problem.
+
+---
+
+## 2026-08-23 (late, 6) — §16.1 stealth gate: AND → score; §20.3 P0-5 and P1-1 closed
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `analysis/stealth.py` (the gate; `STEALTH_MIN_CONDITIONS`; `RETURN_BOTTOM_FRAC` 0.60 → 0.40)
+  - `api/routers/stealth.py` (classification, `min_conditions`, cond4 percentile)
+  - `frontend/src/lib/stealthPresets.ts` (rewritten), `lib/glossary.tsx`,
+    `pages/StealthWatchPage.tsx`
+  - new `tests/test_stealth_gate.py` (14)
+  - `CLAUDE.md` §16.1, §16.2, §16.11, §19, §20.3, §22.1, §24.2, §24.4
+- Reason: closes **§20.3 P1-1** (§18.8 requires evidence, not just code) and
+  **§20.3 P0-5**. Found by *exercising* the Chặt/Vừa/Rộng presets shipped in the
+  previous entry, whose stated purpose was to price P1-1 in sectors. They
+  returned `active: []` at every setting including maximally-wide — so the
+  disagreement they were built to price was worth zero sectors on either side.
+- Summary:
+  - **The §16.1 conjunction was arithmetically unreachable.** Measured on the
+    full 13,470-row panel: pass rates c1 17.5% · c2 20.4% · c3 34.7% ·
+    c4 52.1% · c5 47.7%; all five at once on 0.3% of rows; **longest
+    consecutive all-five run across 15 sectors in 3.5 years = 2 sessions**
+    against a requirement of 3. `accumulation_age` was 0 on every row ever
+    written — not because §16 was untested, because it could not fire. §22.1
+    had the symptom right and the cause wrong.
+  - **Gate is now a score.** ≥ `STEALTH_MIN_CONDITIONS` of 5 (default 4) held
+    ≥ `STEALTH_MIN_SESSIONS` (default 3). Conditions deliberately unweighted —
+    §16 gives no basis to rank them. A condition that cannot be evaluated is
+    dropped from **both** numerator and denominator, so missing data never
+    silently raises the bar (`need = min(MIN_CONDITIONS, len(conds))`).
+  - **Result:** 23 events / 11 sectors; 53 rows with `accumulation_age > 0`
+    (max 7) after backfilling via `_rebuild_leading_features_fast`. First
+    non-zero values in the system's history.
+  - **It fails §16.11, and that is now written into §16.11 rather than glossed.**
+    74% breakout within 40d, but **median lead 3 days, only 24% at ≥10 days**
+    (target ≥60%) and **root capture 0.910** (target ≤0.85). Tightening to N=5
+    gives 12 events / 92% / 36% / 0.913; loosening to ≥3/5 gives 130 / 79% /
+    17% / 0.944. Read plainly: this is a momentum confirmation signal — §16.3's
+    `BUY`, "cành cao" — wearing the `ACCUMULATE` label. The "gốc" claim is not
+    yet earned and §16.9's 1.5× sizing should not be trusted on it. Suspect is
+    c1: `flow_z20 > 1` is contemporaneous. The §16.2 features that would buy
+    lead time (`flow_price_divergence`, `foreign_streak`, `flow_leadtime_proxy`)
+    are computed and stored but are in no condition. Next experiment.
+  - **P0-5 closed.** `foreign_net` non-zero on **12,616 / 13,470** rows,
+    2023-03-13 → 2026-08-21, backfilled by `b4d1d90`; `foreign_hit_20d` spans
+    0.0→1.0 with 2,742 rows clearing 0.6. Consequence nobody logged at the
+    time: the backfill flipped `foreign_available` to True, silently taking the
+    stealth gate from 3 evaluable conditions to 5 — a behaviour change arriving
+    as a side effect of a data change. Now explicit and pinned by a test.
+  - **Endpoint reconciled with the scanner.** `/api/stealth/active` classified
+    `active` only at `passes == 5` with its own `min_sessions=5`, a *third* set
+    of thresholds. Both knobs are imported from `analysis.stealth` now.
+  - **cond4 was passing for free.** The endpoint compared a raw `atr_pct`
+    (~0.006) to a threshold named `atr_rank_max` (0.5), so the "five-condition"
+    gate was really four on all 15 sectors. It takes a 0..1 percentile within
+    the sector's own window now.
+  - **Presets rewritten** around `min_conditions`, page opens on **Vừa** (what
+    runs) not Chặt (what returns 0). Chặt is kept precisely so the doctrine
+    number can be seen returning nothing. The `foreign_hit_20d` tooltip warning
+    was already false the morning it shipped; corrected.
+- Follow-ups:
+  - **Buy back the lead time.** Add `flow_price_divergence` / `foreign_streak`
+    to the condition set and re-measure §16.11. Until then ACCUMULATE ≈ BUY.
+  - `/api/stealth/history` is still `{"rows": []}` — the Gantt and the
+    HIT / FALSE POSITIVE chips on Stealth Watch have no source. The 23 events
+    now exist and could populate it (§16.7's `sector_accumulation_events`).
+  - §18.1/15 still open: the cuts are global, not sector-specific quantiles.
+    With foreign data live, that is now the sharpest remaining §16.1 lever.
+
+---
+
+## 2026-08-23 (late, 5) — Global filter, stealth presets, CSV, send-report, tooltips
+- Author: Claude Code on behalf of Tom
+- Files:
+  - new `services/report_runner.py`, `api/routers/state.py` (+2 endpoints)
+  - new `frontend/src/lib/filters.tsx`, `lib/stealthPresets.ts`, `lib/glossary.tsx`
+  - `frontend/src/pages/RankingPage.tsx`, `FlowMonitorPage.tsx`,
+    `StealthWatchPage.tsx`, `DailyInsightPage.tsx`
+  - `frontend/src/api/client.ts` (`sendReport`, `reportStatus`, `ReportStatus`)
+  - new `tests/test_report_runner.py` (11)
+- Reason: sponsor review step 6, the last of the six. Every table showed all 15
+  sectors in one fixed order with no way to say "show me less", nothing on any
+  page said what `flow_z20` or `stealth_score` mean, and the only way to send
+  the daily email off-schedule was a terminal on this machine.
+- Summary:
+  - **One filter vocabulary, not five.** `lib/filters.tsx` exports
+    `useTableFilter` / `passes` / `useSorter` / `Th` / `downloadCsv` /
+    `FilterBar`, wired into Ranking and Money Flow Monitor. State lives in the
+    **URL** (`?rk_act=BUY&rk_sort=score&rk_dir=desc`, `replace: true`), because
+    a filtered view is a thing you send to someone and F5 must not clear it.
+    A prefix per table keeps two tables on one page from colliding.
+  - **"Chỉ ngành tôi đang nắm"** answers a question no page could answer,
+    purely client-side from the `lib/tradingState.ts` store — no backend call.
+    Disabled with the count visible when the book is empty.
+  - **CSV export** carries a UTF-8 BOM: without it Excel on a Vietnamese
+    locale renders "Ngân hàng" as mojibake, which makes the feature useless to
+    its only user.
+  - **Stealth presets — Chặt / Vừa / Rộng.** Named for the argument they
+    carry, not for tightness. "Chặt" is doctrine §16.1 (N=5, đáy 40%); "Vừa" is
+    what `analysis/stealth.py` actually ships (N=3, đáy 60%) and raises a
+    warning naming both numbers and §20.3 P1-1; "Rộng" is a probe, not a buy
+    list. Switching between the first two now prices the P1-1 disagreement **in
+    sectors**. The conflict is three-way: `api/routers/stealth.py`'s own Query
+    defaults already match doctrine, so the offline scanner that writes
+    `accumulation_age` and the endpoint this page reads are gated differently.
+    The six knobs became URL params too.
+  - **Send report now.** `POST /api/state/report/send` +
+    `GET /api/state/report/status`. It **shells out** rather than imports:
+    `generate_report.py` is 1,629 module-level lines driven by `sys.argv` with
+    no `main()` (§20.3 P3-2), so importing it would send mail as an import side
+    effect, once per process. Placed under `/api/state/*` because it is an
+    operator action — same category as the kill-switch and the book. A second
+    click returns `already_running` instead of starting a second subprocess;
+    two clicks must not send two emails, and that is the one thing tested hard.
+    `report_date` is regex-validated before anything runs.
+  - **Tooltips.** `lib/glossary.tsx` — 13 terms behind a native `title`. No
+    state, no portal, no library, and the only tooltip that works on a table
+    header without fighting `overflow-hidden`. `foreign_hit_20d` carries the
+    §20.3 P0-5 warning that `foreign_net` is zero across the whole history, so
+    the term names a condition that has never done anything.
+- Verification: 193 backend (182 + 11), 13 frontend, `npm run build` 385.49 kB
+  main + 361.97 kB recharts chunk, `ruff check` clean on the new files.
+- Follow-ups: `Th`/`FilterBar` are not yet on the Risk, Stealth or Regime
+  tables. Native `title` has no touch support (~1s delay) — swap for a popover
+  if a term ever needs a formula or a link. Report history is in-memory only;
+  it becomes a table like `model_runs` if a second operator appears.
+
+---
+
+## 2026-08-23 (late, 4) — Backtest controls; and `flow_z` was `flow_raw` in disguise
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `services/backtest_service.py` (strategy fix, cost overrides, benchmark curve)
+  - `api/routers/sectors_backtest.py` (`strategy` + cost fields on the request)
+  - `frontend/src/api/client.ts` (`BacktestStrategy`, 10 result fields, `listBacktests`)
+  - `frontend/src/pages/BacktestPage.tsx` (rewritten)
+  - new `tests/test_backtest_controls.py` (13)
+- Reason: sponsor review step 5. The backend had modelled T+2, fees, sell tax,
+  slippage and the ±7% band since 2026-08-22 and returned ten fields proving
+  it — the frontend received none of them and the router accepted no
+  `strategy`, so every run the UI could trigger was the same default. Tom's
+  words: *"đây là filter đắt giá nhất đang bị giấu."*
+- Summary:
+  - **Strategy selector.** `BacktestRequest` gains `strategy` as a `Literal`,
+    not a `str`: unvalidated, a typo fell through to the `flow_raw` branch,
+    which is the one behaviour nobody wants by accident.
+  - **`flow_z` and `flow_raw` were the same strategy.** Found by shipping the
+    selector and comparing: both returned **-25.06% over an identical 330
+    trades**. Cause: `_cross_sectional_z` computed `(v - mean) / sd` *within
+    the same day the rows were then sorted in*. A positive affine map preserves
+    order, so it produced the raw-VND permutation every day — the P0-4 fix for
+    size bias never actually removed the size bias. `flow_z` now ranks on
+    `flow_z20`, the per-sector z against a sector's **own** history (§16.2),
+    which is the only version that can surface a small sector. Now
+    signals -6.14% / flow_z -26.07% / flow_raw -25.06% — three strategies.
+    `_cross_sectional_z` is kept (P0-4 tests refer to it) with the proof in its
+    docstring and a test pinning it.
+  - **Per-run cost overrides.** `fee_bps` / `sell_tax_bps` / `settlement_lag`
+    thread through `run()`, clamped at ≥0 — a negative fee would pay the trader
+    to trade. Slippage and the ±7% band stay fixed: market structure, not a
+    negotiated rate.
+  - **Benchmark as a curve.** `_load_benchmark` already produced a daily series
+    but only the scalar escaped, so the chart could not draw it. Each
+    `equity_curve` row now carries `benchmark`, rebased to the same initial
+    capital. A test asserts the curve's total agrees with the tile.
+  - **Trade log rendered.** It was fetched and discarded, which made every
+    metric above it unauditable. Also corrects the TS type: rows carry
+    `alloc` (BUY) or `proceeds` (SELL) and `cost` — never the `ret` the type
+    claimed, which has never existed in the payload.
+  - **The Sharpe caveat was false.** The note added in the A7 pass said T+2,
+    fees, tax and the price band were *not* modelled. It was written from
+    §18.6's open-BLOCKER list without reading the service, which models all
+    four. It now prints the actual figures. A false caveat is worse than none:
+    it teaches the reader to discount a number that is already net.
+  - **Default range moved to 2026-04-09 → today.** It was 2025, and
+    `sector_signals` starts 2026-04-09 — so the page opened on "Tín hiệu đã
+    phát" and silently fell back on every first run. A visible banner now says
+    so when a fallback does happen.
+  - Compare-2-runs pins the current result client-side and joins the pinned
+    curve **by date**, not by index — an index join would slide two ranges
+    against each other and draw a comparison that never happened.
+- Evidence (§18.8): backend 169 → **182** (13 new); frontend 13/13; `tsc`
+  clean; build main bundle **374.84 kB** (unchanged — the growth is in the lazy
+  `BacktestPage` chunk, 346 → 361.97 kB). Live: all three strategies exercised
+  through the UI at 1440px, 3 curves render with the pinned run, 0 failed
+  requests.
+- Follow-ups:
+  - The `flow_z`/`flow_raw` collapse means **P0-4's size-bias fix never worked**
+    in the flow baseline. CLAUDE.md §20.2's P0-4 row overstates what shipped.
+  - The live run shows **45% friction on 844 trades/year** at default costs.
+    That is the daily-rebalance turnover, not a bug in the cost model, but it
+    says the strategy as simulated is uninvestable — worth a look before any
+    §18.7 net-of-cost Sharpe target is taken seriously.
+  - Many trade-log rows show a 0 VND fill (cash exhausted by earlier buys in
+    the same session). Harmless but noisy; a minimum-allocation floor would
+    stop them.
+  - No VNINDEX rows in `macro_anchors` for 2025, so ranges there label the
+    benchmark `sector_mean`. §11 wants VNINDEX — backfill it.
+
+## 2026-08-23 (late, 3) — Kill-switch, position book, watchlist, data-age bar
+- Author: Claude Code on behalf of Tom
+- Files:
+  - new `services/trading_state.py`, `api/routers/state.py`, `tests/test_trading_state.py`
+  - new `frontend/src/lib/tradingState.ts`, `frontend/src/components/KillSwitch.tsx`
+  - `api/main.py` (mount `/api/state`), `services/sector_signal_service.py` (read the flag)
+  - `frontend/src/api/client.ts` (`stateApi`, `Freshness` type)
+  - `frontend/src/components/Layout.tsx` (halt banner + data-age bar)
+  - `frontend/src/pages/RiskPage.tsx`, `frontend/src/pages/DailyInsightPage.tsx`
+  - `frontend/src/pages/FlowMonitorPage.tsx` (local freshness strip removed)
+  - `.gitignore` (`data/trading_state.json`)
+- Reason: sponsor review §D/§E, and §18.4/20. Three gaps, one cause — the app
+  knew what the *model* thought and nothing about what the *operator* did.
+  `TRADING_HALT` was an env var, so stopping the 17:00 publish meant editing
+  `.env` and restarting the process. No pick could be marked as taken, so the
+  Risk page's "Vị thế đang mở" was model suggestions wearing the name of a
+  book. The "Vốn 50-500tr" slider only split weights and reset to 100tr on
+  every F5. And "how old is this data" was answered on one route out of nine.
+- Summary:
+  - `trading_state.py` — one JSON file at `data/trading_state.json` holding
+    `halt`, `capital_mn`, `positions`, `watchlist`. Deliberately not a table:
+    three keys do not justify migration 12, and the scheduler process has no
+    HTTP client, so it must read the halt flag directly.
+  - The halt has **two sources, OR'd**: the `TRADING_HALT` env var stays a hard
+    override a browser cannot clear, the runtime flag is what the UI toggles.
+    `halt_env` / `halt_effective` are returned so the asymmetry is visible
+    rather than surprising, and the toggle disables itself when the env var is
+    the one holding the halt.
+  - `SectorSignalService.publish()` reads the flag **once before the loop**, so
+    a mid-run toggle cannot split a batch into half-published.
+  - Marking a pick is idempotent on `(symbol, side)` and drops the symbol from
+    the watchlist — you cannot be watching something you have bought.
+  - The halt banner is app-wide and un-dismissable: a halt visible only on the
+    page where you set it is a halt you will forget about.
+  - `DataAgeBar` in `Layout` — one freshness fetch above every page, quiet when
+    fresh, warn-coloured with the session gap when behind.
+  - Capital slider persists on pointer/key release, not per drag tick (one POST
+    per gesture, not per pixel), and seeds from the stored value on load.
+  - Renamed the Risk exposure table to "Tỷ trọng ngành mô hình đề xuất". With a
+    real book on the same page the two tables would otherwise be indistinguishable.
+- Evidence (§18.8): 13 new backend tests, incl. the integration guard that a
+  flag set from the browser reaches `publish()` and yields all-HOLD. Suite
+  156 → **169 passed**; frontend 13/13; `tsc --noEmit` clean; build 374.77 kB
+  (+0.65 kB). Live: halt → banner on `/insight` and `/flow`; marking BVH from a
+  pick card propagated to every other card through the shared store.
+- Follow-ups: the position book stores no exit price, so it cannot yet compute
+  P&L — deliberate, and the next thing to add if Tom wants performance
+  attribution. Step 5 of the review backlog (backtest strategy selector, fees,
+  benchmark, trade log) is next.
+
+---
+
+## 2026-08-23 (late, 2) — Nav merged 9 → 5
+- Author: Claude Code on behalf of Tom
+- Files:
+  - new `frontend/src/components/Tabs.tsx`
+  - new `frontend/src/pages/{FlowPage,RotationPage,PositionsPage,ResearchPage}.tsx`
+  - `frontend/src/App.tsx` (5 routes + 7 redirects), `frontend/src/components/Layout.tsx` (nav)
+  - `frontend/src/pages/SectorDetailPage.tsx` (route param → prop, tokenised)
+  - `frontend/src/pages/FlowMonitorPage.tsx` (sector link → tab link)
+  - `frontend/src/pages/DailyInsightPage.tsx` (sticky jump bar + 2 anchors)
+- Reason: sponsor review §C. Nine nav doors for 15 sectors was more navigation
+  than data, and clicking a sector in Money Flow Monitor navigated away — the
+  interval, the `flow_z_hot` you had typed and the selected chart line all
+  died on the way to `/flow/:code`.
+- Summary:
+  - Five nav items: Daily Insight · Dòng tiền · Luân chuyển · Rủi ro & Vị thế ·
+    Nghiên cứu. Each carries a one-line hint under the label; the two group
+    headers are gone, since five items do not need them.
+  - `Tabs.tsx` keeps the active tab in the URL (`?tab=`) with
+    `replace: true`, so merged pages keep the deep links the old routes had and
+    Back does not walk through every tab switch.
+  - Merges: Dòng tiền = Money Flow Monitor + Sector Detail; Luân chuyển =
+    Stealth Watch + Rotation Map; Rủi ro & Vị thế = Risk + Flow Pulse (which
+    also removes the last way for the two exposure panels of §A4 to disagree);
+    Nghiên cứu = Xếp hạng + Regime + Backtest.
+  - All seven pre-merge paths redirect, including `/flow/:code` →
+    `/flow?tab=detail&code=<code>`. Four months of bookmarks keep working.
+  - `SectorDetailPage` was the last page on raw Tailwind (37 `slate-*` hits).
+    Tokenised in the same pass, including the 20 hardcoded SVG hexes.
+  - Daily Insight gained a sticky jump bar over `#pho-dong-tien` /
+    `#danh-sach-hanh-dong` — the buy/sell list sat two screens below the fold.
+- Verification: `tsc --noEmit` clean · vitest 13/13 · pytest 156 · build 793
+  modules, main bundle **376.43 → 371.12 kB** (BacktestPage still its own
+  346 kB chunk, PositionsPage 12.7 kB, ResearchPage 1.05 kB — all lazy).
+  Live: all 7 redirects land on the right tab; `/flow?tab=detail&code=BROK`
+  renders on tokens (`main table` computed colour `rgb(234,240,247)` = `--color-hi`);
+  the jump bar scrolls the action list to 64 px, under the sticky bar; zero
+  console errors.
+- Follow-ups: kill-switch belongs on the merged Rủi ro & Vị thế page — that is
+  step 4, not this one.
+
+## 2026-08-23 (late) — One design system, one action vocabulary
+- Author: Claude Code on behalf of Tom
+- Files:
+  - new `frontend/src/lib/actions.tsx`
+  - `frontend/src/pages/{RankingPage,RegimePage,RiskPage,BacktestPage}.tsx`
+  - `frontend/src/pages/{FlowMonitorPage,DailyInsightPage}.tsx` (badge call sites)
+  - `frontend/src/api/client.ts` (two type comments + the `SectorSignalRow.action` union)
+- Reason: sponsor review §B. The four "Ra quyết định" pages were route-wired on
+  2026-08-23 and had never been through the redesign, so they still used raw
+  Tailwind (`slate-800`, `emerald-600`, `rounded-xl`) while the five "Theo dõi"
+  pages used the `@theme` tokens. Clicking between the two groups read as two
+  different products. Separately, three pages spoke three action alphabets —
+  HOT/COOL/NEUTRAL, BUY/SELL/HOLD, BUY/ACCUMULATE/SELL — and none of them was
+  the five-state enum CLAUDE.md §16.3 defines.
+- Summary:
+  - **Vocabulary.** `lib/actions.tsx` holds the whole alphabet in one place and
+    splits what was being conflated. `ActionBadge` renders the §16.3 *trade
+    instruction* (ACCUMULATE / BUY / TRIM / SELL / HOLD) in Vietnamese with the
+    §16.1 gốc/cành-cao/ngọn hint in the tooltip; `FlowBadge` renders the
+    HOT/COOL/NEUTRAL *tape observation* that `api/routers/flow.py:176` derives
+    from `flow_z` alone, styled deliberately flatter so it never reads as a
+    buy order. TRIM is in the table but the signal service never emits it —
+    doctrine-only today, and the UI will render it the day it appears.
+  - **Style.** No new design: only class swaps onto the existing tokens
+    (`bg-panel`/`bg-panel2`, `text-hi`/`text-mid`/`text-lo`, `border-line`,
+    `rounded-2xl`, `section-label`, `font-display`/`font-mono`) plus Vietnamese
+    labels. `grep -n 'slate-|emerald-|rose-|amber-|cyan-'` over the four pages
+    now returns nothing. Recharts takes colour strings, not classes, so
+    BacktestPage's six hardcoded hexes were repointed at the `@theme` values
+    rather than removed.
+  - HOLD renders without its hint — 13 of 15 ranking rows are HOLD and spelling
+    out "chưa đủ điều kiện" on each was noise. The tooltip still carries it.
+- Verification: `tsc --noEmit` clean; vitest 13/13; `npm run build` 6.7 s, main
+  bundle 376.43 kB (unchanged — `lib/actions.tsx` is ~1 kB and the four pages
+  stay lazy). Exercised against the running server at 1440×900: `/ranking`
+  shows `#3 INSUR ✓ Mua · cành cao — xác nhận momentum` and 13 `Đứng ngoài`;
+  `/regime` shows the Risk-off card on `bg-sell/[0.10]`; `/risk` shows
+  `INSUR Mua 100.00% #3` through the shared badge; `/backtest` re-ran live
+  (−43.72% vs benchmark 16.59%, Sharpe −4.20 with the §18.2 caveat intact).
+  `preview_inspect` confirms `bg-panel` resolves to `rgb(17,21,28)`. Zero
+  console errors.
+- Follow-ups: sponsor steps 3–6 remain — merge nav 9→5, watchlist +
+  kill-switch + "đã vào lệnh", Backtest strategy/fees/benchmark/trade-log, and
+  the global filter + Stealth presets.
+
+---
+
 ## 2026-08-23 (evening) — Frontend defect pass (A1–A8), outdated docs deleted, repo reorganised by topic
 - Author: Claude Code on behalf of Tom
 - Reason: a business-sponsor review of the running web app produced seven

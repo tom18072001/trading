@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { flowApi } from '../api/client';
 import type { FlowRankingResponse, FlowHeatResponse, FlowSeriesResponse, Interval } from '../api/client';
+import { FlowBadge } from '../lib/actions';
+import { FilterBar, Th, downloadCsv, passes, useSorter, useTableFilter } from '../lib/filters';
+import { Hint } from '../lib/glossary';
 
 const INTERVALS: Interval[] = ['1d', '1w', '2w', '1m', '1q'];
 
@@ -157,10 +160,6 @@ function HeatStrip({ heat }: { heat: FlowHeatResponse | null }) {
   );
 }
 
-const ACTION_CHIP: Record<string, string> = {
-  HOT: 'bg-buy/[0.13] text-buy', COOL: 'bg-sell/[0.13] text-sell', NEUTRAL: 'bg-raise text-mid',
-};
-
 export default function FlowMonitorPage() {
   const [interval, setInterval] = useState<Interval>('1d');
   const [flowZHot, setFlowZHot] = useState(1.0);
@@ -171,17 +170,23 @@ export default function FlowMonitorPage() {
   const [err, setErr] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshMsg, setRefreshMsg] = useState<string | null>(null);
-  const [freshness, setFreshness] = useState<any>(null);
+  const f = useTableFilter('fl');
+  const sorter = useSorter('rank', 'asc', 'fl');
 
+  const allRows = ranking?.rows ?? [];
+  const shown = sorter.apply(allRows.filter((r) => passes(f, r)));
+
+  // The freshness fetch that used to live here moved to the app-wide bar in
+  // Layout (review §D). Two copies of "how old is the data" on one screen is
+  // one copy too many.
   const load = () => {
     setErr(null);
     Promise.all([
       flowApi.ranking(interval, flowZHot),
       flowApi.heat(interval, 60),
       flowApi.series(interval),
-      flowApi.freshness(),
     ])
-      .then(([r, h, s, f]) => { setRanking(r.data); setHeat(h.data); setSeries(s.data); setFreshness(f.data); })
+      .then(([r, h, s]) => { setRanking(r.data); setHeat(h.data); setSeries(s.data); })
       .catch((e) => setErr(String(e?.message || e)));
   };
   useEffect(load, [interval, flowZHot]);
@@ -223,10 +228,7 @@ export default function FlowMonitorPage() {
           <p className="text-[13px] text-mid mt-0.5">Dòng tiền vào/ra ngành nào, mạnh đến đâu</p>
         </div>
         <div className="text-[11px] text-lo font-mono text-right self-center">
-          DB: {freshness?.latest_date || ranking?.as_of || '—'}
-          {freshness && !freshness.is_fresh && freshness.gap_days > 0 && (
-            <span className="text-warn ml-1">({freshness.gap_days}d behind)</span>
-          )}
+          Xếp hạng tính đến {ranking?.as_of || '—'}
         </div>
       </header>
 
@@ -262,23 +264,43 @@ export default function FlowMonitorPage() {
       <HeatStrip heat={heat} />
 
       {/* ranking table */}
+      <FilterBar
+        f={f} actions={['HOT', 'COOL', 'NEUTRAL']}
+        total={allRows.length} shown={shown.length}
+        onExport={() => downloadCsv(
+          `dong_tien_nganh_${ranking?.as_of ?? 'export'}.csv`,
+          [
+            { key: 'rank', label: 'Hạng' }, { key: 'sector', label: 'Ngành' },
+            { key: 'name', label: 'Tên' }, { key: 'score', label: 'Score' },
+            { key: 'flow_z20', label: 'flow_z20' },
+            { key: 'net_dollar_flow', label: 'Net flow (VND)' },
+            { key: 'breadth_sma20', label: 'breadth_sma20' },
+            { key: 'action', label: 'Dòng tiền' }, { key: 'why', label: 'Vì sao' },
+          ],
+          shown)}
+      />
+
       <section className="rounded-2xl bg-panel border border-line overflow-hidden">
         <div className="p-3 border-b border-line section-label">Xếp hạng dòng tiền</div>
         <table className="w-full text-sm">
           <thead className="bg-panel2 border-b border-line text-[10px] uppercase tracking-wider text-mid">
             <tr>
-              <th className="p-2.5 text-left">#</th>
-              <th className="p-2.5 text-left">Ngành</th>
-              <th className="p-2.5 text-right">Score</th>
-              <th className="p-2.5 text-right">Flow Z20</th>
-              <th className="p-2.5 text-right">Net Flow (tỷ)</th>
-              <th className="p-2.5 text-right">Breadth</th>
-              <th className="p-2.5 text-left">Action</th>
-              <th className="p-2.5 text-left">Why</th>
+              <Th s={sorter} col="rank">#</Th>
+              <Th s={sorter} col="sector">Ngành</Th>
+              <Th s={sorter} col="score" align="right">Score</Th>
+              <Th s={sorter} col="flow_z20" align="right"><Hint term="flow_z20">Flow Z20</Hint></Th>
+              <Th s={sorter} col="net_dollar_flow" align="right">
+                <Hint term="net_dollar_flow">Net Flow (tỷ)</Hint>
+              </Th>
+              <Th s={sorter} col="breadth_sma20" align="right">
+                <Hint term="breadth_sma20">Breadth</Hint>
+              </Th>
+              <Th s={sorter} col="action">Dòng tiền</Th>
+              <th className="p-2.5 text-left">Vì sao</th>
             </tr>
           </thead>
           <tbody>
-            {ranking?.rows.map((r) => {
+            {shown.map((r) => {
               const on = selected === r.sector;
               return (
                 <tr key={r.sector}
@@ -287,18 +309,25 @@ export default function FlowMonitorPage() {
                   <td className="p-2.5 text-lo font-mono">{r.rank}</td>
                   <td className="p-2.5">
                     <span className="inline-block w-2 h-2 rounded-full mr-2 align-middle" style={{ background: colorFor(r.sector) }} />
-                    <Link to={`/flow/${r.sector}`} onClick={(e) => e.stopPropagation()} className="font-semibold text-hi hover:text-acc transition">{r.sector}</Link>
+                    {/* Opens the Chi tiết tab of this same page, not a new
+                        route — the interval and flow_z_hot you set survive. */}
+                    <Link to={`/flow?tab=detail&code=${r.sector}`} onClick={(e) => e.stopPropagation()} className="font-semibold text-hi hover:text-acc transition">{r.sector}</Link>
                     <span className="text-lo text-xs ml-2">{r.name}</span>
                   </td>
                   <td className="p-2.5 text-right font-mono text-hi">{r.score.toFixed(2)}</td>
                   <td className={`p-2.5 text-right font-mono ${r.flow_z20 > 0 ? 'text-buy' : 'text-sell'}`}>{r.flow_z20 >= 0 ? '+' : ''}{r.flow_z20.toFixed(2)}</td>
                   <td className="p-2.5 text-right font-mono text-mid">{(r.net_dollar_flow / 1e9).toFixed(2)}</td>
                   <td className="p-2.5 text-right font-mono text-mid">{r.breadth_sma20.toFixed(2)}</td>
-                  <td className="p-2.5"><span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold ${ACTION_CHIP[r.action] || 'bg-raise text-mid'}`}>{r.action}</span></td>
+                  <td className="p-2.5"><FlowBadge state={r.action} /></td>
                   <td className="p-2.5 text-[11px] text-mid">{r.why}</td>
                 </tr>
               );
             })}
+            {allRows.length > 0 && shown.length === 0 && (
+              <tr><td colSpan={8} className="p-8 text-center text-mid text-[13px]">
+                Không ngành nào khớp bộ lọc ({allRows.length} ngành bị ẩn).
+              </td></tr>
+            )}
           </tbody>
         </table>
       </section>

@@ -3,6 +3,13 @@
 Uses pre-computed columns from sector_flow_daily (flow_z20, foreign_hit_20d,
 breadth_sma20, atr_pct, close_idx, stealth_score, accumulation_age) rather
 than recomputing on every request.
+
+2026-08-23: reconciled with `analysis/stealth.py`. This endpoint used to
+classify `active` only at `passes == 5` while the offline scanner that writes
+`accumulation_age` required 3 conditions — so the page could show a sector the
+scanner would never record, and vice versa. Both now read the same two knobs
+(`STEALTH_MIN_CONDITIONS`, `STEALTH_MIN_SESSIONS`) and both are scores, not
+conjunctions. See CLAUDE.md §16.1.
 """
 from __future__ import annotations
 
@@ -10,6 +17,7 @@ import pandas as pd
 from fastapi import APIRouter, Query
 from sqlalchemy import func
 
+from analysis.stealth import STEALTH_MIN_CONDITIONS, STEALTH_MIN_SESSIONS
 from config import SECTORS
 from database.connection import SessionLocal
 from database.models import SectorFlowDaily
@@ -17,7 +25,7 @@ from database.models import SectorFlowDaily
 router = APIRouter(prefix="/api/stealth", tags=["stealth-watch"])
 
 
-def _build_gate(flow_z, foreign_hit, breadth, atr_pct, close_pct,
+def _build_gate(flow_z, foreign_hit, breadth, atr_rank, close_pct,
                 flow_z_hot, foreign_hit_min, breadth_min, atr_rank_max, close_pct_60d_max):
     gate = {}
 
@@ -45,14 +53,16 @@ def _build_gate(flow_z, foreign_hit, breadth, atr_pct, close_pct,
                   + ("" if c3 else f" — thiếu {breadth_min - breadth:.2f}"),
     }
 
-    # atr_pct: lower = quieter. Use percentile rank within sector as proxy.
-    # For now: atr_pct < atr_rank_max means quiet tape
-    c4 = atr_pct <= atr_rank_max
+    # atr_rank is a 0..1 percentile of today's ATR% within the sector's own 60d
+    # window (0 = quietest). It used to be the RAW atr_pct — a ~0.006 fraction
+    # compared against a 0.5 threshold named "rank", so cond4 passed for free on
+    # every sector and the gate was really four conditions here.
+    c4 = atr_rank <= atr_rank_max
     gate["cond4_atr_quiet"] = {
-        "pass": c4, "value": round(atr_pct, 3), "threshold": atr_rank_max,
+        "pass": c4, "value": round(atr_rank, 3), "threshold": atr_rank_max,
         "label": "ATR quiet (low vol)",
-        "reason": f"atr_pct = {atr_pct:.2f} {'≤' if c4 else '>'} {atr_rank_max}"
-                  + ("" if c4 else f" — vượt {atr_pct - atr_rank_max:.2f}"),
+        "reason": f"atr_rank = {atr_rank:.2f} {'≤' if c4 else '>'} {atr_rank_max}"
+                  + ("" if c4 else f" — vượt {atr_rank - atr_rank_max:.2f}"),
     }
 
     # close_pct: position within 60d range. 0 = bottom, 1 = top.
@@ -79,7 +89,8 @@ def stealth_active(
     breadth_min: float = Query(0.5),
     atr_rank_max: float = Query(0.5),
     close_pct_60d_max: float = Query(0.4),
-    min_sessions: int = Query(5),
+    min_sessions: int = Query(STEALTH_MIN_SESSIONS),
+    min_conditions: int = Query(STEALTH_MIN_CONDITIONS, ge=1, le=5),
 ):
     """Returns ALL 15 sectors classified into active / warming / inactive."""
     sess = SessionLocal()
@@ -105,13 +116,18 @@ def stealth_active(
     finally:
         sess.close()
 
-    # Build 60d high/low per sector for close_pct computation
+    # Build 60d high/low per sector for close_pct computation, and the ATR%
+    # sample the cond4 percentile rank is taken against.
     close_range: dict[str, tuple[float, float]] = {}  # sector -> (min_close, max_close)
+    atr_window: dict[str, list[float]] = {}
     for r in window_rows:
+        code = r.sector_code
+        a = r.atr_pct or 0.0
+        if a > 0:
+            atr_window.setdefault(code, []).append(a)
         c = r.close_idx or 0.0
         if c <= 0:
             continue
-        code = r.sector_code
         if code not in close_range:
             close_range[code] = (c, c)
         else:
@@ -139,14 +155,20 @@ def stealth_active(
         if close_pct is None:
             close_pct = 0.0  # no data
 
-        gate = _build_gate(flow_z, foreign_hit, breadth, atr_pct, close_pct,
+        # cond4 percentile rank of today's ATR% within the sector's own window.
+        sample = atr_window.get(r.sector_code) or []
+        atr_rank = (sum(1 for a in sample if a <= atr_pct) / len(sample)) if sample else 1.0
+
+        gate = _build_gate(flow_z, foreign_hit, breadth, atr_rank, close_pct,
                            flow_z_hot, foreign_hit_min, breadth_min, atr_rank_max, close_pct_60d_max)
         passes = sum(1 for g in gate.values() if g["pass"])
         fails = [g["label"] for g in gate.values() if not g["pass"]]
 
-        if passes == 5 and age >= min_sessions:
+        # Score gate, matching analysis/stealth.py. `passes == 5` was
+        # unreachable — the longest all-five run in 3.5 years was 2 sessions.
+        if passes >= min_conditions and age >= min_sessions:
             status = "active"
-        elif passes >= 3:
+        elif passes >= min_conditions - 1:
             status = "warming"
         else:
             status = "inactive"
@@ -161,6 +183,7 @@ def stealth_active(
             "foreign_hit_20d": round(foreign_hit, 3),
             "breadth_sma20": round(breadth, 3),
             "atr_pct": round(atr_pct, 3),
+            "atr_rank": round(atr_rank, 3),
             "close_pct_60d": round(close_pct, 3),
             "gate": gate,
             "conditions_passing": passes,
@@ -186,6 +209,7 @@ def stealth_active(
             "atr_rank_max": atr_rank_max,
             "close_pct_60d_max": close_pct_60d_max,
             "min_sessions": min_sessions,
+            "min_conditions": min_conditions,
         },
         "active": active,
         "warming": warming,

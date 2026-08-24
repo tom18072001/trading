@@ -1,5 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { insightApi, type InsightRefreshStatus } from '../api/client';
+import { insightApi, stateApi, type InsightRefreshStatus, type ReportStatus } from '../api/client';
+import { ActionBadge } from '../lib/actions';
+import { isHeld, tradingState, useTradingState } from '../lib/tradingState';
 
 // Polls /insight/refresh/status until the background run completes. Used by
 // the Refresh button so the UI can surface stage + progress % instead of
@@ -314,20 +316,77 @@ export function AgentReport({ report }: { report: any }) {
 // ===================================================================
 //  Pick cards  (Thẻ — default view): ladder + T+3 + sizing
 // ===================================================================
+/** T0..T+3 in SESSIONS, not calendar days.
+ *
+ *  It used to be `setDate(base.getDate() + i)`, so a Thursday buy claimed a
+ *  Sunday settlement. T+ is a count of trading days — that is what settlement
+ *  means — and the backend now returns `sellable_on` on the same basis
+ *  (utils/clock.next_trading_day) for positions already in the book.
+ *
+ *  ponytail: weekends only. VN holidays live in config.VN_MARKET_HOLIDAYS_2026
+ *  and are not worth a second copy in TypeScript for a 4-box preview; the book
+ *  row, which is the one you act on, gets the holiday-aware date from the API.
+ */
 function tPlusDays(date: string | undefined): { label: string; date: string; sub: string; state: 'now' | 'future' | 'sell' }[] {
   const base = date ? new Date(date) : new Date();
   const out: { label: string; date: string; sub: string; state: 'now' | 'future' | 'sell' }[] = [];
+  const d = new Date(base);
   for (let i = 0; i < 4; i++) {
-    const d = new Date(base);
-    d.setDate(base.getDate() + i);
+    if (i > 0) do { d.setDate(d.getDate() + 1); } while (d.getDay() === 0 || d.getDay() === 6);
     out.push({
       label: i === 0 ? 'T0' : `T+${i}`,
       date: `${d.getDate()}/${d.getMonth() + 1}`,
-      sub: i === 0 ? 'Mua' : i === 3 ? 'Bán được' : '',
-      state: i === 0 ? 'now' : i === 3 ? 'sell' : 'future',
+      // T+2: HOSE cash settlement, the same lag the backtest models (§18.2/7).
+      sub: i === 0 ? 'Mua' : i === 2 ? 'Bán được' : '',
+      state: i === 0 ? 'now' : i === 2 ? 'sell' : 'future',
     });
   }
   return out;
+}
+
+/**
+ * "Đã vào lệnh" / "Theo dõi" — the app had no idea which recommendations you
+ * had acted on, so it kept surfacing tomorrow what you bought today. Marking a
+ * pick stores it in the operator's book (services/trading_state.py) with the
+ * price shown on this card, which is the price the recommendation was made at.
+ */
+function PickActions({ p, kind, close }: { p: any; kind: 'BUY' | 'SELL'; close: number | null }) {
+  const s = useTradingState();
+  const sym = p.symbol;
+  const held = isHeld(s, sym, kind);
+  const watched = s.watchlist.includes(sym);
+
+  return (
+    <div className="flex items-center gap-2 pt-1">
+      <button
+        onClick={() => held
+          ? tradingState.removePosition(sym, kind)
+          : tradingState.addPosition({
+              symbol: sym, sector_code: pSecCode(p), side: kind, entry_price: close,
+              // The card renders these two above; the book needs them to answer
+              // "is this trade still valid" tomorrow.
+              stop: p.stop, target: p.target, thesis: p.thesis,
+            })}
+        className={`flex-1 px-3 py-2 rounded-lg text-[12px] font-bold transition border ${
+          held
+            ? 'bg-buy/[0.14] border-buy/40 text-buy hover:bg-buy/[0.2]'
+            : 'bg-raise border-line2 text-mid hover:text-hi hover:border-acc/40'}`}
+      >
+        {held ? '✓ Đã vào lệnh — bỏ đánh dấu' : 'Đã vào lệnh'}
+      </button>
+      {!held && (
+        <button
+          onClick={() => tradingState.toggleWatch(sym)}
+          className={`px-3 py-2 rounded-lg text-[12px] font-semibold transition border ${
+            watched
+              ? 'bg-acc/[0.12] border-acc/40 text-acc'
+              : 'bg-raise border-line2 text-mid hover:text-hi'}`}
+        >
+          {watched ? '★ Đang theo dõi' : '☆ Theo dõi'}
+        </button>
+      )}
+    </div>
+  );
 }
 
 function PickCard({ p, kind, alloc }: { p: any; kind: 'BUY' | 'SELL'; alloc: number }) {
@@ -357,9 +416,7 @@ function PickCard({ p, kind, alloc }: { p: any; kind: 'BUY' | 'SELL'; alloc: num
           <div className="text-[11px] text-lo mt-1">{p.sector_name}</div>
         </div>
         <div className="text-right">
-          <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${
-            isBuy ? 'bg-buy/[0.13] text-buy' : 'bg-sell/[0.13] text-sell'
-          }`}>{p.action}</span>
+          <ActionBadge action={p.action} />
           <div className="text-[12px] text-warn mt-1 tracking-tight" title={`Conviction ${conv}/5`}>{starStr(conv)}</div>
         </div>
       </div>
@@ -464,6 +521,8 @@ function PickCard({ p, kind, alloc }: { p: any; kind: 'BUY' | 'SELL'; alloc: num
           )}
         </div>
       )}
+
+      <PickActions p={p} kind={kind} close={close} />
     </div>
   );
 }
@@ -556,9 +615,7 @@ export function PickTable({ title, subtitle, kind, picks }: {
                 <tr className="border-b border-line hover:bg-panel2/60 align-top">
                   <td className="p-2">
                     <div className="font-bold text-hi">{sym}</div>
-                    <span className={`inline-block mt-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold ${
-                      kind === 'BUY' ? 'bg-buy/[0.13] text-buy' : 'bg-sell/[0.13] text-sell'
-                    }`}>{p.action}</span>
+                    <div className="mt-0.5"><ActionBadge action={p.action} /></div>
                   </td>
                   <td className="p-2 text-xs">
                     <span className="font-mono text-acc">{pSecCode(p)}</span>
@@ -637,6 +694,81 @@ export function PickTable({ title, subtitle, kind, picks }: {
 }
 
 // ===================================================================
+//  Send the daily report now (backlog step 6)
+// ===================================================================
+// The 17:00 job (§8) is the normal path. This is for the days you want the
+// email before then — or after a Refresh changed the picks.
+//
+// The button disables itself while a run is in flight, but that is cosmetic:
+// the backend is the real guard (report_runner returns already_running instead
+// of starting a second subprocess), because two clicks must not send two mails.
+function SendReportButton() {
+  const [st, setSt] = useState<ReportStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const timer = useRef<number | null>(null);
+
+  const stopPoll = () => {
+    if (timer.current) { window.clearInterval(timer.current); timer.current = null; }
+  };
+  useEffect(() => stopPoll, []);
+
+  const poll = () => {
+    stopPoll();
+    timer.current = window.setInterval(() => {
+      stateApi.reportStatus()
+        .then(({ data }) => {
+          setSt(data);
+          if (!data.running) { stopPoll(); setBusy(false); }
+        })
+        .catch(() => { stopPoll(); setBusy(false); });
+    }, REFRESH_POLL_INTERVAL_MS);
+  };
+
+  const send = async () => {
+    setBusy(true);
+    try {
+      const { data } = await stateApi.sendReport();
+      setSt(data);
+      poll();
+    } catch (e: any) {
+      setBusy(false);
+      setSt({
+        running: false, report_date: null, started_at: null, finished_at: null,
+        ok: false, returncode: -1, tail: String(e?.message || e),
+      });
+    }
+  };
+
+  const running = busy || st?.running;
+  const failed = st && !st.running && st.ok === false;
+  const done = st && !st.running && st.ok === true;
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <button
+        onClick={send}
+        disabled={!!running}
+        title="Chạy generate_report.py và gửi email ngay, không đợi job 17:00"
+        className="px-3.5 py-2 rounded-xl bg-warn/[0.13] text-warn border border-warn/30 hover:bg-warn/[0.2] disabled:opacity-50 text-[13px] font-semibold whitespace-nowrap"
+      >
+        {running
+          ? `✉ Đang gửi…${st?.elapsed_sec ? ` ${Math.round(st.elapsed_sec)}s` : ''}`
+          : '✉ Gửi báo cáo ngay'}
+      </button>
+      {done && <span className="text-[11px] text-buy font-mono">✓ Đã gửi</span>}
+      {failed && (
+        <span
+          className="text-[11px] text-sell font-mono max-w-[280px] truncate cursor-help"
+          title={st?.tail || ''}
+        >
+          ✗ Lỗi (exit {st?.returncode}) — di chuột để xem log
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ===================================================================
 //  Page
 // ===================================================================
 type PickView = 'cards' | 'table';
@@ -650,6 +782,16 @@ export default function DailyInsightPage() {
   const [pickView, setPickView] = useState<PickView>('cards');
   const [capital, setCapital] = useState(100); // million VND (tr)
   const activeRunRef = useRef<string | null>(null);
+  // The slider used to reset to 100tr on every F5. Seed it from the stored
+  // value once it arrives, but never fight the user mid-session.
+  const persistedCapital = useTradingState().capital_mn;
+  const seededCapital = useRef(false);
+  useEffect(() => {
+    if (!seededCapital.current && persistedCapital) {
+      seededCapital.current = true;
+      setCapital(persistedCapital);
+    }
+  }, [persistedCapital]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -733,6 +875,8 @@ export default function DailyInsightPage() {
           {genTime && <p className="text-[11px] text-lo mt-1 font-mono">cập nhật {genTime}</p>}
         </div>
         <div className="flex flex-col items-end gap-1.5">
+          <div className="flex items-center gap-2">
+          <SendReportButton />
           <button
             onClick={refresh}
             disabled={refreshing || loading}
@@ -746,6 +890,7 @@ export default function DailyInsightPage() {
             <span className={refreshing ? 'inline-block animate-spin360' : ''}>↻</span>
             {refreshing ? STAGE_LABELS[refreshStatus?.stage || 'queued'] || 'Đang làm mới…' : 'Refresh'}
           </button>
+          </div>
           {refreshing && refreshStatus && (
             <div className="w-60">
               <div className="flex items-baseline justify-between text-[10px] text-mid font-mono">
@@ -795,6 +940,25 @@ export default function DailyInsightPage() {
         </div>
       )}
 
+      {/* Jump bar — review §C. The buy/sell list is what people open this page
+          for, and it sits below the gauge, the spectrum and Minh's memo: on a
+          laptop that is two full screens of scrolling before the first ticker.
+          Native anchors + scroll-mt, no scroll listener. */}
+      <nav className="sticky top-0 z-20 -mx-8 px-8 py-2.5 bg-bg/95 backdrop-blur border-b border-line flex gap-2">
+        {[
+          { href: '#pho-dong-tien', label: 'Phổ dòng tiền' },
+          { href: '#danh-sach-hanh-dong', label: 'Danh sách hành động' },
+        ].map((a) => (
+          <a
+            key={a.href}
+            href={a.href}
+            className="px-3 py-1.5 rounded-lg bg-panel2 border border-line text-[12.5px] font-semibold text-mid hover:text-hi hover:border-line2 transition"
+          >
+            {a.label}
+          </a>
+        ))}
+      </nav>
+
       {/* Decision cockpit */}
       {mc && (
         <section className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-[22px]">
@@ -817,22 +981,28 @@ export default function DailyInsightPage() {
 
       {/* Sector flow spectrum */}
       {(buyPicks.length > 0 || sellPicks.length > 0 || (data?.deltas?.length ?? 0) > 0) && (
-        <FlowSpectrum picks={[...buyPicks, ...sellPicks]} deltas={data?.deltas || []} />
+        <div id="pho-dong-tien" className="scroll-mt-16">
+          <FlowSpectrum picks={[...buyPicks, ...sellPicks]} deltas={data?.deltas || []} />
+        </div>
       )}
 
       {/* Trader Agent — Minh */}
       <AgentReport report={data?.agent_report} />
 
       {/* Action list toolbar */}
-      <section className="space-y-4">
+      <section id="danh-sach-hanh-dong" className="space-y-4 scroll-mt-16">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="section-label">Danh sách hành động</div>
           <div className="flex items-center gap-4">
             <label className="flex items-center gap-2 text-[12px] text-mid">
               <span>Vốn</span>
+              {/* Persisted on release, not on every drag tick: the slider
+                  fires onChange per pixel and each one would be a POST. */}
               <input
                 type="range" min={50} max={500} step={10} value={capital}
                 onChange={(e) => setCapital(Number(e.target.value))}
+                onPointerUp={() => tradingState.setCapital(capital)}
+                onKeyUp={() => tradingState.setCapital(capital)}
                 className="accent-[#46C9E6] w-32"
               />
               <span className="font-mono text-hi w-12 text-right">{capital}tr</span>

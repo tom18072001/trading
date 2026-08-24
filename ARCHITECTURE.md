@@ -5,6 +5,127 @@
 > change must be logged in `MODIFICATION_LOG.md`.
 
 ## CHANGELOG
+- **2026-08-24 (3) — Exit price, realised P&L, and a measured `CONF_HORIZON`.**
+  Contract change: `/api/state/*` gains `POST /state/positions/{symbol}/close`
+  and `GET /state/positions/realised`, and `trading_state.json` gains a
+  `closed` list (a key, not a migration — `_read()` merges `_DEFAULT`, so every
+  file written before today loads unchanged). `close_position()` is deliberately
+  distinct from `remove_position()`: the latter deletes, which is right for a
+  mis-click and wrong for a sale, and until now they were the same operation —
+  so the system could not answer whether its own picks made money. Realised P&L
+  is **net of the §18.2/10 costs** (`BACKTEST_FEE_BPS` per side +
+  `BACKTEST_SELL_TAX_BPS` on proceeds, imported from `config.py` rather than
+  retyped, ~0.40% round trip), so the book and the backtest cannot disagree.
+  `/positions/realised` is a literal sharing a prefix with `/positions/{symbol}`
+  — same route-ordering trap as `/positions/pnl`, pinned by a test.
+  Also `analysis/regime.py`: `CONF_HORIZON = 5` stops being an assertion.
+  `scripts/regime_horizon_experiment.py` walks the filtered posterior over 900
+  bars and reports Brier skill per horizon, split in thirds; pooled it picks
+  H=13, but that win comes entirely from the middle stretch and every horizon
+  above 5 goes negative on the last third. 5 is the longest horizon that stays
+  positive throughout. The same script rejects calibration: isotonic and Platt
+  both lose to raw out of sample, so no calibrator ships. See `CLAUDE.md` §22.10
+  and §25.
+- **2026-08-24 (2) — Regime confidence: a collapsed model reporting certainty.**
+  Behaviour change, no schema change, no contract change (`GET
+  /api/sectors/regime` keeps its shape; the `confidence` *value* now spans
+  0.46–0.91 instead of sitting at 0.9999998). Three compounding defects in
+  `analysis/regime.py`: features fed raw to a diagonal Gaussian HMM collapsed
+  3 of 4 states to hmmlearn's ceiling covariance — **with one live state the
+  posterior is 1.0 by construction** — on only ~111 bars of history, and the
+  number reported was the state posterior, which answers "which state is this
+  bar in" rather than "is this call worth acting on". Now: standardised
+  features, 1500 days of history (`services/rotation_model_service.py`), a fit
+  that **refuses** to publish when >1 state is empty, and `confidence` =
+  P(label holds in 5 sessions) via the transition matrix. Uses the **filtered**
+  posterior of the last bar, which closes §20.3 P1-4 (labels were back-painted
+  by forward-backward decoding). The heuristic fallback's hardcoded
+  0.6/0.6/0.5/0.5 is now a measured label-persistence share. Also
+  `services/macro_service.py`: both VNINDEX fetchers get a date range and a
+  `VNINDEX_MIN_PLAUSIBLE = 200.0` floor — one bad single-day read on 2026-04-16
+  was laundered into 613 of 623 `macro_anchors` rows by `ingest_now`'s
+  carry-forward, which cannot tell a missing value from a wrong one. See
+  `CLAUDE.md` §25.
+- **2026-08-24 — Position book gains editing and mark-to-market.** Contract
+  change: `/api/state/*` gains `PATCH /state/positions/{symbol}` (partial edit;
+  `None` leaves a field, a negative clears it) and `GET
+  /state/positions/pnl`. No schema change — `data/trading_state.json` already
+  carried `entry_price`/`qty`, they were just unreachable after creation.
+  `update_position` is deliberately distinct from `add_position`, which
+  restamps `opened_at` and drops the symbol from the watchlist. The P&L handler
+  prices from `PicksUniverseService().peek()` — never `get_snapshot()`, which
+  would block behind the 18 req/min KBS throttle — and returns `priced` and
+  `count` separately so a partial mark cannot be read as the book's P&L.
+  Unrealised only; no exit price is stored.
+- **2026-08-23 (late, 6) — §16.1 stealth gate: AND → score.** Behaviour change,
+  no schema change. `analysis/stealth.py` stops requiring all five §16.1
+  conditions and emits a `conditions_met` score (0-5); stealth fires at
+  ≥ `STEALTH_MIN_CONDITIONS` (default 4) held ≥ `STEALTH_MIN_SESSIONS`
+  (default 3). A condition that cannot be evaluated is dropped from **both**
+  numerator and denominator, so missing data cannot silently raise the bar —
+  the failure mode that let an all-zero `foreign_net` ship a 3-condition gate.
+  Measured cause: the conjunction was unreachable (longest all-five run across
+  15 sectors in 3.5 years = 2 sessions), so `accumulation_age` had been 0 on
+  every row ever written. Contract change on `GET /api/stealth/active`: new
+  `min_conditions` query param, new `atr_rank` field per sector, and
+  `min_sessions`/`min_conditions` defaults now **imported from
+  `analysis.stealth`** rather than retyped — the endpoint and the offline
+  scanner had been gated differently. Its cond4 also stops comparing a raw
+  `atr_pct` (~0.006) to a threshold named `atr_rank_max` (0.5), which had been
+  passing for free on all 15 sectors. Closes §20.3 P0-5 and P1-1; the gate
+  fires but does **not** meet §16.11 (median lead 3 days vs ≥10 target) — see
+  `CLAUDE.md` §16.11.
+- **2026-08-23 (late, 5) — Global filter, stealth presets, CSV, send-report.**
+  Contract change: `/api/state/*` gains `POST /state/report/send` and
+  `GET /state/report/status`, backed by the new `services/report_runner.py`.
+  It runs `generate_report.py` as a **subprocess**, not an import — the script
+  is 1,629 module-level lines driven by `sys.argv` with no `main()`, so an
+  import would send mail as an import side effect. One run at a time; a second
+  call returns `already_running` rather than starting a second send. It lives
+  under `/state` because it is an operator action, the same category as the
+  kill-switch and the position book, not a new domain. No schema change.
+  Frontend gains three shared modules (`lib/filters.tsx`, `lib/glossary.tsx`,
+  `lib/stealthPresets.ts`); table filter, sort and stealth-threshold state now
+  live in the URL rather than component state.
+- **2026-08-23 (late, 4) — Backtest controls; and `flow_z` was `flow_raw` in disguise.**
+  Contract change on `POST /api/sectors/backtest`: the request model gains
+  `strategy` (a Pydantic `Literal` — an unvalidated string used to fall through
+  to the `flow_raw` branch) plus bounded per-run overrides for `fee_bps`,
+  `sell_tax_bps` and `settlement_lag`; the response's `equity_curve` gains a
+  `benchmark` point per row, so the chart can draw VNINDEX instead of leaving
+  "did I beat the index" as mental arithmetic. Everything else the service has
+  modelled since 2026-08-22 (§18.2/7–10 frictions, `trade_log`, root capture,
+  band skips) was already returned and simply had no type in `client.ts` and no
+  renderer — now both. **The defect this surfaced:** `_cross_sectional_z`
+  computes `(v − mean)/sd` within the same day the rows are then sorted in, a
+  positive affine map, so `flow_z` produced the raw-VND permutation every day —
+  the two "different" baselines returned an identical −25.06% over 330 trades.
+  `flow_z` now ranks on `flow_z20` (per-sector z vs. its own history). §20.2's
+  P0-4 row was accordingly half true; see `CLAUDE.md` §23.
+- **2026-08-23 (late, 3) — Operator state: kill-switch, position book, watchlist.**
+  New layer, new contract. `services/trading_state.py` is the first piece of
+  state the *operator* owns rather than the model: a single JSON file
+  (`data/trading_state.json`, gitignored) holding the halt flag, the capital
+  slider, the marked positions and the watchlist, exposed as `/api/state/*`
+  (router 13). `§18.4/20`'s kill-switch stops being env-only —
+  `SectorSignalService.publish()` now ORs the `TRADING_HALT` env var with a
+  runtime flag the UI can toggle, reading it once before the loop. Deliberately
+  a file and not a table: three keys do not justify a migration, and the
+  scheduler process has no HTTP client so it must read the flag directly. On the
+  frontend, `lib/tradingState.ts` is a `useSyncExternalStore` module store —
+  the halt banner (Layout), the toggle (Risk) and the mark buttons (Daily
+  Insight) are three trees that never meet. Layout also gained an app-wide
+  data-age bar; `FlowMonitorPage`'s local copy was removed.
+- **2026-08-23 (late) — Nav merged 9 → 5, §10 rewritten against the running app.**
+  Nine nav doors became five, with the merged halves as URL-backed tabs
+  (`components/Tabs.tsx`, `?tab=`): Dòng tiền = Monitor + Sector Detail,
+  Luân chuyển = Stealth + Rotation, Rủi ro & Vị thế = Risk + Pulse, Nghiên cứu
+  = Xếp hạng + Regime + Backtest. All seven pre-merge paths redirect. §10 of
+  this document had described a `features/*` layout that was never built and
+  listed `/backtest` and `/regime` as deleted when both work — replaced with
+  what actually ships. Earlier the same day: the four decision pages moved onto
+  the `@theme` tokens and `lib/actions.tsx` became the single action vocabulary
+  (`CLAUDE.md` §22.8–22.9).
 - **2026-08-23 — Frontend defect pass + docs purge + repo reorg.** Seven measured
   frontend defects fixed (A1–A7 in `MODIFICATION_LOG.md` 2026-08-23). The one
   that mattered: `PicksUniverseService` was the only stage of the daily pipeline
@@ -377,7 +498,7 @@ powershell -ExecutionPolicy Bypass -File scripts\cleanup_scheduled_tasks.ps1
 
 ## 9. API ROUTERS (as of 2026-04-22)
 
-12 routers live under `api/routers/`. Phase-15 trader-first views are the
+13 routers live under `api/routers/`. Phase-15 trader-first views are the
 default; the `sectors_*` set remains for backend-only callers (the scheduler,
 the email report) and for backward-compat.
 
@@ -400,33 +521,55 @@ the email report) and for backward-compat.
 | `sectors_risk.py` | `GET /api/sectors/risk/var`, `GET /api/sectors/risk/exposure` |
 | `sectors_handoff.py` | `GET /api/sectors/handoff` — sector-to-sector money handoff |
 
+**Operator state** (2026-08-23) — not model output; the only router backed by a
+file rather than the DB:
+| Router | Key endpoints |
+|---|---|
+| `state.py` | `GET /api/state`; `POST /api/state/{halt,capital,positions,watchlist}`; `PATCH`/`DELETE /api/state/positions/{symbol}`; `POST /api/state/positions/{symbol}/close`; `GET /api/state/positions/{pnl,realised}`. Every mutating endpoint returns the whole state, so the client never merges. `/positions/pnl` and `/positions/realised` are literal paths sharing a prefix with `/positions/{symbol}` — they must stay the only GETs on that prefix. `close` books an exit (realised P&L net of §18.2/10 costs); `DELETE` still deletes, for a mis-click. Backed by `services/trading_state.py` → `data/trading_state.json`. |
+
 **Removed (legacy, kept in `_trash_20260422/`):** `/api/stocks/*`, `/api/trade/*`, symbol parts of `/api/ml/*`, and the old `/api/agent/*` briefing (replaced by `/api/insight/*` + `trader_agent`).
 
 ---
 
-## 10. FRONTEND PAGES (Phase 15 target — supersedes Phase 8 list)
-Feature-sliced layout under `frontend/src/features/*`. Each feature owns its
-components, hooks, and api slice; shared primitives live in `frontend/src/shared/*`.
+## 10. FRONTEND PAGES (as shipped — 2026-08-23)
 
-| Route | Feature folder | Question answered |
-|---|---|---|
-| `/flow` | `features/flow-monitor/` | "Dòng tiền vào/ra sector nào?" (merges old Flow Dashboard + Ranking) |
-| `/rotation` | `features/rotation-map/` | "Tiền dịch chuyển TỪ đâu SANG đâu?" (Sankey + pair table) |
-| `/stealth` | `features/stealth-watch/` | "Sector nào tích luỹ âm thầm?" (5-cond gate + Gantt) |
-| `/pulse` | `features/flow-pulse/` | "NGAY LÚC NÀY flow sector nào lên/xuống?" (live tape; VaR → secondary) |
-| `/insight` | `features/daily-insight/` | "Hôm nay có gì đáng chú ý, nên làm gì?" (LLM narrative + deltas) |
+> The previous version of this section described a feature-sliced layout under
+> `frontend/src/features/*`. That layout was never built: the app is flat
+> `frontend/src/pages/*.tsx` with shared bits in `components/`, `lib/` and
+> `api/client.ts`. It also listed `/backtest` and `/regime` as deleted; both
+> exist and work. Corrected here against the running app.
 
-**Deleted** in Phase 15: `/backtest` (rebuilt only after real `close_idx` lands),
-`/regime` (heuristic fallback, non-actionable), standalone `/ranking` (merged into
-`/flow`), and the legacy symbol pages from Phase 8. Matching backend routers
-`sectors_backtest`, `sectors_regime` and their services are scheduled for
-deletion as each replacement feature ships.
+Five nav items (`CLAUDE.md` §22.9). Four of them merge what used to be
+separate routes into URL-backed tabs (`components/Tabs.tsx`, `?tab=`).
 
-New backend routers for Phase 15: `routers/flow.py`, `routers/rotation.py`,
-`routers/stealth.py`, `routers/pulse.py`, `routers/insight.py`. New services:
-`services/flow/aggregation.py` (interval resampler), `services/rotation/pair_detector.py`,
-`services/stealth/detector.py` (wraps existing `analysis/stealth.py`),
-`services/insight/narrative.py`. Full contracts in `specs/REDESIGN_PHASE15.md`.
+| Nav | Route | Tabs → page component | Question answered |
+|---|---|---|---|
+| Daily Insight | `/insight` | — `DailyInsightPage` | "Hôm nay mua/bán mã nào?" |
+| Dòng tiền | `/flow` | `overview` → `FlowMonitorPage`, `detail` → `SectorDetailPage` | "Dòng tiền vào/ra ngành nào, mạnh đến đâu?" |
+| Luân chuyển | `/rotation` | `stealth` → `StealthWatchPage`, `handoff` → `RotationMapPage` | "Tiền đang đi đâu tiếp?" |
+| Rủi ro & Vị thế | `/positions` | `risk` → `RiskPage`, `pulse` → `FlowPulsePage` | "Đang nắm gì, rủi ro bao nhiêu?" |
+| Nghiên cứu | `/research` | `ranking` → `RankingPage`, `regime` → `RegimePage`, `backtest` → `BacktestPage` | "Chiến lược có dương không?" |
+
+`PositionsPage` and `ResearchPage` are `React.lazy`; recharts (346 kB) loads
+only on the Backtest tab. Main bundle 371 kB.
+
+Pre-merge paths still resolve as redirects, `/flow/:code` included:
+`/stealth`, `/pulse`, `/risk`, `/ranking`, `/regime`, `/backtest`.
+
+Shared frontend modules:
+
+| module | role |
+|---|---|
+| `api/client.ts` | every endpoint, one axios instance |
+| `lib/actions.tsx` | `ActionBadge` (§16.3 trade action) vs `FlowBadge` (tape state) — see `CLAUDE.md` §22.8 |
+| `components/Tabs.tsx` | tab state in the URL |
+| `components/Layout.tsx` | sidebar nav |
+| `index.css` | Tailwind v4 `@theme` tokens — `bg-panel`, `text-hi/mid/lo`, `border-line`, `text-buy/sell/warn/acc` |
+
+Backend routers behind these pages: `routers/flow.py`, `routers/stealth.py`,
+`routers/pulse.py`, `routers/insight.py`, `routers/sectors_*.py`.
+`routers/rotation.py` stays mounted but has no consumer — its pair detection
+returns an empty cartesian product at every threshold (`CLAUDE.md` §22.1).
 
 ---
 

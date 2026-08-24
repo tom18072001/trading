@@ -19,6 +19,7 @@ from api.routers import rotation as rotation_router
 from api.routers import stealth as stealth_router
 from api.routers import pulse as pulse_router
 from api.routers import insight as insight_router
+from api.routers import state as state_router
 from config import (
     API_ALLOW_TUNNEL_ORIGINS, API_HOST, API_PORT, API_REQUIRE_KEY, FRONTEND_URLS,
 )
@@ -97,6 +98,7 @@ app.include_router(rotation_router.router, dependencies=_guard)
 app.include_router(stealth_router.router, dependencies=_guard)
 app.include_router(pulse_router.router, dependencies=_guard)
 app.include_router(insight_router.router, dependencies=_guard)
+app.include_router(state_router.router, dependencies=_guard)  # kill-switch + positions
 
 
 @app.get("/", tags=["health"])

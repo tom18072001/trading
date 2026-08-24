@@ -20,7 +20,10 @@ export type SectorSignalRow = {
   sector_code: string;
   score: number;
   rank: number;
-  action: 'BUY' | 'SELL' | 'HOLD';
+  // CLAUDE.md §16.3. sector_signal_service.py emits four of the five today —
+  // TRIM is defined in doctrine but never written, so the UI renders it if it
+  // ever appears rather than falling back to a raw string.
+  action: 'ACCUMULATE' | 'BUY' | 'TRIM' | 'SELL' | 'HOLD';
   persistence_ok: boolean;
 };
 
@@ -54,11 +57,18 @@ export type StopLossAlert = {
   severity: string;
 };
 
+export type BacktestStrategy = 'signals' | 'flow_z' | 'flow_raw';
+
 export type BacktestRequest = {
   name: string;
   start_date: string;
   end_date: string;
   initial_capital?: number;
+  strategy?: BacktestStrategy;
+  // null/omitted = use the config defaults (§18.2/7,10).
+  fee_bps?: number | null;
+  sell_tax_bps?: number | null;
+  settlement_lag?: number | null;
 };
 
 export type BacktestResult = {
@@ -73,8 +83,32 @@ export type BacktestResult = {
   total_trades: number;
   win_rate: number;
   benchmark_return_pct: number;
-  equity_curve: { date: string; equity: number }[];
-  trade_log: { date: string; sector: string; side: string; ret: number }[];
+  equity_curve: { date: string; equity: number; benchmark: number | null }[];
+  // The service emits `alloc` on BUY rows and `proceeds` on SELL rows — never
+  // both, and never the `ret` this type used to claim.
+  trade_log: {
+    date: string; sector: string; side: 'BUY' | 'SELL';
+    alloc?: number; proceeds?: number; cost: number;
+  }[];
+  // §18.2 realism diagnostics — modelled by the service since 2026-08-22,
+  // returned all along, rendered by nobody until backlog step 5.
+  long_only: boolean;
+  settlement_lag: number;
+  fee_bps: number;
+  sell_tax_bps: number;
+  total_cost_pct: number;
+  ceiling_floor_skips: number;
+  root_capture_ratio: number | null;
+  strategy_source: BacktestStrategy;
+  benchmark_source: 'vnindex' | 'sector_mean';
+  signal_dates_covered: number;
+};
+
+export type BacktestRunRow = {
+  id: number; name: string; strategy: string;
+  start_date: string; end_date: string;
+  total_return_pct: number; sharpe_ratio: number;
+  max_drawdown_pct: number; win_rate: number;
 };
 
 // One handoff row = flow leaving `from_sector` while entering `to_sector` on
@@ -89,6 +123,8 @@ export type HandoffResponse = { count: number; window: number; handoffs: Handoff
 
 // 2026-08-23: six methods removed here — listFlow, sectorFlow, heatmap, varOne,
 // listBacktests and stealth. All had zero call sites across frontend/src.
+// (listBacktests came back the same day: the run-history table on the Backtest
+// tab is its caller.)
 export const sectorsApi = {
   // ----- ranking -----
   latestRanking: () => api.get<SectorSignalRow[]>('/sectors/ranking'),
@@ -104,6 +140,8 @@ export const sectorsApi = {
   // ----- backtest -----
   runBacktest: (req: BacktestRequest) =>
     api.post<BacktestResult>('/sectors/backtest', req, { timeout: LONG_TIMEOUT }),
+  listBacktests: (limit = 20) =>
+    api.get<BacktestRunRow[]>('/sectors/backtest', { params: { limit } }),
 
   // ----- risk -----
   varAll: () => api.get<VaRReport[]>('/sectors/risk/var'),
@@ -117,6 +155,139 @@ export const sectorsApi = {
   // docstring in api/routers/rotation.py.
   handoff: (lookback_days = 60, window = 5, top_k = 5) =>
     api.get<HandoffResponse>('/sectors/handoff', { params: { lookback_days, window, top_k } }),
+};
+
+// ----- operator state: kill-switch, positions, watchlist (backlog step 4) -----
+// Every endpoint returns the whole state, so callers replace rather than merge.
+export type Position = {
+  symbol: string;
+  sector_code: string;
+  side: 'BUY' | 'SELL';
+  entry_price: number | null;
+  qty: number | null;
+  note: string;
+  opened_at: string;
+  /** The recommendation this was entered on. Null on rows marked before 2026-08-24. */
+  stop: number | null;
+  target: number | null;
+  thesis: string;
+};
+
+export type PositionPatch = {
+  entry_price?: number | null;
+  qty?: number | null;
+  note?: string;
+  opened_at?: string;
+  stop?: number | null;
+  target?: number | null;
+};
+
+/** One book row marked to the last known close. `last` is null on a cold cache. */
+export type PnlRow = Position & {
+  last: number | null;
+  pnl_pct: number | null;
+  pnl_vnd: number | null;
+  value: number | null;
+  /** Closes since entry, from the picks snapshot's 30-session tail. */
+  path: { date: string; close: number }[];
+  /** Ever touched since entry, not just today — a breach that recovered still counts. */
+  hit_stop: boolean;
+  hit_target: boolean;
+  dist_to_stop_pct: number | null;
+  dist_to_target_pct: number | null;
+  sessions_held: number | null;
+  /** T+2: the first session this can be sold. Trading days, holidays excluded. */
+  sellable_on: string | null;
+};
+
+export type PnlResponse = {
+  as_of: string | null;
+  positions: PnlRow[];
+  total_cost: number | null;
+  total_value: number | null;
+  total_pnl_vnd: number | null;
+  total_pnl_pct: number | null;
+  /** How many rows could be priced — a total over 2 of 9 is not the book's P&L. */
+  priced: number;
+  count: number;
+};
+
+/** A position that was sold. P&L is realised and net of the §18.2/10 costs. */
+export type ClosedPosition = Position & {
+  exit_price: number;
+  closed_at: string;
+  pnl_pct: number | null;
+  pnl_vnd: number | null;
+  fees_vnd: number | null;
+};
+
+export type RealisedResponse = {
+  count: number;
+  /** How many closed trades carried a qty, hence a VND figure. */
+  priced: number;
+  total_pnl_vnd: number | null;
+  total_fees_vnd: number | null;
+  avg_pnl_pct: number | null;
+  win_rate: number | null;
+  trades: ClosedPosition[];
+};
+
+export type TradingState = {
+  halt: boolean;
+  halt_reason: string;
+  halt_set_at: string | null;
+  /** TRADING_HALT env var. A hard override the UI cannot clear. */
+  halt_env: boolean;
+  /** halt || halt_env — what the publish job actually acts on. */
+  halt_effective: boolean;
+  capital_mn: number;
+  positions: Position[];
+  closed: ClosedPosition[];
+  watchlist: string[];
+};
+
+export const stateApi = {
+  get: () => api.get<TradingState>('/state'),
+  setHalt: (halt: boolean, reason = '') =>
+    api.post<TradingState>('/state/halt', { halt, reason }),
+  setCapital: (capital_mn: number) =>
+    api.post<TradingState>('/state/capital', { capital_mn }),
+  addPosition: (p: Partial<Position> & { symbol: string }) =>
+    api.post<TradingState>('/state/positions', p),
+  /** Partial edit. Omit a field to leave it; send -1 to clear it. */
+  updatePosition: (symbol: string, side: 'BUY' | 'SELL', patch: PositionPatch) =>
+    api.patch<TradingState>(`/state/positions/${symbol}`, patch, { params: { side } }),
+  /** "I mis-clicked" — deletes the row. To record a sale use closePosition. */
+  removePosition: (symbol: string, side: 'BUY' | 'SELL' = 'BUY') =>
+    api.delete<TradingState>(`/state/positions/${symbol}`, { params: { side } }),
+  /** "I sold" — moves the row to `closed` with realised P&L. */
+  closePosition: (symbol: string, side: 'BUY' | 'SELL', exit_price: number, note?: string) =>
+    api.post<TradingState>(`/state/positions/${symbol}/close`, { exit_price, note },
+      { params: { side } }),
+  /** The book marked to the last close from the picks snapshot. */
+  pnl: () => api.get<PnlResponse>('/state/positions/pnl'),
+  /** Closed trades + totals, net of costs. */
+  realised: () => api.get<RealisedResponse>('/state/positions/realised'),
+  toggleWatch: (symbol: string) =>
+    api.post<TradingState>('/state/watchlist', { symbol }),
+
+  // Send the daily report now, instead of waiting for the 17:00 job (§8).
+  // Kicks a background subprocess and returns immediately — poll reportStatus.
+  sendReport: (report_date?: string, send_email = true) =>
+    api.post<ReportStatus>('/state/report/send', { report_date, send_email }),
+  reportStatus: () => api.get<ReportStatus>('/state/report/status'),
+};
+
+export type ReportStatus = {
+  running: boolean;
+  report_date: string | null;
+  started_at: number | null;
+  finished_at: number | null;
+  ok: boolean | null;
+  returncode: number | null;
+  tail: string;
+  elapsed_sec?: number;
+  already_running?: boolean;
 };
 
 // agentApi (briefing / stoploss-alerts) removed 2026-08-23.
@@ -151,6 +322,9 @@ export type FlowRankingRow = {
   net_dollar_flow: number;
   breadth_sma20: number;
   atr_pct: number;
+  // NOT a §16.3 trade action — api/routers/flow.py:176 derives this from
+  // flow_z alone. It describes the tape, not what to do. Rendered with
+  // FlowBadge, deliberately flatter than ActionBadge (lib/actions.tsx).
   action: 'HOT' | 'COOL' | 'NEUTRAL';
   why: string;
 };
@@ -159,6 +333,15 @@ export type FlowRankingResponse = {
   as_of: string | null;
   flow_z_hot: number;
   rows: FlowRankingRow[];
+};
+
+export type Freshness = {
+  latest_date: string | null;
+  last_trading_day: string | null;
+  today: string;
+  is_weekend: boolean;
+  is_fresh: boolean;
+  gap_days: number;
 };
 
 export type FlowHeatCell = { sector: string; bucket: string; flow_z20: number | null };
@@ -185,7 +368,7 @@ export const flowApi = {
     api.get('/flow/sector/' + code, { params: { interval, lookback } }),
   refresh: () => api.post('/flow/refresh'),
   refreshStatus: () => api.get('/flow/refresh/status'),
-  freshness: () => api.get('/flow/freshness'),
+  freshness: () => api.get<Freshness>('/flow/freshness'),
   index: (lookback = 60) => api.get('/flow/index', { params: { lookback } }),
 };
 

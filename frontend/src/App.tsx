@@ -1,24 +1,21 @@
-import { Suspense, lazy } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Suspense, lazy, type ReactNode } from 'react';
+import { Navigate, Route, Routes, useParams } from 'react-router-dom';
 import Layout from './components/Layout';
-import FlowMonitorPage from './pages/FlowMonitorPage';
-import RotationMapPage from './pages/RotationMapPage';
-import StealthWatchPage from './pages/StealthWatchPage';
-import FlowPulsePage from './pages/FlowPulsePage';
 import DailyInsightPage from './pages/DailyInsightPage';
-import SectorDetailPage from './pages/SectorDetailPage';
-// Wired 2026-08-23. These four were fully built, their APIs return real data,
-// and CLAUDE.md section 12 lists them as deliverables -- they simply had no
-// <Route>, so the only way to reach them was to edit the source.
+import FlowPage from './pages/FlowPage';
+import RotationPage from './pages/RotationPage';
+
+// 2026-08-23 (review §C): nav merged 9 → 5. Four routes became tabs inside
+// two pages (FlowPage, RotationPage) and three became tabs inside ResearchPage.
+// The old paths still resolve — see the redirects below — because they are in
+// four months of bookmarks and in MODIFICATION_LOG.md.
 //
-// Lazy, deliberately. Wiring them eagerly took the main bundle from 372 kB to
-// 732 kB: BacktestPage pulls in recharts, which nothing on the daily path
-// needs. These four are opened occasionally, so they should not be on the
-// critical path for the page you open every morning.
-const RankingPage = lazy(() => import('./pages/RankingPage'));
-const RegimePage = lazy(() => import('./pages/RegimePage'));
-const RiskPage = lazy(() => import('./pages/RiskPage'));
-const BacktestPage = lazy(() => import('./pages/BacktestPage'));
+// Lazy, and for the same reason as before: BacktestPage pulls in recharts,
+// which nothing on the daily path needs. PositionsPage and ResearchPage are
+// opened occasionally; keeping them off the main bundle keeps the page you
+// open every morning at ~376 kB.
+const PositionsPage = lazy(() => import('./pages/PositionsPage'));
+const ResearchPage = lazy(() => import('./pages/ResearchPage'));
 
 function RouteFallback() {
   return (
@@ -28,34 +25,35 @@ function RouteFallback() {
   );
 }
 
+const lazyRoute = (el: ReactNode) => <Suspense fallback={<RouteFallback />}>{el}</Suspense>;
+
+/** /flow/BANK → /flow?tab=detail&code=BANK. Old per-sector links keep working. */
+function SectorDetailRedirect() {
+  const { code } = useParams<{ code: string }>();
+  return <Navigate to={`/flow?tab=detail&code=${code}`} replace />;
+}
+
 export default function App() {
   return (
     <Routes>
       <Route element={<Layout />}>
         <Route path="/" element={<Navigate to="/insight" replace />} />
-        <Route path="/flow" element={<FlowMonitorPage />} />
-        <Route path="/flow/:code" element={<SectorDetailPage />} />
-        <Route path="/rotation" element={<RotationMapPage />} />
-        <Route path="/stealth" element={<StealthWatchPage />} />
-        <Route path="/pulse" element={<FlowPulsePage />} />
-        <Route
-          path="/ranking"
-          element={<Suspense fallback={<RouteFallback />}><RankingPage /></Suspense>}
-        />
-        <Route
-          path="/regime"
-          element={<Suspense fallback={<RouteFallback />}><RegimePage /></Suspense>}
-        />
-        <Route
-          path="/risk"
-          element={<Suspense fallback={<RouteFallback />}><RiskPage /></Suspense>}
-        />
-        <Route
-          path="/backtest"
-          element={<Suspense fallback={<RouteFallback />}><BacktestPage /></Suspense>}
-        />
         <Route path="/insight" element={<DailyInsightPage />} />
-        <Route path="*" element={<Navigate to="/flow" replace />} />
+        <Route path="/flow" element={<FlowPage />} />
+        <Route path="/rotation" element={<RotationPage />} />
+        <Route path="/positions" element={lazyRoute(<PositionsPage />)} />
+        <Route path="/research" element={lazyRoute(<ResearchPage />)} />
+
+        {/* Pre-merge paths. */}
+        <Route path="/flow/:code" element={<SectorDetailRedirect />} />
+        <Route path="/stealth" element={<Navigate to="/rotation?tab=stealth" replace />} />
+        <Route path="/pulse" element={<Navigate to="/positions?tab=pulse" replace />} />
+        <Route path="/risk" element={<Navigate to="/positions?tab=risk" replace />} />
+        <Route path="/ranking" element={<Navigate to="/research?tab=ranking" replace />} />
+        <Route path="/regime" element={<Navigate to="/research?tab=regime" replace />} />
+        <Route path="/backtest" element={<Navigate to="/research?tab=backtest" replace />} />
+
+        <Route path="*" element={<Navigate to="/insight" replace />} />
       </Route>
     </Routes>
   );
