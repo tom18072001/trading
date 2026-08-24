@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { sectorsApi, type VaRReport, type ExposureRow, type StopLossAlert } from '../api/client';
 import { ActionBadge } from '../lib/actions';
-import { KillSwitchPanel, MyBookPanel } from '../components/KillSwitch';
+import { ClosedBookPanel, KillSwitchPanel, MyBookPanel } from '../components/KillSwitch';
 
 export default function RiskPage() {
   const [vars, setVars] = useState<VaRReport[]>([]);
@@ -38,6 +38,7 @@ export default function RiskPage() {
           and do not wait on the VaR/exposure fetch below. */}
       <KillSwitchPanel />
       <MyBookPanel />
+      <ClosedBookPanel />
 
       {loading && <div className="text-mid text-sm">Đang tải…</div>}
       {error && (

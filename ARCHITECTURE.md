@@ -5,6 +5,27 @@
 > change must be logged in `MODIFICATION_LOG.md`.
 
 ## CHANGELOG
+- **2026-08-24 (3) — Exit price, realised P&L, and a measured `CONF_HORIZON`.**
+  Contract change: `/api/state/*` gains `POST /state/positions/{symbol}/close`
+  and `GET /state/positions/realised`, and `trading_state.json` gains a
+  `closed` list (a key, not a migration — `_read()` merges `_DEFAULT`, so every
+  file written before today loads unchanged). `close_position()` is deliberately
+  distinct from `remove_position()`: the latter deletes, which is right for a
+  mis-click and wrong for a sale, and until now they were the same operation —
+  so the system could not answer whether its own picks made money. Realised P&L
+  is **net of the §18.2/10 costs** (`BACKTEST_FEE_BPS` per side +
+  `BACKTEST_SELL_TAX_BPS` on proceeds, imported from `config.py` rather than
+  retyped, ~0.40% round trip), so the book and the backtest cannot disagree.
+  `/positions/realised` is a literal sharing a prefix with `/positions/{symbol}`
+  — same route-ordering trap as `/positions/pnl`, pinned by a test.
+  Also `analysis/regime.py`: `CONF_HORIZON = 5` stops being an assertion.
+  `scripts/regime_horizon_experiment.py` walks the filtered posterior over 900
+  bars and reports Brier skill per horizon, split in thirds; pooled it picks
+  H=13, but that win comes entirely from the middle stretch and every horizon
+  above 5 goes negative on the last third. 5 is the longest horizon that stays
+  positive throughout. The same script rejects calibration: isotonic and Platt
+  both lose to raw out of sample, so no calibrator ships. See `CLAUDE.md` §22.10
+  and §25.
 - **2026-08-24 (2) — Regime confidence: a collapsed model reporting certainty.**
   Behaviour change, no schema change, no contract change (`GET
   /api/sectors/regime` keeps its shape; the `confidence` *value* now spans
@@ -504,7 +525,7 @@ the email report) and for backward-compat.
 file rather than the DB:
 | Router | Key endpoints |
 |---|---|
-| `state.py` | `GET /api/state`; `POST /api/state/{halt,capital,positions,watchlist}`; `PATCH`/`DELETE /api/state/positions/{symbol}`; `GET /api/state/positions/pnl`. Every mutating endpoint returns the whole state, so the client never merges. `/positions/pnl` is a literal path sharing a prefix with `/positions/{symbol}` — it must stay declared as the only GET on that prefix. Backed by `services/trading_state.py` → `data/trading_state.json`. |
+| `state.py` | `GET /api/state`; `POST /api/state/{halt,capital,positions,watchlist}`; `PATCH`/`DELETE /api/state/positions/{symbol}`; `POST /api/state/positions/{symbol}/close`; `GET /api/state/positions/{pnl,realised}`. Every mutating endpoint returns the whole state, so the client never merges. `/positions/pnl` and `/positions/realised` are literal paths sharing a prefix with `/positions/{symbol}` — they must stay the only GETs on that prefix. `close` books an exit (realised P&L net of §18.2/10 costs); `DELETE` still deletes, for a mis-click. Backed by `services/trading_state.py` → `data/trading_state.json`. |
 
 **Removed (legacy, kept in `_trash_20260422/`):** `/api/stocks/*`, `/api/trade/*`, symbol parts of `/api/ml/*`, and the old `/api/agent/*` briefing (replaced by `/api/insight/*` + `trader_agent`).
 

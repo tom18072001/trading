@@ -10,6 +10,10 @@ Three things the UI could not remember before (review §D, backlog step 4):
   positions  "Đã vào lệnh". The app showed picks with no idea which ones you
              actually took, so every screen re-recommended what you already own.
   watchlist  Symbols you are tracking but have not entered.
+  closed     (2026-08-24) Exits, with realised P&L net of the §18.2/10 costs.
+             Until this existed the only verb was remove_position(), i.e. a
+             sale was indistinguishable from a mis-click, and the system could
+             not answer whether its own picks made money.
 
 Storage is one JSON file, not a table. Migration 12 for three keys would be
 ceremony: this is single-operator state, it is tiny, and it must be readable by
@@ -42,6 +46,7 @@ _DEFAULT: dict[str, Any] = {
     "halt_set_at": None,
     "capital_mn": 100,      # the Daily Insight sizing slider, in triệu VND
     "positions": [],        # [{symbol, sector_code, side, entry_price, qty, note, opened_at}]
+    "closed": [],           # same shape + {exit_price, closed_at, pnl_vnd, pnl_pct, fees_vnd}
     "watchlist": [],        # [symbol]
 }
 
@@ -175,6 +180,93 @@ def update_position(symbol: str, side: str = "BUY", *,
             raise ValueError(f"no open {side} position for {sym}")
         _write(s)
     return get_state()
+
+
+def close_position(symbol: str, side: str = "BUY", *,
+                   exit_price: float, closed_at: str | None = None,
+                   note: str | None = None) -> dict[str, Any]:
+    """Book an exit: move the row from `positions` to `closed` with realised P&L.
+
+    Deliberately NOT remove_position(). That one deletes, which is right for
+    "I mis-clicked" and wrong for "I sold" — deleting a closed trade throws away
+    the only record of whether the system's picks made money, which is the whole
+    reason to track a book.
+
+    Costs are the §18.2/10 figures the backtest already uses (BACKTEST_FEE_BPS
+    per side, BACKTEST_SELL_TAX_BPS on proceeds), imported rather than retyped:
+    a book that reports a gross number the backtest would call a loss is worse
+    than no book. On a round trip that is ~0.40% of notional, which routinely
+    decides whether a small win is a win.
+
+    ponytail: no partial exits — closing takes the whole position. Split it into
+    a `qty` argument and a residual row if you ever scale out.
+    """
+    from config import BACKTEST_FEE_BPS, BACKTEST_SELL_TAX_BPS
+
+    sym = symbol.strip().upper()
+    side = side.strip().upper()
+    exit_price = float(exit_price)
+    if exit_price <= 0:
+        raise ValueError("exit_price must be positive")
+
+    with _lock:
+        s = _read()
+        row = next((p for p in s["positions"]
+                    if p.get("symbol") == sym and p.get("side") == side), None)
+        if row is None:
+            raise ValueError(f"no open {side} position for {sym}")
+
+        entry, qty = row.get("entry_price"), row.get("qty")
+        direction = 1 if side == "BUY" else -1
+        closed = {
+            **row,
+            "exit_price": exit_price,
+            "closed_at": (closed_at or today_str()).strip(),
+            "pnl_pct": None, "pnl_vnd": None, "fees_vnd": None,
+        }
+        if note is not None:
+            closed["note"] = note.strip()
+
+        if entry:
+            gross_pct = direction * (exit_price / entry - 1) * 100
+            # Cost in percent terms is independent of size, so a position with
+            # no qty still gets an honest net figure.
+            cost_pct = (2 * BACKTEST_FEE_BPS + BACKTEST_SELL_TAX_BPS) / 100
+            closed["pnl_pct"] = gross_pct - cost_pct
+            if qty:
+                fees = ((entry + exit_price) * qty * BACKTEST_FEE_BPS / 10_000
+                        + exit_price * qty * BACKTEST_SELL_TAX_BPS / 10_000)
+                closed["fees_vnd"] = fees
+                closed["pnl_vnd"] = direction * (exit_price - entry) * qty - fees
+
+        s["positions"] = [p for p in s["positions"]
+                          if not (p.get("symbol") == sym and p.get("side") == side)]
+        s["closed"] = [*s["closed"], closed]
+        _write(s)
+    log.info("[state] closed %s %s @ %s", side, sym, exit_price)
+    return get_state()
+
+
+def realised_pnl() -> dict[str, Any]:
+    """Totals over `closed`. Net of §18.2/10 costs, because close_position is."""
+    rows = get_state()["closed"]
+    with_vnd = [r for r in rows if r.get("pnl_vnd") is not None]
+    with_pct = [r for r in rows if r.get("pnl_pct") is not None]
+    wins = [r for r in with_pct if r["pnl_pct"] > 0]
+    return {
+        "count": len(rows),
+        # Same discipline as the unrealised endpoint: a total over 2 of 9 trades
+        # is not the book's total, so say how many carried a number.
+        "priced": len(with_vnd),
+        # `or None` would be wrong here: a book that broke exactly even is not
+        # a book with no number.
+        "total_pnl_vnd": sum(r["pnl_vnd"] for r in with_vnd) if with_vnd else None,
+        "total_fees_vnd": sum(r.get("fees_vnd") or 0 for r in with_vnd) if with_vnd else None,
+        "avg_pnl_pct": (sum(r["pnl_pct"] for r in with_pct) / len(with_pct)
+                        if with_pct else None),
+        "win_rate": (len(wins) / len(with_pct)) if with_pct else None,
+        "trades": rows,
+    }
 
 
 def remove_position(symbol: str, side: str = "BUY") -> dict[str, Any]:

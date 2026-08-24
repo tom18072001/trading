@@ -39,6 +39,13 @@ class PositionPatch(BaseModel):
     opened_at: str | None = None
 
 
+class PositionClose(BaseModel):
+    """Book an exit. `exit_price` is required — that is the point of the verb."""
+    exit_price: float
+    closed_at: str | None = None
+    note: str | None = None
+
+
 class SymbolBody(BaseModel):
     symbol: str
 
@@ -82,6 +89,24 @@ def update_position(symbol: str, body: PositionPatch, side: str = "BUY"):
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+@router.post("/positions/{symbol}/close")
+def close_position(symbol: str, body: PositionClose, side: str = "BUY"):
+    """Sell it. Distinct from DELETE, which is for a mis-click.
+
+    DELETE throws the row away; this keeps it in `closed` with realised P&L, so
+    the book can eventually answer whether the picks made money.
+    """
+    try:
+        return trading_state.close_position(
+            symbol, side, exit_price=body.exit_price,
+            closed_at=body.closed_at, note=body.note,
+        )
+    except ValueError as e:
+        # "no open position" is a 404; "exit_price must be positive" is a 422.
+        status = 422 if "exit_price" in str(e) else 404
+        raise HTTPException(status_code=status, detail=str(e)) from e
 
 
 @router.delete("/positions/{symbol}")
@@ -149,6 +174,17 @@ def positions_pnl():
         "priced": sum(1 for r in out if r["pnl_pct"] is not None),
         "count": len(out),
     }
+
+
+@router.get("/positions/realised")
+def positions_realised():
+    """Closed trades, net of the §18.2/10 costs the backtest charges.
+
+    Declared next to /positions/pnl for the same reason that one is: a literal
+    path segment that shares a prefix with /positions/{symbol} must not end up
+    matched as a symbol named "realised".
+    """
+    return trading_state.realised_pnl()
 
 
 @router.post("/watchlist")

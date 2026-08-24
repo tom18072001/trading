@@ -196,6 +196,26 @@ export type PnlResponse = {
   count: number;
 };
 
+/** A position that was sold. P&L is realised and net of the §18.2/10 costs. */
+export type ClosedPosition = Position & {
+  exit_price: number;
+  closed_at: string;
+  pnl_pct: number | null;
+  pnl_vnd: number | null;
+  fees_vnd: number | null;
+};
+
+export type RealisedResponse = {
+  count: number;
+  /** How many closed trades carried a qty, hence a VND figure. */
+  priced: number;
+  total_pnl_vnd: number | null;
+  total_fees_vnd: number | null;
+  avg_pnl_pct: number | null;
+  win_rate: number | null;
+  trades: ClosedPosition[];
+};
+
 export type TradingState = {
   halt: boolean;
   halt_reason: string;
@@ -206,6 +226,7 @@ export type TradingState = {
   halt_effective: boolean;
   capital_mn: number;
   positions: Position[];
+  closed: ClosedPosition[];
   watchlist: string[];
 };
 
@@ -220,10 +241,17 @@ export const stateApi = {
   /** Partial edit. Omit a field to leave it; send -1 to clear it. */
   updatePosition: (symbol: string, side: 'BUY' | 'SELL', patch: PositionPatch) =>
     api.patch<TradingState>(`/state/positions/${symbol}`, patch, { params: { side } }),
+  /** "I mis-clicked" — deletes the row. To record a sale use closePosition. */
   removePosition: (symbol: string, side: 'BUY' | 'SELL' = 'BUY') =>
     api.delete<TradingState>(`/state/positions/${symbol}`, { params: { side } }),
+  /** "I sold" — moves the row to `closed` with realised P&L. */
+  closePosition: (symbol: string, side: 'BUY' | 'SELL', exit_price: number, note?: string) =>
+    api.post<TradingState>(`/state/positions/${symbol}/close`, { exit_price, note },
+      { params: { side } }),
   /** The book marked to the last close from the picks snapshot. */
   pnl: () => api.get<PnlResponse>('/state/positions/pnl'),
+  /** Closed trades + totals, net of costs. */
+  realised: () => api.get<RealisedResponse>('/state/positions/realised'),
   toggleWatch: (symbol: string) =>
     api.post<TradingState>('/state/watchlist', { symbol }),
 

@@ -440,19 +440,35 @@ As of 2026-04-23:
 
 | Suite | Count | Command |
 |---|---|---|
-| Backend (pytest) | 233 | `python -m pytest tests/` |
+| Backend (pytest) | 252 | `python -m pytest tests/` |
 | Frontend (vitest) | 13 | `cd frontend && npm test` |
-| **Total** | **246** | — |
+| **Total** | **265** | — |
 
-> 2026-08-24: +26. `tests/test_regime_confidence.py` (+13) and
+> 2026-08-24 (3): +19. `tests/test_position_close.py` (+17) and two more in
+> `test_regime_confidence.py`.
+>
+> The load-bearing one is `test_a_close_is_not_a_delete`: closing must *leave
+> evidence*. Until `close_position()` existed the only verb was
+> `remove_position()`, so a sale and a mis-click were the same operation and the
+> book could never answer whether the picks made money.
+> `test_costs_can_turn_a_small_win_into_a_loss` is the reason the §18.2/10
+> figures are imported rather than retyped — a +0.20% gross scalp is a loss net
+> of a ~0.40% round trip, and a book that disagrees with the backtest about that
+> is worse than no book. `test_a_break_even_book_reports_zero_not_none` guards a
+> `sum(...) or None` that would have erased an exactly-flat book, and
+> `test_an_old_state_file_without_closed_still_loads` pins the reason this
+> needed no migration.
+>
+> 2026-08-24 (2): +26. `tests/test_regime_confidence.py` (+13) and
 > `tests/test_position_edit.py` (+13).
 >
 > Three of the regime tests guard *wording*, not arithmetic, which is unusual
 > enough to justify: `confidence_phrase()` is the only reader-facing sentence
 > that says what the number means, and the four strings it replaced said "HMM
-> confidence 1.00" for months. `test_the_phrase_hedges_exactly_where_
-> calibration_fails` pins the hedge to the measured 0.85 boundary, so removing
-> it requires deleting a test that names the miscalibration.
+> confidence 1.00" for months. `test_the_phrase_hedges_at_the_low_end_not_the_
+> high_end` pins the *direction* of the hedge — it first sat above 0.85 on a
+> 300-bar measurement that turned out to be a period artefact (§25.2), so
+> asserting the direction is what stops that regressing quietly.
 >
 > **`hmmlearn` was missing from the interpreter that runs pytest**, while
 > production runs through `uv run` and resolves `.venv`, where it is installed.
@@ -854,6 +870,30 @@ oversight.
 > Unrealised only: **still no exit price**, so realised attribution remains the
 > next thing to add.
 
+> **2026-08-24 (3) — and now it is added, which finishes the book.**
+> `POST /api/state/positions/{symbol}/close` moves a row from `positions` to a
+> new `closed` list with realised P&L; `GET /api/state/positions/realised`
+> totals it. The UI gets an "Đã bán" button that asks for the fill price, and a
+> closed-trades panel that hides itself when empty.
+>
+> **The distinction that makes this worth a second verb:** `DELETE` still
+> deletes. "I mis-clicked" and "I sold at 28" were the same operation before
+> today, and both destroyed the row — so the app was structurally incapable of
+> answering the one question a book exists to answer. The ✕ is still there,
+> smaller, for the mis-click.
+>
+> Realised P&L is **net of the §18.2/10 costs**, imported from `config.py`
+> (`BACKTEST_FEE_BPS` × 2 + `BACKTEST_SELL_TAX_BPS`, ≈0.40% round trip) rather
+> than retyped. A book quoting a gross number the backtest would call a loss is
+> worse than no book, and at these levels the costs routinely decide whether a
+> small win is a win — a +0.20% gross scalp books at −0.20%.
+> `pnl_pct` is computed even without `qty`, because cost-in-percent is
+> size-independent; `pnl_vnd` is not, and stays null rather than being invented.
+>
+> `closed` is a key, not migration 12 — `_read()` merges `_DEFAULT`, so every
+> state file written before today loads unchanged. Still no partial exits: a
+> close takes the whole position (`ponytail:` in the source names the upgrade).
+
 ## 23. Backtest controls — and `flow_z` was `flow_raw` in disguise — 2026-08-23
 
 ### 23.1 What was unreachable
@@ -1054,6 +1094,28 @@ overconfident: 0.90 predicted, 0.70 actual.** Read >0.85 as "likely", not
 "certain". Isotonic calibration would fix it and needs more than 300 sessions
 to fit honestly.
 
+> **2026-08-24 (3) — that last paragraph was measured on too short a window and
+> is wrong.** Re-run over the full 900 walk-forward bars
+> (`scripts/regime_horizon_experiment.py`), the top bucket is fine — 0.895
+> predicted vs **0.906** realised, n=406 — and the *bottom* is the biased end:
+> below 0.55 it predicts 0.487 against a realised **0.370**. That gap widens the
+> nearer you get to today (+0.012 early, +0.110 mid, +0.243 late), which is what
+> the 300-bar window was actually seeing: it put the whole degrading stretch
+> under a magnifying glass and read a **period**-specific miss as a **level**-
+> specific one. The lesson generalises past this number: a calibration curve
+> fitted on the most recent slice of a non-stationary series measures the slice.
+>
+> Direction matters more than size here. A low reading **overstates** survival,
+> so "50%" means less than half — a reader who trusts it sizes on a call that
+> holds ~37% of the time. The hedge in `confidence_phrase()` moved accordingly:
+> it fires below 0.55 and points downward. The high end carries none.
+>
+> **And no calibrator ships.** Isotonic and Platt were both fitted walk-forward
+> (train on the past, score the next 100 bars) against raw: raw wins the mean
+> Brier — 0.1464 vs 0.1540 isotonic, 0.1479 Platt — and each method wins some
+> folds. A calibrator that loses out of sample is a fitted layer that costs
+> money. The mitigation stays a sentence, on purpose.
+
 ### 25.3 Filtered, not smoothed — this closes §20.3 P1-4
 
 P1-4: *"Regime labels are back-painted — Viterbi re-decodes the whole history
@@ -1117,14 +1179,41 @@ changes what the number means owns the words describing it. It is also the only
 way it could be tested — `generate_report.py` is 1,629 module-level lines that
 send mail on `import` (§20.3 P3-2).
 
-Above 0.85 the phrase appends a hedge. That is not padding, it is §25.2's
-measurement: the top bucket predicts 0.90 against a realised 0.70. The boundary
-is pinned by `test_the_phrase_hedges_exactly_where_calibration_fails`, so the
-hedge cannot be dropped without deleting a test that names the reason.
+~~Above 0.85 the phrase appends a hedge.~~ **Below 0.55** — see §25.2's
+correction. The direction is pinned by
+`test_the_phrase_hedges_at_the_low_end_not_the_high_end`, which asserts the
+*side* rather than the boundary, so putting it back on the high end fails a test
+instead of shipping.
 
-### 25.7 Open
-- `CONF_HORIZON = 5` is asserted, not derived. Nothing measured says one trading
-  week is the right horizon for a regime call. The phrase now states the horizon
-  out loud, which makes the arbitrariness visible rather than fixing it.
-- The top confidence bucket needs isotonic calibration (25.2). Until it lands
-  the hedge above is the mitigation, and it is a sentence, not a correction.
+### 25.7 `CONF_HORIZON` — derived 2026-08-24 (3), and the pooled answer rejected
+
+It was an assertion for months. `scripts/regime_horizon_experiment.py` walks the
+filtered posterior over 900 bars and scores every horizon by Brier skill against
+a base-rate forecast.
+
+Pooled, skill rises to a flat plateau at H=8-13 (+0.207…+0.212) and **H=13
+wins**. Split in thirds it does not:
+
+| H | early | mid | late (2025-06 → 2026-08) |
+|---|---|---|---|
+| 5 | +0.223 | +0.229 | **+0.060** |
+| 8 | +0.262 | +0.224 | −0.003 |
+| 13 | +0.172 | +0.297 | −0.020 |
+| 20 | +0.161 | +0.298 | **−0.166** (AUC 0.510 — a coin) |
+
+The entire H≥8 advantage comes from the middle stretch. **5 is the only horizon
+positive in all three thirds**, so it stays — not because it is optimal, but
+because it is the longest horizon that has not been shown to break. Same
+methodological point as §16.12: pooling let one strong stretch mask a recent one
+that matches random.
+
+AUC is ~0.80 across H=1-13 and carries no opinion — it ranks, it does not
+calibrate, which is why skill is the deciding metric here.
+
+### 25.8 Open
+- The late-third degradation itself. Both the horizon sweep here and the stealth
+  gate (§16.13) get sharply worse over 2026. **A defect common to two unrelated
+  models is more likely the tape or the data than either model** — that is the
+  next thing to look at, ahead of tuning either.
+- `CONF_HORIZON` should be re-measured when the panel grows; 900 bars split
+  three ways is 300 per cell.

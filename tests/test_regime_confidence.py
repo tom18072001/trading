@@ -195,16 +195,52 @@ def test_the_phrase_never_says_confidence():
         assert str(CONF_HORIZON) in txt, "the horizon must be stated, not implied"
 
 
-def test_the_phrase_hedges_exactly_where_calibration_fails():
-    """Measured over 300 sessions the top bucket predicts 0.90 against a
-    realised 0.70. The hedge is that measurement, not decoration — it must
-    appear above 0.85 and not below."""
-    assert "nhiều khả năng" in confidence_phrase(0.91)
-    assert "nhiều khả năng" in confidence_phrase(0.85)
-    assert "nhiều khả năng" not in confidence_phrase(0.84)
+def test_the_phrase_hedges_at_the_low_end_not_the_high_end():
+    """The hedge moved on 2026-08-24 (late) and the direction is the finding.
+
+    It first went above 0.85, citing a top bucket that predicted 0.90 against a
+    realised 0.70 — measured on the last 300 bars. Over the full 900 the top
+    bucket is fine (0.895 vs 0.906) and the *bottom* is the biased one (0.487
+    predicted vs 0.370 realised). A short window read a period-specific miss as
+    a level-specific one.
+
+    This asserts the direction, so putting the hedge back on the high end fails
+    here rather than shipping.
+    """
+    hedge = "thang dưới"
+    assert hedge in confidence_phrase(0.40)
+    assert hedge in confidence_phrase(0.54)
+    assert hedge not in confidence_phrase(0.55)
+    assert hedge not in confidence_phrase(0.91), (
+        "the high end is calibrated on the full panel — hedging it re-introduces "
+        "the 300-bar artefact"
+    )
+
+
+def test_the_low_hedge_says_reality_is_worse_not_better():
+    """A low reading OVERSTATES survival, so a reader who trusts 50% sizes on a
+    call that holds ~37% of the time. A hedge that read the other way would be
+    worse than none."""
+    txt = confidence_phrase(0.50)
+    assert "thấp hơn" in txt, f"the hedge must point downward: {txt}"
 
 
 def test_a_missing_confidence_does_not_crash_the_report():
     """`regime.get('confidence')` is None on a fresh DB, and this runs inside
     the daily email."""
     assert confidence_phrase(None).startswith("~0%")
+
+
+def test_the_horizon_is_stated_in_the_phrase_not_hardcoded_in_it():
+    """CONF_HORIZON was asserted for months. It is measured now
+    (scripts/regime_horizon_experiment.py), and the phrase must track it — a
+    hardcoded "5 phiên" would go stale silently the day the horizon changes."""
+    import analysis.regime as regime_mod
+
+    original = regime_mod.CONF_HORIZON
+    try:
+        regime_mod.CONF_HORIZON = 8
+        assert "8 phiên" in regime_mod.confidence_phrase(0.7)
+    finally:
+        regime_mod.CONF_HORIZON = original
+    assert f"{original} phiên" in confidence_phrase(0.7)

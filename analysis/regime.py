@@ -51,10 +51,20 @@ import pandas as pd
 
 from config import REGIME_STATES
 
-# How far ahead "confidence" looks. 5 sessions = one trading week, which is the
-# horizon over which a regime label is actually used (position sizing, the
-# §16.1 stealth read). Longer horizons drift toward the stationary distribution
-# and stop discriminating.
+# How far ahead "confidence" looks. Measured, not asserted — run
+# `scripts/regime_horizon_experiment.py` to reproduce.
+#
+# Pooled over 900 walk-forward bars, Brier skill rises to a flat plateau at
+# H=8-13 (+0.207 to +0.212) and 5 sits just under it (+0.202). Pooled, H=13
+# wins. Split in thirds it does not: the entire H>=8 advantage comes from the
+# middle stretch, and on the last third (2025-06 -> 2026-08) every horizon
+# above 5 goes NEGATIVE — H=13 skill -0.020, H=20 -0.166 with AUC 0.510, which
+# is a coin. H=5 is the longest horizon that stays positive in all three
+# thirds (+0.223 / +0.229 / +0.060), so it is the honest ceiling on how far
+# this model can see. AUC is ~0.80 across 1-13 and carries no opinion.
+#
+# Read that plainly: 5 is not optimal, it is the longest horizon that has not
+# been shown to break. Re-measure when the panel grows.
 CONF_HORIZON = 5
 
 
@@ -66,14 +76,31 @@ def confidence_phrase(conf: float | None) -> str:
     sentence describing it. Every renderer that used to print
     "HMM confidence 1.00" calls this instead.
 
-    The hedge above 0.85 is not decoration — it is the measured miscalibration
-    of the top bucket (0.90 predicted vs 0.70 realised over 300 sessions).
-    Remove it when isotonic calibration lands, not before.
+    **The hedge fires low, not high, and that is a correction.** It was written
+    above 0.85, citing a top bucket that predicted 0.90 against a realised
+    0.70. That measurement used the last 300 bars only. Over the full 900 the
+    top bucket is fine (0.895 predicted vs 0.906 realised, n=406) and the
+    *bottom* is where the model is consistently wrong: below 0.55 it predicts
+    0.487 against a realised 0.370, and that gap widens the closer you get to
+    today (+0.012 early, +0.110 mid, +0.243 late). A 300-bar window put the
+    whole of that late stretch under a magnifying glass and read a
+    period-specific miss as a level-specific one.
+
+    Which way it errs matters more than the size. A low reading overstates how
+    likely the label is to survive, so "50%" means "less than half" — and a
+    reader who trusts 50% sizes a position on a call that holds ~37% of the
+    time. The high end needs no hedge.
+
+    Deliberately NOT corrected numerically. Isotonic and Platt were both fitted
+    walk-forward against raw (`scripts/regime_horizon_experiment.py`): raw wins
+    the mean Brier (0.1464 vs 0.1540 isotonic, 0.1479 Platt) and each wins some
+    folds. A calibrator that loses out of sample is a fitted layer that costs
+    money, so this stays a sentence.
     """
     c = float(conf or 0.0)
     base = f"~{c:.0%} khả năng giữ {CONF_HORIZON} phiên tới"
-    if c >= 0.85:
-        return f"{base} (thang trên còn lạc quan — đọc là 'nhiều khả năng')"
+    if c < 0.55:
+        return f"{base} (thang dưới thường lạc quan quá — thực tế còn thấp hơn)"
     return base
 
 

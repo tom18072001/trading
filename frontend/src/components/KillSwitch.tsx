@@ -8,7 +8,7 @@
  * same. This adds the second one.
  */
 import { useEffect, useState } from 'react';
-import { stateApi, type PnlResponse, type Position } from '../api/client';
+import { stateApi, type PnlResponse, type Position, type RealisedResponse } from '../api/client';
 import { tradingState, useTradingState } from '../lib/tradingState';
 
 /** Compact VND. The book is in đồng; 12.400.000 in a table cell is unreadable. */
@@ -123,10 +123,149 @@ function NumCell({ value, onCommit, align = 'right', width = 'w-[86px]', placeho
   );
 }
 
+/** Closed trades. Hidden until there is at least one — an empty ledger is noise.
+ *
+ *  Totals come from the endpoint rather than being summed here: win rate and
+ *  average are one piece of arithmetic, and a second copy in TypeScript is a
+ *  second thing to keep in step with the cost model.
+ */
+export function ClosedBookPanel() {
+  const s = useTradingState();
+  const [r, setR] = useState<RealisedResponse | null>(null);
+
+  useEffect(() => {
+    stateApi.realised().then((x) => setR(x.data)).catch(() => setR(null));
+  }, [s.closed]);
+
+  if (!r || r.count === 0) return null;
+  const up = (r.avg_pnl_pct ?? 0) >= 0;
+
+  return (
+    <section className="rounded-2xl bg-panel border border-line overflow-hidden">
+      <div className="px-4 py-3 border-b border-line flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div className="section-label">Lệnh đã đóng — lãi/lỗ thực hiện</div>
+          <p className="text-[11px] text-lo mt-0.5">
+            Đã trừ phí {'≈'}0,40% khứ hồi (phí môi giới 2 chiều + thuế bán 0,1%),
+            cùng mức backtest tính — §18.2/10.
+            {r.priced < r.count && (
+              <span className="text-warn"> · chỉ {r.priced}/{r.count} lệnh có khối lượng
+                nên ra được số tiền</span>
+            )}
+          </p>
+        </div>
+        <div className="flex items-center gap-5 text-right">
+          {r.win_rate != null && (
+            <div>
+              <div className="section-label">Tỷ lệ thắng</div>
+              <div className="font-mono tabular font-bold text-[17px] text-hi">
+                {(r.win_rate * 100).toFixed(0)}%
+                <span className="text-[12px] text-mid ml-1">({r.count} lệnh)</span>
+              </div>
+            </div>
+          )}
+          {r.avg_pnl_pct != null && (
+            <div>
+              <div className="section-label">Trung bình / lệnh</div>
+              <div className={`font-mono tabular font-bold text-[17px] ${up ? 'text-buy' : 'text-sell'}`}>
+                {up ? '+' : ''}{r.avg_pnl_pct.toFixed(2)}%
+                {r.total_pnl_vnd != null && (
+                  <span className="text-[12px] text-mid ml-1.5">({fmtVnd(r.total_pnl_vnd)})</span>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <table className="w-full text-[13px]">
+        <thead className="bg-panel2 border-b border-line text-[10px] uppercase tracking-wider text-mid">
+          <tr>
+            <th className="p-2.5 text-left">Mã</th>
+            <th className="p-2.5 text-left">Chiều</th>
+            <th className="p-2.5 text-right">Giá vào</th>
+            <th className="p-2.5 text-right">Giá bán</th>
+            <th className="p-2.5 text-right">KL</th>
+            <th className="p-2.5 text-right">Phí</th>
+            <th className="p-2.5 text-right">Lãi/lỗ ròng</th>
+            <th className="p-2.5 text-right">Mở</th>
+            <th className="p-2.5 text-right">Đóng</th>
+          </tr>
+        </thead>
+        <tbody>
+          {[...r.trades].reverse().map((t, i) => {
+            const win = (t.pnl_pct ?? 0) >= 0;
+            return (
+              <tr key={`${t.symbol}-${t.closed_at}-${i}`} className="border-b border-line hover:bg-panel2/60">
+                <td className="p-2.5 font-display font-bold text-hi">{t.symbol}</td>
+                <td className={`p-2.5 font-semibold ${t.side === 'BUY' ? 'text-buy' : 'text-sell'}`}>{t.side}</td>
+                <td className="p-2.5 text-right font-mono tabular text-mid">
+                  {t.entry_price != null ? t.entry_price.toFixed(2) : '—'}
+                </td>
+                <td className="p-2.5 text-right font-mono tabular text-hi">{t.exit_price.toFixed(2)}</td>
+                <td className="p-2.5 text-right font-mono tabular text-mid">{t.qty ?? '—'}</td>
+                <td className="p-2.5 text-right font-mono tabular text-lo">{fmtVnd(t.fees_vnd)}</td>
+                <td className={`p-2.5 text-right font-mono tabular font-semibold ${
+                  t.pnl_pct == null ? 'text-lo' : win ? 'text-buy' : 'text-sell'}`}>
+                  {t.pnl_pct != null ? `${win ? '+' : ''}${t.pnl_pct.toFixed(2)}%` : '—'}
+                  {t.pnl_vnd != null && (
+                    <div className="text-[10.5px] font-normal opacity-75">{fmtVnd(t.pnl_vnd)}</div>
+                  )}
+                </td>
+                <td className="p-2.5 text-right font-mono tabular text-lo">{t.opened_at}</td>
+                <td className="p-2.5 text-right font-mono tabular text-lo">{t.closed_at}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+/** Ask for the exit price, then close.
+ *
+ *  Not NumCell: there, an empty box means "clear this field" (-1), which for a
+ *  sale would mean booking a trade at no price. Here empty must mean cancel.
+ *
+ *  Prefilled with the last close — the nearest thing the app knows to your fill.
+ *  It is NOT your fill, which is why this is an editable box and not a one-click
+ *  "bán ở giá hiện tại": a wrong exit price is a permanently wrong realised P&L.
+ */
+function ExitCell({ suggested, onCommit, onCancel }: {
+  suggested: number | null;
+  onCommit: (v: number) => void;
+  onCancel: () => void;
+}) {
+  const [v, setV] = useState(suggested != null ? String(suggested) : '');
+  const commit = () => {
+    const n = Number(v.trim());
+    if (Number.isFinite(n) && n > 0) onCommit(n);
+    else onCancel();
+  };
+  return (
+    <input
+      autoFocus
+      value={v}
+      onChange={(e) => setV(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        if (e.key === 'Escape') { setV(''); onCancel(); }
+      }}
+      placeholder="Giá bán"
+      title="Giá bán thực tế — Enter để ghi nhận, Esc để huỷ"
+      className="bg-panel2 border border-sell/40 rounded-md px-1.5 py-0.5 font-mono tabular
+        text-hi outline-none w-[96px] text-right"
+    />
+  );
+}
+
 export function MyBookPanel() {
   const s = useTradingState();
   const [sym, setSym] = useState('');
   const [pnl, setPnl] = useState<PnlResponse | null>(null);
+  const [closing, setClosing] = useState<string | null>(null);
 
   // Re-mark whenever the book changes — an edited entry price with a stale P&L
   // beside it is worse than no P&L.
@@ -211,10 +350,11 @@ export function MyBookPanel() {
           </thead>
           <tbody>
             {s.positions.map((p) => {
-              const m = marked.get(`${p.symbol}-${p.side}`);
+              const key = `${p.symbol}-${p.side}`;
+              const m = marked.get(key);
               const up = (m?.pnl_pct ?? 0) >= 0;
               return (
-                <tr key={`${p.symbol}-${p.side}`} className="border-b border-line hover:bg-panel2/60">
+                <tr key={key} className="border-b border-line hover:bg-panel2/60">
                   <td className="p-2.5 font-display font-bold text-hi">{p.symbol}</td>
                   <td className="p-2.5 font-mono text-[11px] text-mid">{p.sector_code || '—'}</td>
                   <td className={`p-2.5 font-semibold ${p.side === 'BUY' ? 'text-buy' : 'text-sell'}`}>{p.side}</td>
@@ -238,12 +378,32 @@ export function MyBookPanel() {
                     {m?.value != null ? fmtVnd(m.value) : '—'}
                   </td>
                   <td className="p-2.5 text-right font-mono tabular text-lo">{p.opened_at}</td>
-                  <td className="p-2.5 text-right">
-                    <button
-                      onClick={() => tradingState.removePosition(p.symbol, p.side)}
-                      className="text-[11.5px] text-lo hover:text-sell transition">
-                      Đã thoát
-                    </button>
+                  <td className="p-1.5 text-right whitespace-nowrap">
+                    {closing === key ? (
+                      <ExitCell
+                        suggested={m?.last ?? p.entry_price}
+                        onCancel={() => setClosing(null)}
+                        onCommit={async (v) => {
+                          setClosing(null);
+                          await tradingState.closePosition(p.symbol, p.side, v);
+                        }}
+                      />
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => setClosing(key)}
+                          title="Ghi nhận đã bán — giữ lại lãi/lỗ thực hiện"
+                          className="text-[11.5px] text-lo hover:text-hi transition">
+                          Đã bán
+                        </button>
+                        <button
+                          onClick={() => tradingState.removePosition(p.symbol, p.side)}
+                          title="Bấm nhầm — xoá hẳn, không ghi vào lịch sử"
+                          className="text-[11.5px] text-lo/60 hover:text-sell transition ml-2.5">
+                          ✕
+                        </button>
+                      </>
+                    )}
                   </td>
                 </tr>
               );

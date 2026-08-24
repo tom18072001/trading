@@ -16,7 +16,7 @@ import { stateApi, type PositionPatch, type TradingState } from '../api/client';
 const EMPTY: TradingState = {
   halt: false, halt_reason: '', halt_set_at: null,
   halt_env: false, halt_effective: false,
-  capital_mn: 100, positions: [], watchlist: [],
+  capital_mn: 100, positions: [], closed: [], watchlist: [],
 };
 
 let state: TradingState = EMPTY;
@@ -53,6 +53,8 @@ export const tradingState = {
     run(stateApi.updatePosition(symbol, side, patch)),
   removePosition: (symbol: string, side: 'BUY' | 'SELL' = 'BUY') =>
     run(stateApi.removePosition(symbol, side)),
+  closePosition: (symbol: string, side: 'BUY' | 'SELL', exitPrice: number, note?: string) =>
+    run(stateApi.closePosition(symbol, side, exitPrice, note)),
   toggleWatch: (symbol: string) => run(stateApi.toggleWatch(symbol)),
   reload: () => run(stateApi.get()),
 };

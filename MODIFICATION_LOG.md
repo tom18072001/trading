@@ -14,6 +14,72 @@
 
 ---
 
+## 2026-08-24 (6) — a sale stops being a delete; CONF_HORIZON stops being an assertion
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `services/trading_state.py` (`closed` key, `close_position()`, `realised_pnl()`)
+  - `api/routers/state.py` (`POST /positions/{symbol}/close`, `GET /positions/realised`)
+  - `frontend/src/api/client.ts`, `lib/tradingState.ts` (types + bindings)
+  - `frontend/src/components/KillSwitch.tsx` (`ExitCell`, `ClosedBookPanel`),
+    `pages/RiskPage.tsx`
+  - `tests/test_position_close.py` (new, +17)
+  - `analysis/regime.py` (`CONF_HORIZON` comment, `confidence_phrase()` hedge)
+  - `scripts/regime_horizon_experiment.py` (new)
+  - `tests/test_regime_confidence.py` (+2, now 15)
+  - `CLAUDE.md` §19, §22.10, §25.2, §25.6, §25.7 (new), §25.8;
+    `ARCHITECTURE.md` CHANGELOG + `state.py` router row
+- Reason: three items left open by entries (2)-(5), all of them fixable in code.
+  1. The book had **one verb for removing a row**. `remove_position()` deletes,
+     so "I mis-clicked" and "I sold at 28" were the same operation and both
+     destroyed the evidence — the app was structurally incapable of answering
+     whether its own picks made money. §22.10 called realised attribution "the
+     next thing to add"; this is it.
+  2. `CONF_HORIZON = 5` was asserted. Nothing measured said one trading week
+     was the right horizon for a regime call.
+  3. §25.7 recorded "the top confidence bucket needs isotonic calibration" as a
+     known defect, on the strength of a single 300-session window.
+- Summary:
+  - **`close_position()` is deliberately not `remove_position()`.** It moves the
+    row to a new `closed` list with realised P&L; `DELETE` still deletes, for
+    the mis-click. The UI gets "Đã bán" (asks for the fill price) and a smaller
+    ✕ beside it.
+  - Realised P&L is **net of the §18.2/10 costs**, imported from `config.py`
+    (`BACKTEST_FEE_BPS`×2 + `BACKTEST_SELL_TAX_BPS`, ≈0.40% round trip) rather
+    than retyped — a book quoting a gross number the backtest would call a loss
+    is worse than no book. `pnl_pct` is computed even without `qty` because
+    cost-in-percent is size-independent; `pnl_vnd` stays null rather than
+    invented.
+  - `closed` is a key, not migration 12: `_read()` merges `_DEFAULT`, so every
+    state file written before today loads unchanged (pinned by a test).
+  - `/positions/realised` is a literal sharing a prefix with
+    `/positions/{symbol}` — same route-ordering trap `/positions/pnl` already
+    documents, and pinned the same way.
+  - **`CONF_HORIZON` measured.** Pooled Brier skill over 900 walk-forward bars
+    picks H=13, and that answer is rejected: the entire H≥8 advantage comes from
+    the middle third, and on the last third every horizon above 5 goes negative
+    (H=20 at −0.166, AUC 0.510). H=5 is the only one positive in all three
+    thirds, so it stays — not as optimal, as the longest not shown to break.
+  - **A prior claim of mine was wrong and is corrected in place.** Over the full
+    900 bars the top confidence bucket is well calibrated (0.895 predicted vs
+    0.906 realised, n=406); the **bottom** is the biased end (0.487 vs 0.370),
+    and the gap widens toward today. The old figure was a 300-bar artefact that
+    read a period-specific miss as a level-specific one. The hedge in
+    `confidence_phrase()` moved from >0.85 to <0.55 and reversed direction — a
+    low reading *overstates* survival, which is the dangerous way to be wrong.
+  - **No calibrator ships.** Isotonic and Platt both fitted walk-forward lose to
+    raw on mean Brier (0.1464 raw vs 0.1540 / 0.1479). A calibrator that loses
+    out of sample is a fitted layer that costs money.
+- Verified: 252 backend (was 233) + 13 frontend green; `npx tsc --noEmit` clean;
+  ruff 66, unchanged from baseline.
+- Follow-ups:
+  - **The late-third degradation is now visible in two unrelated models** — the
+    horizon sweep here and the §16.13 stealth gate both fall apart over 2026. A
+    defect common to both is more likely the tape or the data than either model.
+    That is the next thing to look at, ahead of tuning either.
+  - No partial exits: a close takes the whole position (`ponytail:` in source).
+  - Browser verification of the close flow is still outstanding — both dev
+    servers run outside the preview harness on this box.
+
 ## 2026-08-24 (5) — the report still called it "confidence"
 - Author: Claude Code on behalf of Tom
 - Files:
