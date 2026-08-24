@@ -140,6 +140,43 @@ def add_position(symbol: str, sector_code: str = "", side: str = "BUY",
     return get_state()
 
 
+def update_position(symbol: str, side: str = "BUY", *,
+                    entry_price: float | None = None, qty: float | None = None,
+                    note: str | None = None, opened_at: str | None = None) -> dict[str, Any]:
+    """Edit a position in place. Only the fields passed are touched.
+
+    Deliberately NOT add_position(): that one stamps `opened_at` to today and
+    drops the symbol from the watchlist, both of which are wrong when you are
+    only correcting a price you typed from memory. The entry price marked from
+    Daily Insight is the previous close, which is almost never your fill.
+
+    `None` means "leave alone", so clearing a price needs an explicit -1 rather
+    than an omitted field — the alternative is that every partial edit silently
+    wipes qty.
+    """
+    sym = symbol.strip().upper()
+    side = side.strip().upper()
+    with _lock:
+        s = _read()
+        found = False
+        for p in s["positions"]:
+            if p.get("symbol") != sym or p.get("side") != side:
+                continue
+            found = True
+            if entry_price is not None:
+                p["entry_price"] = None if entry_price < 0 else float(entry_price)
+            if qty is not None:
+                p["qty"] = None if qty < 0 else float(qty)
+            if note is not None:
+                p["note"] = note.strip()
+            if opened_at is not None:
+                p["opened_at"] = opened_at.strip()
+        if not found:
+            raise ValueError(f"no open {side} position for {sym}")
+        _write(s)
+    return get_state()
+
+
 def remove_position(symbol: str, side: str = "BUY") -> dict[str, Any]:
     sym = symbol.strip().upper()
     side = side.strip().upper()

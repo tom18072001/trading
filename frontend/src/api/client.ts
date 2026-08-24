@@ -169,6 +169,33 @@ export type Position = {
   opened_at: string;
 };
 
+export type PositionPatch = {
+  entry_price?: number | null;
+  qty?: number | null;
+  note?: string;
+  opened_at?: string;
+};
+
+/** One book row marked to the last known close. `last` is null on a cold cache. */
+export type PnlRow = Position & {
+  last: number | null;
+  pnl_pct: number | null;
+  pnl_vnd: number | null;
+  value: number | null;
+};
+
+export type PnlResponse = {
+  as_of: string | null;
+  positions: PnlRow[];
+  total_cost: number | null;
+  total_value: number | null;
+  total_pnl_vnd: number | null;
+  total_pnl_pct: number | null;
+  /** How many rows could be priced — a total over 2 of 9 is not the book's P&L. */
+  priced: number;
+  count: number;
+};
+
 export type TradingState = {
   halt: boolean;
   halt_reason: string;
@@ -190,8 +217,13 @@ export const stateApi = {
     api.post<TradingState>('/state/capital', { capital_mn }),
   addPosition: (p: Partial<Position> & { symbol: string }) =>
     api.post<TradingState>('/state/positions', p),
+  /** Partial edit. Omit a field to leave it; send -1 to clear it. */
+  updatePosition: (symbol: string, side: 'BUY' | 'SELL', patch: PositionPatch) =>
+    api.patch<TradingState>(`/state/positions/${symbol}`, patch, { params: { side } }),
   removePosition: (symbol: string, side: 'BUY' | 'SELL' = 'BUY') =>
     api.delete<TradingState>(`/state/positions/${symbol}`, { params: { side } }),
+  /** The book marked to the last close from the picks snapshot. */
+  pnl: () => api.get<PnlResponse>('/state/positions/pnl'),
   toggleWatch: (symbol: string) =>
     api.post<TradingState>('/state/watchlist', { symbol }),
 

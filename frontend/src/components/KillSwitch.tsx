@@ -7,8 +7,19 @@
  * *suggests* holding, not what you hold — two different things that looked the
  * same. This adds the second one.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { stateApi, type PnlResponse, type Position } from '../api/client';
 import { tradingState, useTradingState } from '../lib/tradingState';
+
+/** Compact VND. The book is in đồng; 12.400.000 in a table cell is unreadable. */
+function fmtVnd(v: number | null | undefined) {
+  if (v == null || !Number.isFinite(v)) return '—';
+  const a = Math.abs(v), sign = v < 0 ? '-' : '';
+  if (a >= 1e9) return `${sign}${(a / 1e9).toFixed(2)} tỷ`;
+  if (a >= 1e6) return `${sign}${(a / 1e6).toFixed(1)} tr`;
+  if (a >= 1e3) return `${sign}${(a / 1e3).toFixed(0)}k`;
+  return `${sign}${a.toFixed(0)}`;
+}
 
 export function KillSwitchPanel() {
   const s = useTradingState();
@@ -72,9 +83,56 @@ export function KillSwitchPanel() {
   );
 }
 
+/** One editable cell. Commits on blur or Enter, reverts on Escape.
+ *
+ *  Not a form: a book row has two editable numbers, and a save button per row
+ *  is more chrome than the edit is worth. Commit-on-blur means the value you
+ *  can see is the value on disk. */
+function NumCell({ value, onCommit, align = 'right', width = 'w-[86px]', placeholder = '—' }: {
+  value: number | null; onCommit: (v: number | null) => void;
+  align?: 'right' | 'left'; width?: string; placeholder?: string;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? (value != null ? String(value) : '');
+
+  const commit = () => {
+    if (draft === null) return;
+    const t = draft.trim();
+    setDraft(null);
+    // -1 is the API's "clear this field"; an empty box means the same thing.
+    const next = t === '' ? -1 : Number(t);
+    if (!Number.isFinite(next)) return;                    // typo: revert, don't save
+    if (next === value || (t === '' && value == null)) return;
+    onCommit(next);
+  };
+
+  return (
+    <input
+      value={shown}
+      placeholder={placeholder}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        if (e.key === 'Escape') { setDraft(null); (e.target as HTMLInputElement).blur(); }
+      }}
+      className={`bg-transparent border border-transparent hover:border-line2 focus:border-acc/50
+        focus:bg-panel2 rounded-md px-1.5 py-0.5 font-mono tabular text-hi outline-none
+        transition ${width} text-${align}`}
+    />
+  );
+}
+
 export function MyBookPanel() {
   const s = useTradingState();
   const [sym, setSym] = useState('');
+  const [pnl, setPnl] = useState<PnlResponse | null>(null);
+
+  // Re-mark whenever the book changes — an edited entry price with a stale P&L
+  // beside it is worse than no P&L.
+  useEffect(() => {
+    stateApi.pnl().then((r) => setPnl(r.data)).catch(() => setPnl(null));
+  }, [s.positions]);
 
   const add = async () => {
     const v = sym.trim().toUpperCase();
@@ -83,11 +141,38 @@ export function MyBookPanel() {
     await tradingState.addPosition({ symbol: v });
   };
 
+  const marked = new Map((pnl?.positions ?? []).map((p) => [`${p.symbol}-${p.side}`, p]));
+  const patch = (p: Position, k: 'entry_price' | 'qty') => (v: number | null) =>
+    tradingState.updatePosition(p.symbol, p.side, { [k]: v });
+
   return (
     <section className="rounded-2xl bg-panel border border-line overflow-hidden">
-      <div className="px-4 py-3 border-b border-line flex items-center justify-between gap-3">
-        <div className="section-label">Danh mục của tôi — đã vào lệnh thật</div>
-        <div className="flex gap-2">
+      <div className="px-4 py-3 border-b border-line flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div className="section-label">Danh mục của tôi — đã vào lệnh thật</div>
+          {pnl && pnl.count > 0 && (
+            <div className="text-[11px] text-lo mt-0.5">
+              Định giá theo giá đóng cửa {pnl.as_of ?? 'chưa có'}
+              {pnl.priced < pnl.count && (
+                <span className="text-warn"> · chỉ {pnl.priced}/{pnl.count} mã tính được lãi/lỗ
+                  (thiếu giá vào hoặc khối lượng)</span>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          {pnl?.total_pnl_pct != null && (
+            <div className="text-right">
+              <div className="section-label">Lãi/lỗ tạm tính</div>
+              <div className={`font-mono tabular font-bold text-[17px] ${
+                pnl.total_pnl_pct >= 0 ? 'text-buy' : 'text-sell'}`}>
+                {pnl.total_pnl_pct >= 0 ? '+' : ''}{pnl.total_pnl_pct.toFixed(2)}%
+                <span className="text-[12px] text-mid ml-1.5">
+                  ({fmtVnd(pnl.total_pnl_vnd)})
+                </span>
+              </div>
+            </div>
+          )}
           <input
             value={sym}
             onChange={(e) => setSym(e.target.value)}
@@ -116,29 +201,53 @@ export function MyBookPanel() {
               <th className="p-2.5 text-left">Ngành</th>
               <th className="p-2.5 text-left">Chiều</th>
               <th className="p-2.5 text-right">Giá vào</th>
+              <th className="p-2.5 text-right">KL</th>
+              <th className="p-2.5 text-right">Giá hiện tại</th>
+              <th className="p-2.5 text-right">Lãi/lỗ</th>
+              <th className="p-2.5 text-right">Giá trị</th>
               <th className="p-2.5 text-right">Ngày</th>
               <th className="p-2.5 text-right"></th>
             </tr>
           </thead>
           <tbody>
-            {s.positions.map((p) => (
-              <tr key={`${p.symbol}-${p.side}`} className="border-b border-line hover:bg-panel2/60">
-                <td className="p-2.5 font-display font-bold text-hi">{p.symbol}</td>
-                <td className="p-2.5 font-mono text-[11px] text-mid">{p.sector_code || '—'}</td>
-                <td className={`p-2.5 font-semibold ${p.side === 'BUY' ? 'text-buy' : 'text-sell'}`}>{p.side}</td>
-                <td className="p-2.5 text-right font-mono tabular text-hi">
-                  {p.entry_price != null ? p.entry_price.toFixed(2) : '—'}
-                </td>
-                <td className="p-2.5 text-right font-mono tabular text-lo">{p.opened_at}</td>
-                <td className="p-2.5 text-right">
-                  <button
-                    onClick={() => tradingState.removePosition(p.symbol, p.side)}
-                    className="text-[11.5px] text-lo hover:text-sell transition">
-                    Đã thoát
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {s.positions.map((p) => {
+              const m = marked.get(`${p.symbol}-${p.side}`);
+              const up = (m?.pnl_pct ?? 0) >= 0;
+              return (
+                <tr key={`${p.symbol}-${p.side}`} className="border-b border-line hover:bg-panel2/60">
+                  <td className="p-2.5 font-display font-bold text-hi">{p.symbol}</td>
+                  <td className="p-2.5 font-mono text-[11px] text-mid">{p.sector_code || '—'}</td>
+                  <td className={`p-2.5 font-semibold ${p.side === 'BUY' ? 'text-buy' : 'text-sell'}`}>{p.side}</td>
+                  <td className="p-1.5 text-right">
+                    <NumCell value={p.entry_price} onCommit={patch(p, 'entry_price')} />
+                  </td>
+                  <td className="p-1.5 text-right">
+                    <NumCell value={p.qty} onCommit={patch(p, 'qty')} placeholder="KL" />
+                  </td>
+                  <td className="p-2.5 text-right font-mono tabular text-mid">
+                    {m?.last != null ? m.last.toFixed(2) : '—'}
+                  </td>
+                  <td className={`p-2.5 text-right font-mono tabular font-semibold ${
+                    m?.pnl_pct == null ? 'text-lo' : up ? 'text-buy' : 'text-sell'}`}>
+                    {m?.pnl_pct != null ? `${up ? '+' : ''}${m.pnl_pct.toFixed(2)}%` : '—'}
+                    {m?.pnl_vnd != null && (
+                      <div className="text-[10.5px] font-normal opacity-75">{fmtVnd(m.pnl_vnd)}</div>
+                    )}
+                  </td>
+                  <td className="p-2.5 text-right font-mono tabular text-mid">
+                    {m?.value != null ? fmtVnd(m.value) : '—'}
+                  </td>
+                  <td className="p-2.5 text-right font-mono tabular text-lo">{p.opened_at}</td>
+                  <td className="p-2.5 text-right">
+                    <button
+                      onClick={() => tradingState.removePosition(p.symbol, p.side)}
+                      className="text-[11.5px] text-lo hover:text-sell transition">
+                      Đã thoát
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}

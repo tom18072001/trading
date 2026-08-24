@@ -11,7 +11,7 @@
  * rather than merges and the client can never drift from the file on disk.
  */
 import { useSyncExternalStore } from 'react';
-import { stateApi, type TradingState } from '../api/client';
+import { stateApi, type PositionPatch, type TradingState } from '../api/client';
 
 const EMPTY: TradingState = {
   halt: false, halt_reason: '', halt_set_at: null,
@@ -49,6 +49,8 @@ export const tradingState = {
   setCapital: (mn: number) => run(stateApi.setCapital(mn)),
   addPosition: (p: { symbol: string; sector_code?: string; side?: 'BUY' | 'SELL'; entry_price?: number | null; note?: string }) =>
     run(stateApi.addPosition(p)),
+  updatePosition: (symbol: string, side: 'BUY' | 'SELL', patch: PositionPatch) =>
+    run(stateApi.updatePosition(symbol, side, patch)),
   removePosition: (symbol: string, side: 'BUY' | 'SELL' = 'BUY') =>
     run(stateApi.removePosition(symbol, side)),
   toggleWatch: (symbol: string) => run(stateApi.toggleWatch(symbol)),
