@@ -296,6 +296,87 @@ Anything worse than this means the thesis is still lagging — go back to featur
 > than condition choice — that is the next thing to look at, ahead of any
 > further condition tuning.
 
+### 16.12 The base rate — and why §16.11's criteria are not sufficient
+
+> **2026-08-24, chasing the 2026 collapse.** Adding the missing row to
+> `scripts/stealth_leadtime_experiment.py` — score **every** row in the panel,
+> i.e. no gate at all — produced the most important number in this section:
+>
+> | | events | breakout | ≥10d lead | med lead | med RC |
+> |---|---|---|---|---|---|
+> | **NO GATE (base rate)** | 13,033 | **83%** | **23%** | **4** | **0.944** |
+> | shipped §16.1 | 20 | 75% | 20% | 3 | 0.940 |
+> | cond2 → `foreign_streak ≥ 3` | 16 | 88% | 50% | 8 | 0.924 |
+>
+> **The shipped gate is worse than not filtering at all.** Lower breakout rate,
+> fewer early signals, shorter lead. Of the six variants only
+> `foreign_streak` beats the base rate on any axis.
+>
+> **§16.11's three criteria cannot detect this**, which is the doctrine defect.
+> They are absolute thresholds ("≥60% at ≥10d", "RC ≤ 0.85", "FP ≤ 30%"), so a
+> gate posting a respectable-sounding 75% breakout reads as *underperforming a
+> target* when it is in fact **selecting worse-than-random sector-days**. Every
+> §16.11 measurement from here on is reported against the NO GATE row, and a
+> variant that does not beat it is not a signal regardless of its absolute
+> numbers. The bench prints the row on every run.
+>
+> **Amend §16.11's success criteria accordingly:** each of the three targets is
+> now *necessary but not sufficient* — a candidate must also beat the
+> unconditional base rate on breakout share and ≥10d share, **within each
+> year**, not pooled. Pooling is what let `foreign_streak`'s pre-2026 strength
+> mask a 2026 that matches random.
+
+### 16.13 The 2026 collapse is mostly the market
+
+> **Same investigation, 2026-08-24.** Ruled out first, cheaply:
+> - **Not data.** 2026 rows are 99% non-zero `foreign_net`, 100% `close_idx`
+>   and `atr_pct`, 15 sectors, 156 sessions — coverage matches 2024-25.
+>   `breadth_sma20` has **zero NULLs** in 2024-26 (245 in 2023 only); its
+>   apparent "76% coverage" was a miscount on my part — a legitimate `0.0` is
+>   not a missing value. Its zero *rate* does rise, 14/15/16% in 2023-25 →
+>   **24%** in 2026, which is not a gap but the flat tape below showing up in
+>   breadth: on a quarter of 2026 sector-days no constituent was above its
+>   SMA20. (Breadth takes 9 distinct values over 5 names — §20.3 P1-3.)
+> - **Not right-censoring.** Only 1 of 7 shipped-gate events in 2026 has fewer
+>   than 40 forward sessions, so "a long lead is unobservable near the panel
+>   edge" does not explain it.
+>
+> What did explain most of it is the tape itself. The **unconditional** base
+> rate falls in lockstep:
+>
+> | year | base breakout | med fwd-40d max | gate breakout | gate ≥10d |
+> |---|---|---|---|---|
+> | 2023 | 88% | +7.1% | 80% | 25% |
+> | 2024 | 84% | +5.4% | 100% | 25% |
+> | 2025 | 86% | +7.9% | 80% | 25% |
+> | **2026** | **68%** | **+3.2%** | **50%** | **0%** |
+>
+> 2026 is a flatter tape: half the forward move, and a breakout definition
+> pinned to 2×ATR catches far less of it. **But the gate degrades faster than
+> the market** — 50% vs a 68% base rate, 0% vs 18% at ≥10d. So regime explains
+> the level, not the shortfall. Both remain open; the tape is the larger term.
+
+### 16.14 What this means for §16 as a whole
+
+> Stated plainly, so no later reader has to re-derive it: **as of 2026-08-24
+> the §16.1 gate has no measurable edge.** It fires 20 times in 3.5 years and
+> those 20 sector-days break out *less* often, *later*, and at a *worse* entry
+> than a sector-day drawn at random from the same panel.
+>
+> This does not falsify §16's thesis — that VN money flow leads public
+> coverage by ~1 month. It falsifies **this implementation** of it. The one
+> result pointing back at the thesis is `foreign_streak`: persistence of net
+> foreign buying is the only tested condition that beat the base rate
+> (88% vs 83% breakout, 50% vs 23% at ≥10d, median lead 8 vs 4), and §18.5/21
+> predicted exactly that on different grounds.
+>
+> **Operational consequence, effective now:** no `ACCUMULATE` sizing rule from
+> §16.9 — 1.5× vol target, 2.5×ATR stop, 4 concurrent — should be trusted on
+> the current gate. §16.11's warning said the "gốc" claim was *not yet earned*;
+> the base rate says the signal is not yet a signal. Treat live `ACCUMULATE`
+> output as a watchlist, not an instruction, until a variant beats NO GATE
+> within-year.
+
 ## 18. Trader-Lens System Review — APPROVED 2026-04-09
 
 > Reviewer stance: "if I had to trade this book tomorrow with my own money, what would break or bleed me?" Findings are grouped by severity. Items marked **[BLOCKER]** must ship before live paper-trade; **[EDGE]** items are alpha improvements; **[HYGIENE]** items are robustness.

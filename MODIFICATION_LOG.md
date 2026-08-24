@@ -43,11 +43,56 @@
   - **The 2026 collapse is the real finding.** Both gates degrade in 2026, so a
     defect common to two condition sets is more likely data or regime than
     condition choice. Look there before tuning further conditions.
+    → chased the same day; see the next entry.
   - Re-run once 2026 has more events; if `foreign_streak` holds up out of
     sample, the change is a one-line edit to `_conditions` in
     `analysis/stealth.py` plus a §16.1 amendment.
   - Root capture stays ~0.92 against §16.11's ≤0.85 on every variant — no
     condition set here earns the "gốc" claim.
+
+---
+
+## 2026-08-24 (2) — the gate has no edge: base rate added to the bench
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `scripts/stealth_leadtime_experiment.py` (`_baseline`, `_summarise`,
+    NO GATE row, header RESULT block)
+  - `CLAUDE.md` new §16.12, §16.13, §16.14
+- Reason: chasing the 2026 collapse logged above. The check that settles it —
+  scoring **every** row, i.e. no gate — was missing from the bench, and adding
+  it changed the reading of every earlier measurement.
+- Summary:
+  - **NO GATE base rate: 83% breakout, 23% at ≥10d, median lead 4, RC 0.944**
+    over 13,033 scorable rows. The shipped §16.1 gate: 75% / 20% / 3 / 0.940.
+    **It is worse than not filtering.** Only `foreign_streak` beats it.
+  - **§16.11's criteria cannot detect this** — they are absolute thresholds, so
+    a worse-than-random gate reads as merely "under target". Amended in §16.12:
+    the three targets are necessary but not sufficient; a candidate must also
+    beat NO GATE **within each year**. Pooling is what let `foreign_streak`'s
+    pre-2026 strength mask a 2026 that matches random.
+  - **2026 collapse is mostly the market** (§16.13). Base breakout falls
+    88/84/86% → **68%**; median forward-40d max +7.1/5.4/7.9% → **+3.2%**.
+    Ruled out: data coverage (99-100% on every field the gate reads) and
+    right-censoring (1 of 7 events has <40 forward sessions). But the gate
+    degrades *faster* than the tape — 50% vs 68%, 0% vs 18% at ≥10d — so
+    regime explains the level, not the shortfall.
+  - §16.14 states the consequence plainly: **live `ACCUMULATE` output is a
+    watchlist, not an instruction**, and no §16.9 sizing rule should be trusted
+    on it until a variant beats NO GATE within-year.
+  - Correction made in-pass: I first read `breadth_sma20` as 76% covered in
+    2026. It is **100%** — zero NULLs since 2024; I had counted a legitimate
+    `0.0` as missing. The rising zero *rate* (16% → 24%) is the flat tape
+    showing up in breadth, not a gap. Recorded in §16.13 rather than silently
+    fixed, since the wrong number briefly justified a wrong suspect.
+- Follow-ups:
+  - `analysis/stealth.py` still unchanged — no shipped behaviour moved in this
+    entry. The decision it forces (retune, or demote ACCUMULATE in
+    `sector_signal_service`) is Tom's.
+  - The breakout definition is pinned to 2×ATR; in a flat tape ATR falls too,
+    so the bar is not fully regime-neutral. Worth testing an absolute-return
+    breakout as a robustness check on §16.13's headline.
+  - §18.5/22's distribution guard and §18.1/15's sector-specific quantiles are
+    both still open and both plausibly relevant to the edge problem.
 
 ---
 

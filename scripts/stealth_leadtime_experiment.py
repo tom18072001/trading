@@ -19,12 +19,24 @@
 # RESULT, first run 2026-08-24 (>=4/5, N=3, full 13,470-row panel):
 #
 #   variant                      events sectors  breakout  lead>=10d  med lead   med RC
+#   NO GATE (base rate)           13033      15      83%       23%         4    0.944
 #   shipped (16.1)                   20      11      75%       20%         3    0.940
 #   +divergence                      77      15      78%       10%         3    0.955
 #   swap c1->divergence              38      13      74%        4%         2    0.958
 #   swap c1->flow_before_price       27      11      67%       11%         3    0.959
 #   swap c2->foreign_streak          16      10      88%       50%         8    0.924
 #   divergence + streak              38      14      79%       17%         3    0.959
+#
+# THE FIRST ROW IS THE FINDING, and it was missing from the first run of this
+# script. Scoring every row in the panel — i.e. no gate at all — gives 83%
+# breakout, 23% at >=10d lead, median lead 4, root capture 0.944. The shipped
+# §16.1 gate scores 75% / 20% / 3 / 0.940. **It is worse than not filtering.**
+# Only `swap c2->foreign_streak` beats the base rate on any axis.
+#
+# This is why §16.11's three criteria are not sufficient on their own: they are
+# absolute thresholds, so a gate can post a respectable-looking 75% breakout
+# while selecting *worse-than-random* sector-days. A signal is only a signal
+# relative to the base rate. The NO GATE row is now printed on every run.
 #
 # The doctrine's suspect was wrong. §16.11 named flow_price_divergence as the
 # feature that would buy lead time; every variant containing it made lead time
@@ -47,9 +59,18 @@
 # n=2, which is not a result. Root capture stays ~0.92 against §16.11's 0.85
 # either way, so no variant here earns the "goc" claim.
 #
-# What would make it shippable: (a) understand the 2026 collapse — it is common
-# to both gates, so it is more likely a data or regime change than a condition
-# choice; (b) re-run once 2026 has more events. Until then §16.1 keeps cond2.
+# THE 2026 COLLAPSE IS MOSTLY THE MARKET, not the gate. Measured per year, the
+# unconditional base rate falls with it: breakout 88/84/86% in 2023-25 -> 68% in
+# 2026, and median forward-40d max return 7.1/5.4/7.9% -> 3.2%. Data coverage is
+# not the cause (2026 rows are 99% foreign_net, 100% close_idx/atr_pct) and nor
+# is right-censoring (1 of 7 events has <40 forward sessions). 2026 is simply a
+# flatter tape. What is NOT explained by the tape: relative to that lower base
+# rate the shipped gate still underperforms in 2026 (50% vs 68% breakout, 0% vs
+# 18% at >=10d) — so it degrades faster than the market does.
+#
+# What would make foreign_streak shippable: re-run once 2026 has more events,
+# and require it to beat the NO GATE row *within* each year, not overall.
+# Until then §16.1 keeps cond2.
 #
 # Usage:  python -m scripts.stealth_leadtime_experiment
 #         python -m scripts.stealth_leadtime_experiment --min-conditions 3
@@ -176,6 +197,38 @@ def _score_event(g: pd.DataFrame, i: int) -> dict | None:
     }
 
 
+def _summarise(scored: list[dict]) -> tuple[float, float, float, float]:
+    """breakout share, >=10d share, median lead, median root capture."""
+    broke = [s for s in scored if s["broke_out"]]
+    leads = [s["lead_days"] for s in broke]
+    rcs = [s["root_capture"] for s in scored if s["root_capture"] is not None]
+    return (
+        len(broke) / len(scored) if scored else 0.0,
+        (sum(1 for x in leads if x >= 10) / len(leads)) if leads else 0.0,
+        float(np.median(leads)) if leads else 0.0,
+        float(np.median(rcs)) if rcs else 0.0,
+    )
+
+
+def _baseline(feat: pd.DataFrame) -> list[dict]:
+    """Score EVERY row, i.e. what you get with no gate at all.
+
+    This row is the one the experiment was missing on its first run. §16.11's
+    three criteria are all absolute, so a gate can clear "75% break out" while
+    being *worse* than picking a sector-day at random — which is exactly what
+    the shipped gate turned out to do. A signal is only a signal relative to
+    the base rate.
+    """
+    out = []
+    for _, g in feat.groupby("sector_code", sort=False):
+        g = g.reset_index(drop=True)
+        for i in range(len(g)):
+            s = _score_event(g, i)
+            if s:
+                out.append(s)
+    return out
+
+
 def run(need: int, sessions: int) -> None:
     panel = _load_panel()
     if panel.empty:
@@ -187,8 +240,15 @@ def run(need: int, sessions: int) -> None:
     print(f"gate: >={need} conditions held >={sessions} sessions "
           f"(breakout = +{BREAKOUT_ATR_MULT}xATR within {BREAKOUT_WINDOW}d)\n")
 
-    hdr = f"{'variant':<28}{'events':>7}{'sectors':>8}{'breakout':>10}{'lead>=10d':>11}{'med lead':>10}{'med RC':>9}"
+    hdr = (f"{'variant':<28}{'events':>7}{'sectors':>8}{'breakout':>10}"
+           f"{'lead>=10d':>11}{'med lead':>10}{'med RC':>9}")
     print(hdr)
+    print("-" * len(hdr))
+
+    base = _baseline(feat)
+    b_bo, b_early, b_lead, b_rc = _summarise(base)
+    print(f"{'NO GATE (base rate)':<28}{len(base):>7}{feat.sector_code.nunique():>8}"
+          f"{b_bo:>9.0%}{b_early:>10.0%}{b_lead:>10.0f}{b_rc:>9.3f}")
     print("-" * len(hdr))
 
     for name, keys in VARIANTS.items():
@@ -205,18 +265,15 @@ def run(need: int, sessions: int) -> None:
             print(f"{name:<28}{0:>7}{0:>8}{'-':>10}{'-':>11}{'-':>10}{'-':>9}")
             continue
 
-        broke = [s for s in scored if s["broke_out"]]
-        leads = [s["lead_days"] for s in broke]
-        rcs = [s["root_capture"] for s in scored if s["root_capture"] is not None]
-        early = sum(1 for x in leads if x >= 10)
+        bo, early, lead, rc = _summarise(scored)
         print(f"{name:<28}{len(scored):>7}{len(sectors):>8}"
-              f"{len(broke) / len(scored):>9.0%}"
-              f"{(early / len(leads) if leads else 0):>10.0%}"
-              f"{(np.median(leads) if leads else 0):>10.0f}"
-              f"{(np.median(rcs) if rcs else 0):>9.3f}")
+              f"{bo:>9.0%}{early:>10.0%}{lead:>10.0f}{rc:>9.3f}")
 
-    print("\n§16.11 targets: breakout lead >=10d on >=60% of signals · median RC <= 0.85 "
+    # ASCII only: Windows console is cp1252 and a section sign raises here.
+    print("\n16.11 targets: breakout lead >=10d on >=60% of signals | median RC <= 0.85 "
           "| false positives <= 30%")
+    print("Read every row against NO GATE, not against the targets alone: a variant "
+          "that does not beat the base rate is not a signal.")
 
 
 if __name__ == "__main__":
