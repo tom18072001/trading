@@ -16,7 +16,6 @@
 
 | plan | phạm vi | trạng thái |
 |---|---|---|
-| **Ranh giới module** | Còn lại: tách `generate_report.py` (1640 dòng module-level, gửi mail khi `import` — §20.3 P3-2) thành `services/report/{data,charts,render}.py` + `main()` | **một nửa xong** (`ARCHITECTURE.md` §4.1). Ranh giới đã có test chặn — nhưng **đo trước rồi mới sửa, và phép đo đổi luôn kế hoạch**: graph `services/` vốn đã là DAG nông (17 module, sâu tối đa 2, 0 vi phạm layer), nên **không file nào phải move**. Thiếu là *cách giữ*, không phải cấu trúc. Bắt được 2 defect: cycle `services → api → services` và `scripts/seed_data.py` import module đã xoá 4 tháng |
 | **Repo clone-được** | `.github/workflows/ci.yml` (pytest + ruff + vitest), `.devcontainer/devcontainer.json`, mục README "Chạy trên máy mới" — DB 22 MB không nằm trong repo nên clone xong app chạy nhưng **rỗng** nếu không backfill | **chưa bắt đầu** — làm sau khi cấu trúc ổn định, CI mới bảo vệ đúng thứ |
 
 ---
@@ -25,6 +24,7 @@
 
 | ngày | plan | kết quả | commit |
 |---|---|---|---|
+| 2026-08-24 | **Ranh giới module** (§20.3 P3-2 + `ARCHITECTURE.md` §4.1) | **Đo trước rồi mới sửa, và phép đo đổi luôn kế hoạch**: graph `services/` vốn đã là DAG nông (17 module, sâu tối đa 2, 0 vi phạm layer) → **không file nào phải move**; thiếu là *cách giữ*, không phải cấu trúc. Bắt được 2 defect: cycle `services → api → services` và `scripts/seed_data.py` import module đã xoá 4 tháng. Nửa sau: `generate_report.py` **113 → 4** câu lệnh module-level, `import` không còn gửi mail; chỉ tách phần thuần (charts, SQL, formatter) — HTML weave **cố ý giữ nguyên**. Lộ ra defect thứ ba, nặng hơn cả hai: **chạy pytest ghi đè model production** (`fit()` ghi thẳng `models/saved/`, gitignore nên git không thấy, job 17:00 chết). 326 test (+19), ruff 67 → 65 | `4aa783a`, (this) |
 | 2026-08-24 | **View theo dõi lệnh** — stop/target sống sót lúc bấm "Đã vào lệnh"; đường giá từ ngày vào lệnh | Ba tầng đều đã có dữ liệu, đứt ở đúng **một dòng**: nút mark chỉ gửi `entry_price`. Nay lưu `stop`/`target`/`thesis`, `/positions/pnl` trả thêm `path`, `hit_stop`, `sessions_held`, `sellable_on`. Không thêm endpoint, không thêm nguồn dữ liệu. 265 test (+13). §22.10 | `90304b7` |
 | 2026-08-24 | **Định nghĩa breakout** (§16.15) | Nghi ngờ ban đầu (2×ATR co giãn theo tape) **sai**; lỗi thật là **đơn vị** — `atr_pct` là biên độ *ngày*, bar ~1.15%, áp lên max 40 phiên nên 83% sector-day "breakout". `atr_scaled` ≈ 7.2%. Bench đo, không ship vào scanner | `cd4928f` |
 | 2026-08-24 | **Sập ở đoạn gần đây** (§25.9) | Cả gate §16.1 lẫn horizon sweep đều hỏng ở cùng một giai đoạn → **là tape, không phải model**. Chia theo tercile vol: AUC 0.827/0.790/0.694, đơn điệu, và lịch chỉ là proxy cho vol | `262bca6` |

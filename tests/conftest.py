@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 import pytest
 from sqlalchemy import create_engine, event
+
+import models.rotation_ranker as _rr
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -15,6 +17,31 @@ from database.models import (
     Base, Sector, SectorConstituent, SectorFlowDaily, MacroAnchor,
 )
 from config import PROXY_BASKETS, SECTORS
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _models_go_to_a_tmpdir(tmp_path_factory):
+    """Keep `fit()` away from the live model directory.
+
+    `RotationRanker.fit()` writes `rotation_ranker.pkl` + `.json` to
+    `config.SAVED_MODELS_DIR` unconditionally — there is no opt-out, and six
+    tests call it with 2-3 synthetic features. So **running pytest replaced the
+    production ranker with a test artefact**, and the next `main.py --publish`
+    died with "number of features in data (19) is not the same as it was in
+    training data (3)". Found 2026-08-24; `models/saved/` is gitignored, so git
+    could not show the damage and nothing failed until the job ran.
+
+    Autouse and session-scoped on purpose: an opt-in fixture only protects the
+    tests that remember to ask, and the ones that forget are exactly the
+    dangerous ones. Repointing the module global covers every present and
+    future caller.
+
+    `ponytail:` the real fix is `fit(save_to=...)` so production names the path
+    explicitly. That is a signature change with call sites in
+    `rotation_model_service`; this stops the bleeding without touching them.
+    """
+    _rr.SAVED_MODELS_DIR = str(tmp_path_factory.mktemp("saved_models"))
+    yield
 
 
 @pytest.fixture(scope="session")

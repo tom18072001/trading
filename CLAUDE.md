@@ -521,6 +521,30 @@ As of 2026-04-23:
 | Frontend (vitest) | 13 | `cd frontend && npm test` |
 | **Total** | **265** | — |
 
+> 2026-08-24 (12): +11, and one of them found a live production defect.
+> `tests/test_report_import.py` (+8) pins that `import generate_report` sends no
+> mail, opens no DB and writes no file — the property the §20.3 P3-2 split
+> exists for. Three of those are behavioural and one is structural
+> (`test_the_work_lives_inside_main_not_at_module_level`), because the first
+> three can pass by luck and the last cannot: measured against the pre-split
+> file it is 113 module-level statements versus 4, so the `< 40` threshold
+> discriminates. `smtplib.SMTP` is replaced with a raising bomb rather than a
+> recording mock — a mock lets the import finish and reports afterwards, which
+> is exactly the behaviour that shipped for months.
+>
+> `tests/test_model_artifacts.py` (+3) guards something worse and unrelated to
+> the refactor: **running pytest overwrote the production ranker.**
+> `RotationRanker.fit()` writes `rotation_ranker.pkl` to
+> `config.SAVED_MODELS_DIR` unconditionally, six tests call it with 2-3
+> synthetic features, and `models/saved/` is gitignored — so the 17:00 publish
+> job died with *"number of features in data (19) is not the same as it was in
+> training data (3)"*, `git status` was clean, and no test failed. A silent
+> suite that breaks production is the worst shape a defect can take.
+> `tests/conftest.py::_models_go_to_a_tmpdir` is autouse for the reason an
+> opt-in fixture would fail: the tests that forget to ask are the dangerous
+> ones. Verified by negative control — de-autousing it fails 2 of the 3 guards
+> (and re-broke the live model, which is the bug reproducing itself).
+>
 > 2026-08-24 (9): +13. `tests/test_position_track.py` — stop/target on the book
 > and the price path since entry (§22.10). The two that carry the feature are
 > `test_stop_and_target_survive_the_round_trip` (the defect itself: both numbers
@@ -702,6 +726,14 @@ daily table.
 > several later features landed, and nobody re-measured it — which is the
 > failure mode a hardcoded count in a document always has. Treat 66 as the
 > number a change must not grow, and re-measure rather than trusting this line.
+>
+> **65 as of 2026-08-24 (12)** — three `F841` dead locals in
+> `generate_report.py` (`sector_prior_dv`, never even written to;
+> `sector_stats_map`; `flow_in_secs`) fell out of the `main()` wrap. They were
+> not new: ruff analyses function scope properly and module scope barely, so
+> moving the body inside a function is what made them visible. That is worth
+> knowing before the next count moves — a refactor can raise this number without
+> breaking anything, and lower it without fixing anything.
 
 **Defaults chosen to preserve live behaviour:** `API_REQUIRE_KEY=0`,
 `ALLOW_SHORT_SIGNALS=1`, `TRADING_HALT=0`. Nothing in the daily email changes
@@ -718,7 +750,7 @@ DO change behaviour — they implement §16.9, which was never enforced.
 | ~~P1-4~~ | **CLOSED 2026-08-24** (§25.3). The published label is the filtered posterior of the last bar — `predict_proba(X[:t+1])[-1]`, which has no future to smooth over — so it no longer changes with hindsight. Found while chasing a different symptom: confidence pinned at 1.0. The back-painting was the *third* defect in that chain; the first was a collapsed fit that made the posterior 1.0 by construction. |
 | P2-2 | Two rate-limit buckets in one process: `utils/vnstock_gate` and `picks_universe_service._kbs_throttle`. `/insight/refresh` takes no `job_lock` at all, so a UI refresh overlapping the intraday job runs at 2× the KBS ceiling. |
 | P2-3 | The "intraday" job fetches `interval="1D"` and re-downloads 120 days every 15 minutes (~3,750 calls/day against an 18/min gate). Either fetch real 15m bars or admit it is an EOD pipeline and fix §4/§8. |
-| P3-2 | `generate_report.py` is 1,629 module-level lines with zero tests, and it is the one output read every day. Extract the decision layer. |
+| ~~P3-2~~ | **CLOSED 2026-08-24.** `import generate_report` is inert: 113 module-level statements → 4, everything else inside `main(argv=None)`. `services/report/` took the genuinely pure pieces — chart builders, the six SQL reads (which now take the cursor as an argument instead of closing over a module global, the actual reason nothing could be tested) and the two formatters. **The HTML weave deliberately did not move**: ~700 lines of `X = build_x()` where each builder reads several others' globals is a rewrite, not an extraction, and the harm was `import` sending mail — which is fixed. `ponytail:` in `services/report/__init__.py` names the trigger for finishing it (a second output format). `/api/state/report/send` still shells out; it no longer has to, and that is its own commit. |
 
 ### 20.4 Doctrine drift to close
 

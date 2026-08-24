@@ -60,6 +60,11 @@ LAYER: dict[str, str] = {
     "risk_service": "book",
     # report / agent — the two output surfaces.
     "report_runner": "report",
+    # package: the pure pieces pulled out of generate_report.py on 2026-08-24
+    # (charts, SQL reads, formatters). Imports nothing from services/ — it is
+    # given its cursor and its data rather than fetching them, which is what
+    # made it testable at all.
+    "report": "report",
     "trader_agent": "agent",
     "insight_refresh": "agent",
 }

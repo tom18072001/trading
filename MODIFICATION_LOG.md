@@ -14,6 +14,70 @@
 
 ---
 
+## 2026-08-24 (12) — `import generate_report` stops sending mail; and the test suite was overwriting the live model
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `services/report/{__init__,format,charts,data}.py` — **new package**
+  - `generate_report.py` — body wrapped in `main(argv=None)`; 113 module-level
+    statements → 4
+  - `tests/test_report_import.py` — **new**, 8 tests
+  - `tests/test_model_artifacts.py` — **new**, 3 tests
+  - `tests/conftest.py` — `_models_go_to_a_tmpdir` (autouse, session)
+  - `tests/test_module_boundaries.py` — `report` package assigned a layer
+- Reason: plan §2.3 / §20.3 P3-2. `generate_report.py` was 1,640 module-level
+  lines that **sent the daily email as a side effect of `import`**, which is why
+  it had zero tests and why `/api/state/report/send` has to shell out to a
+  subprocess (§24.3).
+- Summary:
+  - **Extract only what is pure.** `services/report/` takes the chart builders,
+    the six SQL reads and the two formatters. The reads previously closed over a
+    module-level `cur`; they take the cursor as an argument now, which is the
+    whole reason they are testable. `charts.py` sets `matplotlib.use("Agg")` at
+    import — mandatory, the job runs headless under Task Scheduler.
+  - **The HTML weave did not move, on purpose.** ~700 lines of `X = build_x()`
+    where each builder reads several others' globals; pulling it apart is a
+    rewrite, not an extraction, and the harm it caused is already gone once
+    `import` is inert. `ponytail:` in `services/report/__init__.py` names the
+    trigger — a second output format.
+  - Pre-flight for the wrap: **no `global`/`nonlocal` anywhere in the file**, so
+    module-scope → function-scope re-indent is behaviour-preserving.
+  - **Three dead locals fell out.** `sector_prior_dv` (never even written to),
+    `sector_stats_map`, `flow_in_secs` — each assigned once, never read. They
+    were invisible while they were module globals; ruff analyses function scope
+    properly. Deleted. Ruff **67 → 65**.
+  - **The defect this uncovered has nothing to do with the refactor.**
+    `main.py --publish` died with *"number of features in data (19) is not the
+    same as it was in training data (3)"*. `models/saved/rotation_ranker.json`
+    read `{"feature_names": ["f1","f2","all_null"]}` — a synthetic panel from
+    `test_review_20260822.py`. `RotationRanker.fit()` writes to
+    `config.SAVED_MODELS_DIR` unconditionally, six tests call it, and
+    `models/saved/` is gitignored. So **running pytest broke the 17:00 job**,
+    git could not show it, and nothing failed until the job ran. Fixed by an
+    autouse session fixture repointing the module global; autouse because an
+    opt-in fixture only protects the tests that remember to ask.
+- Verification:
+  - `python generate_report.py 2026-08-22 --no-email` → exit 0, HTML 694,033 B
+    (baseline 694,163), PDF 1,258,454 B (baseline 1,257,578). Not byte-identical
+    because each run re-invokes the trader agent and the memo prose differs;
+    −130 B on 694 kB is memo-sized. Same 5 BUY / 5 SELL, same ranker align.
+  - Module-level statements measured against the committed file: **113 → 4**, so
+    `test_the_work_lives_inside_main_not_at_module_level`'s `< 40` threshold
+    discriminates rather than passing by luck.
+  - Negative control on the model fixture: de-autoused it and 2 of the 3 guards
+    fail. That run also re-broke the live model, which is the bug reproducing
+    itself — retrained (`--train`, id=80, 19 features) and re-ran the suite to
+    confirm it now survives.
+  - `main.py --publish` green after the retrain. **326 passed**, ruff **65**.
+- Follow-ups:
+  - `fit(save_to=...)` so production names the path explicitly instead of the
+    tests dodging it (`ponytail:` in the fixture).
+  - `main.py` has **no `--dry-run`** — the plan's Phase 2 verification assumed
+    one. Ran the real `--publish` instead; it upserts, so it is idempotent.
+  - `/api/state/report/send` still shells out. It no longer has to, but changing
+    it is a behaviour change and belongs in its own commit.
+
+---
+
 ## 2026-08-24 (11) — the service layer's arrows stop being folklore
 - Author: Claude Code on behalf of Tom
 - Files:
