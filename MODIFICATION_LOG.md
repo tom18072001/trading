@@ -14,6 +14,71 @@
 
 ---
 
+## 2026-08-24 (16) — the stealth history was a stub, and the test for it proved nothing
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `analysis/stealth.py` — `BREAKOUT_WINDOW`, `BREAKOUT_ATR_MULT`,
+    `breakout_bar_baseline`, `breakout_bar_scaled`, `_ACCUM_MAX_AGE`,
+    `stealth_events()`.
+  - `scripts/stealth_leadtime_experiment.py` — the two surviving bars are now
+    imported, not defined; `_bar_atr_now` / `_bar_fixed` stay local.
+  - `api/routers/stealth.py` — `/history` implemented; `_CLASSIFICATION_LABEL`.
+  - `frontend/src/pages/StealthWatchPage.tsx` — summary line, §16.14 base-rate
+    caveat, sessions column, `chưa chấm được` for unscored runs.
+  - `tests/test_stealth_history.py` — new, 14 tests.
+  - `specs/stealth-watch.md` §4.4, `CLAUDE.md` §19 / §22.1 / §22.11,
+    `docs/PATCHES.md`.
+- Reason: `/api/stealth/history` returned a hardcoded `{"rows": []}` from the
+  day it was written — the same defect as §22.1's Flow Pulse. §22.1 filed it as
+  "correct code with no data", which was wrong, and the mistake was cheap to
+  make: while the §16.1 AND gate produced zero events, the stub and the truth
+  were indistinguishable. Once §16.1 became a score (2026-08-23) and 53 rows
+  carried `accumulation_age > 0`, the endpoint kept saying zero and nothing in
+  the app could tell.
+- Summary:
+  - **Derived from the `accumulation_age` column, not from
+    `sector_accumulation_events`.** That table has had no writer since migration
+    9, so reading it returns the same empty list by a longer route — and once
+    something does write it, one fact lives in two places that can disagree. The
+    column is already what the scanner writes and what the badge renders.
+  - `stealth_events()` returns one record per maximal run, scored forward over
+    `BREAKOUT_WINDOW`: `hit` / `false_positive` / `dry_powder_timeout`
+    (§16.9's 30-session release, imported not retyped) / `null`.
+  - **`null` is not a failure.** A run still open, or one whose 40-session
+    window has not elapsed, has no verdict. `summary.scored` excludes it, so the
+    hit rate is not diluted by events that have not had their chance. Getting
+    this wrong understates the gate on every refresh, permanently.
+  - The breakout bar **moved from `scripts/` into `analysis/`** because it now
+    has two callers. Two copies drift, and the drift is invisible — the bench
+    keeps reporting a number the page stopped using. Verified
+    behaviour-preserving: re-ran the bench and matched §16.15's recorded table
+    byte-for-byte (NO GATE 13,048 / 43% / 74% / 17 / 0.944; shipped 20 / 40% /
+    75% / 21 / 0.940).
+  - Live: 21 events, 20 scored, 40% hit, median lead 21, 75% at ≥10d — exactly
+    the bench's shipped-gate row. One open STEEL run correctly unscored.
+  - The page prints §16.14 beside those numbers: base rate is 43% / 74%, so the
+    gate still does not beat not filtering, and 40% must not read as evidence.
+  - `_CLASSIFICATION_LABEL` is a lookup, not `.replace("_"," ").upper()` —
+    that mangling yields `DRY POWDER TIMEOUT` while the page's chip map keys on
+    `DRY-POWDER TIMEOUT`, and the miss renders as an unstyled grey chip that
+    looks like a data problem.
+  - **A negative control caught a worthless test.** The first
+    `test_an_open_run_is_not_scored_as_a_failure` used a 3-session run at the
+    panel edge, which has no forward bars — `judgeable` was already False, so
+    deleting the `still_running` guard left all 13 tests green. Replaced with a
+    25-session open run that has 24 forward bars and clears the bar, so only
+    `still_running` keeps it unscored; that one goes red without the guard.
+  - Verified: backend **342 pass** (+14), frontend 13 pass, `npm run build`
+    clean, ruff **65** (baseline, no growth).
+- Follow-ups:
+  - `api/routers/sectors_flow.py:80` builds its `history` key from the same
+    write-less `SectorAccumulationEvent` table, so `/api/sectors/stealth` still
+    returns an empty history. Should read `stealth_events()`.
+  - §16.14 stands: the gate has no measurable edge over the base rate. This
+    change makes that *visible*; it does not improve it.
+
+---
+
 ## 2026-08-24 (15) — the repo went public, so the repo stops carrying inboxes
 - Author: Claude Code on behalf of Tom
 - Files:

@@ -75,6 +75,7 @@ function StealthCard({ e }: { e: any }) {
 export default function StealthWatchPage() {
   const [data, setData] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
+  const [histSummary, setHistSummary] = useState<any>(null);
   const [err, setErr] = useState<string | null>(null);
   const [tab, setTab] = useState<'active' | 'warming'>('active');
 
@@ -101,7 +102,14 @@ export default function StealthWatchPage() {
     setErr(null);
     stealthApi15.active({ ...params })
       .then((r) => setData(r.data)).catch((e) => setErr(String(e?.message || e)));
-    stealthApi15.history(50).then((r: any) => setHistory(r.data?.rows || r.data?.history || [])).catch(() => {});
+    // History does not depend on the gate knobs above — it replays runs the
+    // scanner already recorded, so re-fetching it on every slider nudge would
+    // be 13k rows for an unchanged table. It is in the same callback only
+    // because the page has one load path.
+    stealthApi15.history(50).then((r: any) => {
+      setHistory(r.data?.rows || r.data?.history || []);
+      setHistSummary(r.data?.summary ?? null);
+    }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sp]);
 
@@ -231,13 +239,34 @@ export default function StealthWatchPage() {
       {/* History */}
       {history.length > 0 && (
         <section className="rounded-2xl bg-panel border border-line overflow-hidden">
-          <div className="p-3 border-b border-line section-label">Lịch sử sự kiện tích luỹ</div>
+          <div className="p-3 border-b border-line flex items-baseline gap-3 flex-wrap">
+            <span className="section-label">Lịch sử sự kiện tích luỹ</span>
+            {histSummary && (
+              <span className="text-[11px] text-mid font-mono">
+                {histSummary.scored}/{histSummary.events} chấm được ·
+                {' '}hit {histSummary.hit_rate != null ? `${(histSummary.hit_rate * 100).toFixed(0)}%` : '—'} ·
+                {' '}lead trung vị {histSummary.median_lead_days ?? '—'} phiên ·
+                {' '}≥10 phiên {histSummary.early_share != null ? `${(histSummary.early_share * 100).toFixed(0)}%` : '—'}
+              </span>
+            )}
+          </div>
+
+          {/* §16.14: the gate fires less often, later and at a worse entry than
+              a sector-day drawn at random. Without this line the hit rate above
+              reads as evidence the gate works. */}
+          <p className="px-3 py-2 text-[11px] text-warn leading-snug border-b border-line">
+            Đọc cùng <b>base rate</b>: không lọc gì cả cũng cho 43% breakout và 74% dẫn trước ≥10 phiên
+            (cùng thước đo §16.15). Cổng hiện tại <b>chưa vượt</b> mức đó — coi ACCUMULATE là
+            watchlist, chưa phải lệnh mua. Xem CLAUDE.md §16.14.
+          </p>
+
           <table className="w-full text-sm">
             <thead className="bg-panel2 border-b border-line text-[10px] uppercase tracking-wider text-mid">
               <tr>
                 <th className="p-2.5 text-left">Ngành</th>
                 <th className="p-2.5 text-left">Bắt đầu</th>
                 <th className="p-2.5 text-left">Kết thúc</th>
+                <th className="p-2.5 text-right">Phiên</th>
                 <th className="p-2.5 text-right">Peak return</th>
                 <th className="p-2.5 text-right">Lead (phiên)</th>
                 <th className="p-2.5 text-left">Kết quả</th>
@@ -248,15 +277,18 @@ export default function StealthWatchPage() {
                 <tr key={i} className="border-b border-line hover:bg-panel2/60">
                   <td className="p-2.5 font-semibold text-hi">{h.sector_code ?? h.sector}</td>
                   <td className="p-2.5 font-mono text-mid">{h.start_date ?? '—'}</td>
-                  <td className="p-2.5 font-mono text-mid">{h.end_date ?? '—'}</td>
+                  <td className="p-2.5 font-mono text-mid">{h.end_date ?? 'đang chạy'}</td>
+                  <td className="p-2.5 text-right font-mono text-mid">{h.sessions ?? '—'}</td>
                   <td className={`p-2.5 text-right font-mono ${(h.peak_return_pct ?? 0) >= 0 ? 'text-buy' : 'text-sell'}`}>
                     {h.peak_return_pct != null ? `${h.peak_return_pct >= 0 ? '+' : ''}${h.peak_return_pct.toFixed(1)}%` : '—'}
                   </td>
                   <td className="p-2.5 text-right font-mono text-hi">{h.lead_days_to_price ?? h.lead_days ?? '—'}</td>
                   <td className="p-2.5">
-                    {h.classification && (
-                      <span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold ${HIST_CHIP[h.classification] || 'bg-raise text-mid'}`}>{h.classification}</span>
-                    )}
+                    {h.classification
+                      ? <span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold ${HIST_CHIP[h.classification] || 'bg-raise text-mid'}`}>{h.classification}</span>
+                      /* Not a failure — the 40-session window has not elapsed.
+                         Scoring it now would understate the gate every day. */
+                      : <span className="text-[11px] text-lo">chưa chấm được</span>}
                   </td>
                 </tr>
               ))}

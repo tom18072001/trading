@@ -521,6 +521,29 @@ As of 2026-04-23:
 | Frontend (vitest) | 13 | `cd frontend && npm test` |
 | **Total** | **265** | — |
 
+> 2026-08-24 (13): +14 in `tests/test_stealth_history.py` — `stealth_events()`,
+> behind `/api/stealth/history` (§22.11). Backend **342**.
+>
+> The one carrying the feature is
+> `test_a_long_open_run_is_not_scored_even_though_it_could_be`, and it exists
+> because its first draft did not work. That draft used a 3-session run at the
+> panel edge, which has no forward bars — so `judgeable` was already False and
+> the test passed against code with the `still_running` guard **deleted**. A
+> negative control caught it: removing the guard left all 13 green. The
+> replacement uses a 25-session open run that has 24 forward bars and clears the
+> breakout bar, so only `still_running` keeps it unscored, and it goes red
+> without it. General lesson, worth more than the test: a guard test whose
+> fixture also trips an *earlier* guard measures the earlier one.
+>
+> `test_the_bench_and_the_endpoint_share_one_breakout_definition` asserts
+> `bench._bar_atr_scaled is S.breakout_bar_scaled` — identity, not equal output,
+> because two copies that agree today are still two copies.
+>
+> The fixture pads 60 quiet sessions in front of every panel. Without them
+> `breakout_bar_baseline` falls short of its 20 ATR observations and silently
+> returns the 0.02 default, so the tests would score against a bar production
+> never uses.
+>
 > 2026-08-24 (12): +11, and one of them found a live production defect.
 > `tests/test_report_import.py` (+8) pins that `import generate_report` sends no
 > mail, opens no DB and writes no file — the property the §20.3 P3-2 split
@@ -798,7 +821,8 @@ state. They are not broken code — they are correct code with no data:
 
 | surface | endpoint | why it is empty |
 |---|---|---|
-| Stealth Watch | `/api/stealth/active`, `/api/stealth/history` | `accumulation_age` is 0 on all 13k rows; §16 has never fired — **cause corrected 2026-08-23**: not missing data, an unreachable AND gate (§16.1). 53 rows are non-zero now. |
+| Stealth Watch | `/api/stealth/active` | `accumulation_age` is 0 on all 13k rows; §16 has never fired — **cause corrected 2026-08-23**: not missing data, an unreachable AND gate (§16.1). 53 rows are non-zero now. |
+| ~~Stealth Watch history~~ | ~~`/api/stealth/history`~~ | **Misdiagnosed, fixed 2026-08-24** — it was not empty *data*, it was a hardcoded `return {"rows": []}`, the same defect as Flow Pulse below. Now derives runs from `sector_flow_daily.accumulation_age`: **21 events, 20 scored, 40% hit, median lead 21 sessions**. See §22.11. |
 | Rotation Map | `/api/rotation/pairs` | ~~no pair clears the 1.5 threshold~~ — **wrong, corrected below** |
 | Flow Pulse | `/api/pulse/exposure` | ~~no positions are tracked~~ — **wrong, corrected below** |
 
@@ -1098,6 +1122,75 @@ oversight.
 > a full T+ calendar panel. Both fields are computed already, so the UI is
 > cheap when wanted. `path` is closes only — `daily_prices` has no high/low — so
 > an intraday wick through a stop that closed back above does not register.
+
+### 22.11 The stealth history was a stub, not an empty table — 2026-08-24
+
+`/api/stealth/history` returned a hardcoded `{"rows": []}` from the day it was
+written. §22.1 filed it under "correct code with no data", which was wrong in
+the same way the Flow Pulse row in that table was wrong — and for a worse
+reason: **the stub was indistinguishable from the truth for months**, because
+the §16.1 AND gate genuinely produced zero events. The moment §16.1 became a
+score and 53 rows carried `accumulation_age > 0`, the endpoint kept saying zero
+and nothing in the app could notice.
+
+**Derived from `sector_flow_daily.accumulation_age`, not from
+`sector_accumulation_events`.** That table has existed since migration 9 with no
+writer in four months, so reading it returns the same empty list by a longer
+route. More to the point, the column *already* encodes every run — it is what
+the scanner writes and what the Stealth Watch badge renders — so writing the
+table too would create a second representation of one fact, and two
+representations disagree.
+
+`analysis.stealth.stealth_events()` turns the column into one record per
+maximal run of `accumulation_age > 0`, scored forward over `BREAKOUT_WINDOW`:
+
+| classification | meaning |
+|---|---|
+| `hit` | price cleared the bar inside the window |
+| `false_positive` | the run ended and price never did |
+| `dry_powder_timeout` | reached §16.9's 30-session max age without breaking out |
+| `null` | still open, or too close to the panel edge to judge |
+
+**The null case is the design.** An event whose forward window has not elapsed
+has not failed, and classifying it as one would understate the gate on every
+refresh, forever. `summary.scored` therefore excludes it, so the hit rate is not
+diluted by events that have not had their chance.
+
+`BREAKOUT_WINDOW`, `BREAKOUT_ATR_MULT` and the two bar functions **moved out of
+`scripts/stealth_leadtime_experiment.py` into `analysis/stealth.py`** — the
+bench and the endpoint are now the second caller of each other's definition, and
+a breakout bar living in two files is two bars that drift. The drift would be
+invisible: the bench would keep reporting a number the page had stopped using.
+`test_the_bench_and_the_endpoint_share_one_breakout_definition` asserts
+*identity*, not equality of output. The extraction was verified
+behaviour-preserving by re-running the bench and matching §16.15's recorded
+table byte-for-byte.
+
+Live: **21 events, 20 scored, hit_rate 0.40, median lead 21 sessions, 75% at
+≥10d** — exactly the bench's shipped-gate row, which is what the shared
+definition buys. One event (STEEL, 2026-08-11→13) is open and correctly
+unscored.
+
+**The page renders §16.14 next to the numbers**, in warn colour: the
+unconditional base rate is 43% breakout / 74% at ≥10d, so 40%/75% is *not*
+evidence the gate works. Without that line a reader takes a respectable-looking
+hit rate as a reason to buy. `ACCUMULATE` is still a watchlist.
+
+> **A negative control caught a test that proved nothing.** The first
+> `test_an_open_run_is_not_scored_as_a_failure` used a 3-session run at the
+> panel edge — which has no forward bars, so `judgeable` was already False and
+> the test passed with the `still_running` guard deleted. Deleting the guard
+> left all 13 tests green. Replaced by
+> `test_a_long_open_run_is_not_scored_even_though_it_could_be`: a 25-session
+> open run has 24 forward bars of its own, clears the bar, and only
+> `still_running` keeps it unscored. That one goes red without the guard. A test
+> that passes against the broken code is worse than no test — it reports
+> coverage it does not have.
+
+**Still open, same family:** `api/routers/sectors_flow.py:80` builds its
+`history` key from `SectorAccumulationEvent` — the same write-less table — so
+`/api/sectors/stealth` still returns an empty history. It should read
+`stealth_events()` too.
 
 ## 23. Backtest controls — and `flow_z` was `flow_raw` in disguise — 2026-08-23
 

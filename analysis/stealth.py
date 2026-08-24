@@ -181,3 +181,137 @@ def active_stealth_sectors(df_with_features: pd.DataFrame) -> pd.DataFrame:
         .groupby("sector_code").tail(1)
     )
     return latest[latest["in_stealth"]].reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
+# What counts as a breakout (§16.4, as corrected by §16.15)
+#
+# These live here rather than in `scripts/stealth_leadtime_experiment.py`
+# because two callers now need them — the bench and `/api/stealth/history` —
+# and a breakout definition that exists twice is two definitions that will
+# disagree. The bench keeps its own alternatives (`atr_now`, `fixed`) for
+# comparison; this is the one §16.15 concluded is honest.
+#
+# NOTE this is still not used by the GATE. §16.1 does not reference a breakout
+# bar, and nothing here changes a published signal — it only classifies runs
+# after the fact.
+# ---------------------------------------------------------------------------
+
+BREAKOUT_WINDOW = 40
+BREAKOUT_ATR_MULT = 2.0
+
+
+def breakout_bar_baseline(atr: np.ndarray, i: int) -> float:
+    """2x ATR, the sector's own trailing 2y median rather than today's reading.
+
+    Sector-relative, so a quiet sector is not held to an energy sector's
+    standard, but with no feedback: a vol spike in the week the signal fires
+    does not raise the bar it must clear.
+    """
+    hist = atr[max(0, i - 500): i + 1]
+    hist = hist[np.isfinite(hist) & (hist > 0)]
+    med = float(np.median(hist)) if len(hist) >= 20 else float("nan")
+    return BREAKOUT_ATR_MULT * (med if np.isfinite(med) else 0.02)
+
+
+def breakout_bar_scaled(atr: np.ndarray, i: int) -> float:
+    """The units fixed: 2 x median ATR x sqrt(window), ~7% on this panel.
+
+    `atr_pct` is a DAILY range (median 0.57%), so §16.4's literal `2 * atr_pct`
+    asks whether a 40-session forward maximum ever exceeded ~1.15%. That is a
+    liveness test, not a breakout test — 83% of all sector-days pass it. Under
+    a random walk the expected maximum over n days grows with sqrt(n), so
+    scaling by sqrt(40) keeps the "two normal moves" intent horizon-consistent.
+    See §16.15.
+    """
+    return breakout_bar_baseline(atr, i) * float(np.sqrt(BREAKOUT_WINDOW))
+
+
+#: §16.9's "dry powder reclaimed" — a stealth run this long with no breakout is
+#: capital sitting idle, and §16.9 auto-exits it. Imported rather than retyped
+#: so the classification cannot drift from the sizing rule that acts on it.
+_ACCUM_MAX_AGE = int(__import__("os").environ.get("ACCUMULATE_MAX_AGE_SESSIONS", "30"))
+
+
+def stealth_events(rows: list[dict], bar=breakout_bar_scaled) -> list[dict]:
+    """Turn stored `accumulation_age` into one record per stealth run.
+
+    Input is the raw daily panel — dicts with sector_code, date,
+    accumulation_age, close_idx, atr_pct, stealth_score — sorted per sector by
+    date. The `accumulation_age` column is read, **not recomputed**: it is what
+    the scanner wrote and what the Stealth Watch badge displays, so deriving a
+    second answer here is how the history table and the badge start disagreeing
+    about whether a sector was ever in stealth.
+
+    A run is a maximal stretch of `accumulation_age > 0`; age resets to 0 and
+    restarts at 1, which is the boundary. Each run is then scored forward from
+    its first session over `BREAKOUT_WINDOW`:
+
+      hit                 — price cleared the bar inside the window
+      false_positive      — the run ended and price never did
+      dry_powder_timeout  — the run reached §16.9's max age without breaking out
+      (None)              — still open, or too close to the panel edge to judge
+
+    The last case is why `classification` is nullable rather than defaulting to
+    a failure: an event whose forward window has not elapsed has not failed, and
+    counting it as one would understate the gate every single day.
+    """
+    out: list[dict] = []
+    by_sector: dict[str, list[dict]] = {}
+    for r in rows:
+        by_sector.setdefault(r["sector_code"], []).append(r)
+
+    for code, panel in by_sector.items():
+        panel = sorted(panel, key=lambda r: r["date"])
+        ages = [int(r.get("accumulation_age") or 0) for r in panel]
+        close = np.array([float(r.get("close_idx") or 0.0) for r in panel])
+        atr = np.array([float(r.get("atr_pct") or 0.0) for r in panel])
+
+        starts = [i for i, a in enumerate(ages) if a > 0 and (i == 0 or ages[i - 1] == 0)]
+        for i in starts:
+            end = i
+            while end + 1 < len(ages) and ages[end + 1] > 0:
+                end += 1
+            run_len = ages[end]
+            still_running = (end == len(panel) - 1)
+
+            entry = close[i]
+            fwd = close[i + 1: i + 1 + BREAKOUT_WINDOW]
+            fwd = fwd[np.isfinite(fwd) & (fwd > 0)]
+
+            judgeable = bool(np.isfinite(entry) and entry > 0 and len(fwd) >= 10)
+            lead_days = peak_pct = None
+            broke = False
+            if judgeable:
+                hit = np.nonzero(fwd >= entry * (1 + bar(atr, i)))[0]
+                broke = bool(len(hit))
+                lead_days = int(hit[0] + 1) if broke else None
+                peak_pct = float(np.nanmax(fwd) / entry - 1.0) * 100.0
+
+            if not judgeable or still_running:
+                classification = None
+            elif broke:
+                classification = "hit"
+            elif run_len >= _ACCUM_MAX_AGE:
+                classification = "dry_powder_timeout"
+            else:
+                classification = "false_positive"
+
+            out.append({
+                "sector_code": code,
+                "start_date": panel[i]["date"],
+                # An open run has no end date. Reporting today's date would make
+                # every live event look closed the moment you refresh.
+                "end_date": None if still_running else panel[end]["date"],
+                "sessions": run_len,
+                "peak_score": round(max(
+                    (float(r.get("stealth_score") or 0.0) for r in panel[i:end + 1]),
+                    default=0.0), 3),
+                "peak_return_pct": round(peak_pct, 2) if peak_pct is not None else None,
+                "lead_days_to_price": lead_days,
+                "classification": classification,
+                "resolved": classification is not None,
+            })
+
+    out.sort(key=lambda e: e["start_date"], reverse=True)
+    return out

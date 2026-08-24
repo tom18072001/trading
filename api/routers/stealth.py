@@ -13,16 +13,33 @@ conjunctions. See CLAUDE.md §16.1.
 """
 from __future__ import annotations
 
+from statistics import median
+
 import pandas as pd
 from fastapi import APIRouter, Query
 from sqlalchemy import func
 
-from analysis.stealth import STEALTH_MIN_CONDITIONS, STEALTH_MIN_SESSIONS
+from analysis.stealth import (
+    STEALTH_MIN_CONDITIONS,
+    STEALTH_MIN_SESSIONS,
+    stealth_events,
+)
 from config import SECTORS
 from database.connection import SessionLocal
 from database.models import SectorFlowDaily
 
 router = APIRouter(prefix="/api/stealth", tags=["stealth-watch"])
+
+#: Display strings for `stealth_events()`'s classification. A lookup rather than
+#: `.replace("_", " ").upper()`, because that mangling silently produces
+#: "DRY POWDER TIMEOUT" while `StealthWatchPage`'s chip map keys on
+#: "DRY-POWDER TIMEOUT" — a miss that renders as an unstyled grey chip and looks
+#: like a data problem rather than a string problem.
+_CLASSIFICATION_LABEL = {
+    "hit": "HIT",
+    "false_positive": "FALSE POSITIVE",
+    "dry_powder_timeout": "DRY-POWDER TIMEOUT",
+}
 
 
 def _build_gate(flow_z, foreign_hit, breadth, atr_rank, close_pct,
@@ -218,5 +235,57 @@ def stealth_active(
 
 
 @router.get("/history")
-def stealth_history(limit: int = Query(50)):
-    return {"rows": []}
+def stealth_history(limit: int = Query(50, ge=1, le=500)):
+    """Past stealth runs, newest first, each scored against §16.15's bar.
+
+    Until 2026-08-24 this returned a hardcoded `{"rows": []}` — the same shape
+    of defect as §22.1's Flow Pulse, and it looked correct for months because
+    the §16.1 AND gate really did produce zero events. It does not any more:
+    53 rows carry `accumulation_age > 0`.
+
+    Derived from `sector_flow_daily.accumulation_age`, **not** from
+    `sector_accumulation_events`. That table has existed since migration 9 and
+    has never had a writer, so reading it would return the same empty list by a
+    longer route; and once something did write it, the same fact would live in
+    two places that can disagree. The column is already the thing the scanner
+    writes and the Stealth Watch badge renders.
+    """
+    sess = SessionLocal()
+    try:
+        rows = (
+            sess.query(SectorFlowDaily)
+            .order_by(SectorFlowDaily.sector_code, SectorFlowDaily.date)
+            .all()
+        )
+        panel = [{
+            "sector_code": r.sector_code,
+            "date": r.date,
+            "accumulation_age": r.accumulation_age or 0,
+            "close_idx": r.close_idx or 0.0,
+            "atr_pct": r.atr_pct or 0.0,
+            "stealth_score": r.stealth_score or 0.0,
+        } for r in rows]
+    finally:
+        sess.close()
+
+    events = stealth_events(panel)
+    scored = [e for e in events if e["classification"]]
+    hits = [e for e in scored if e["classification"] == "hit"]
+    leads = [e["lead_days_to_price"] for e in hits if e["lead_days_to_price"]]
+
+    return {
+        "rows": [{**e, "name": SECTORS.get(e["sector_code"], e["sector_code"]),
+                  "classification": _CLASSIFICATION_LABEL.get(e["classification"])}
+                 for e in events[:limit]],
+        # §16.11 asks three questions of the gate; a history table that shows
+        # events without them invites the reader to eyeball a hit rate off a
+        # truncated list. `scored` excludes still-open and edge-of-panel runs —
+        # see stealth_events() on why those are not failures.
+        "summary": {
+            "events": len(events),
+            "scored": len(scored),
+            "hit_rate": round(len(hits) / len(scored), 3) if scored else None,
+            "median_lead_days": float(median(leads)) if leads else None,
+            "early_share": round(sum(1 for x in leads if x >= 10) / len(leads), 3) if leads else None,
+        },
+    }

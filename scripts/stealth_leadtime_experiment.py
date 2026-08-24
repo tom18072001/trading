@@ -128,12 +128,16 @@ import numpy as np
 import pandas as pd
 
 from analysis.stealth import (
+    BREAKOUT_ATR_MULT,
+    BREAKOUT_WINDOW,
     FLOW_Z_THRESHOLD,
     FOREIGN_HIT_THRESHOLD,
     RETURN_BOTTOM_FRAC,
     STEALTH_MIN_CONDITIONS,
     STEALTH_MIN_SESSIONS,
     _return_60d_position,
+    breakout_bar_baseline,
+    breakout_bar_scaled,
     compute_leading_features,
 )
 from database.connection import SessionLocal
@@ -154,8 +158,8 @@ from database.models import SectorFlowDaily
 # one; every table says which it used. The point is to find out whether §16's
 # 2026 collapse survives a definition that does not move with the tape — an
 # answer that has to be measured, because all three are defensible a priori.
-BREAKOUT_WINDOW = 40
-BREAKOUT_ATR_MULT = 2.0
+# BREAKOUT_WINDOW / BREAKOUT_ATR_MULT are imported from analysis.stealth — see
+# the note above _bar_atr_baseline.
 
 #: A fixed +8%. Immune to the ATR feedback by construction, and unfair to quiet
 #: sectors by exactly the amount §16.4 was worried about. Roughly the median
@@ -168,39 +172,20 @@ def _bar_atr_now(atr: np.ndarray, i: int) -> float:
     return BREAKOUT_ATR_MULT * (atr[i] if np.isfinite(atr[i]) else 0.02)
 
 
-def _bar_atr_baseline(atr: np.ndarray, i: int) -> float:
-    """2x ATR, but the sector's own 2-year median rather than today's reading.
-
-    Keeps §16.4's intent — the bar is sector-relative, so a quiet sector is not
-    held to an energy sector's standard — while removing the feedback: a vol
-    spike in the week the signal fires no longer raises the bar it must clear.
-    """
-    hist = atr[max(0, i - 500): i + 1]
-    hist = hist[np.isfinite(hist) & (hist > 0)]
-    med = float(np.median(hist)) if len(hist) >= 20 else float("nan")
-    return BREAKOUT_ATR_MULT * (med if np.isfinite(med) else 0.02)
+# The two definitions that survived §16.15 moved to `analysis/stealth.py` on
+# 2026-08-24, when `/api/stealth/history` became a second caller: it classifies
+# each past stealth run as hit / false positive / dry-powder timeout, which is
+# the same question this bench asks. A breakout bar living in two files is two
+# bars that drift, and the drift would be invisible — the bench would keep
+# reporting the number the page had stopped using. The bench keeps only the
+# alternatives it needs for comparison (`atr_now` as shipped, `fixed`).
+_bar_atr_baseline = breakout_bar_baseline
+_bar_atr_scaled = breakout_bar_scaled
 
 
 def _bar_fixed(atr: np.ndarray, i: int) -> float:  # noqa: ARG001 - uniform signature
     """A flat +8%, identical for every sector and every date."""
     return BREAKOUT_FIXED_PCT
-
-
-def _bar_atr_scaled(atr: np.ndarray, i: int) -> float:
-    """2x ATR scaled to the horizon: 2 * ATR * sqrt(window).
-
-    This is the one that fixes the units. `atr_pct` is a DAILY range, so §16.4's
-    `2 x atr_pct` asks whether a 40-session forward maximum ever exceeded twice
-    a single day's normal move — a bar of ~1.15% on this panel, which 83% of
-    sector-days clear. That is not a breakout test, it is a liveness test.
-
-    Under a random walk the expected maximum over n days grows with sqrt(n), so
-    2*ATR*sqrt(40) ~ 7.2% keeps §16.4's "two normal moves" intent while making
-    it horizon-consistent. It stays sector-relative (a quiet sector gets a lower
-    bar, which is what §16.4 wanted) and uses the trailing median rather than
-    today's ATR, so it does not inherit the feedback of `atr_now`.
-    """
-    return _bar_atr_baseline(atr, i) * float(np.sqrt(BREAKOUT_WINDOW))
 
 
 BREAKOUT_DEFS = {

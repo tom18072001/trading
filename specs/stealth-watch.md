@@ -98,14 +98,51 @@ response:
 ```
 
 ### 4.4 `GET /api/stealth/history`
+
+> **Shipped 2026-08-24** — it had returned a hardcoded `{"rows": []}` since it
+> was written. Response below is what runs; the shape above it in git history
+> was a sketch.
+
 ```
-params: limit (default 50)
+params: limit (default 50, 1..500)
 response:
   {
-    rows: [ { sector, start, end, peak_return_pct, lead_days, classification } ]
+    rows: [ {
+      sector_code, name, start_date, end_date, sessions,
+      peak_score, peak_return_pct, lead_days_to_price,
+      classification, resolved
+    } ],
+    summary: { events, scored, hit_rate, median_lead_days, early_share }
   }
 ```
-`classification` ∈ `hit | false_positive | dry_powder_timeout`.
+
+`classification` is `"HIT" | "FALSE POSITIVE" | "DRY-POWDER TIMEOUT"` **or
+`null`** — the display strings, mapped in the router; the underlying enum stays
+snake_case in `analysis.stealth.stealth_events()`.
+
+Three things the sketch did not say, each load-bearing:
+
+- **`classification` is nullable, and `null` is not a failure.** A run still
+  going, or one whose 40-session forward window has not elapsed, has no verdict.
+  Scoring it as a miss would understate the gate on every refresh, permanently.
+  `resolved` mirrors this; `summary.scored` counts only the judged ones, so
+  `hit_rate` is not diluted by events that have not had their chance.
+- **`end_date` is `null` for an open run**, not today's date.
+- **Derived from `sector_flow_daily.accumulation_age`, not from
+  `sector_accumulation_events`.** That table has had no writer since migration 9
+  created it, so reading it returns the same empty list by a longer route — and
+  once something does write it, the same fact lives in two places that can
+  disagree.
+
+Breakout is `analysis.stealth.breakout_bar_scaled` — the same function
+`scripts/stealth_leadtime_experiment.py` scores with, by identity, pinned by
+`test_the_bench_and_the_endpoint_share_one_breakout_definition`. See §16.15 for
+why the daily `2 × atr_pct` bar was a liveness test.
+
+Live on the 13,485-row panel: **21 events, 20 scored, hit_rate 0.40, median lead
+21 sessions, 75% at ≥10** — matching the bench's shipped-gate row exactly, which
+is the point of the shared definition. Read against §16.14: the unconditional
+base rate is 43% / 74%, so the gate still does not beat not filtering.
 
 ## 5. UI components (under `features/stealth-watch/components/`)
 - `StealthTimeline.tsx` — Gantt-style horizontal bars.
