@@ -162,8 +162,8 @@
   each entry tagged `source ∈ {BOTH, DAILY_INSIGHT, RANKER}` so the email and
   dashboard always agree. Adds an Expert Trader Memo section at the top of
   the HTML + PDF and a plain-text email body (buy symbols + reasons + Dashboard +
-  news links). Default recipients grown to 3: `tka2001@gmail.com,
-  anhchitruong18@gmail.com, hill.nguyen.1373@gmail.com`. Scheduler contract
+  news links). Default recipients grown to 3 (that hardcoded list was removed
+  2026-08-24 when the repo went public — `REPORT_EMAIL_TO` only). Scheduler contract
   unchanged (same 17:00 slot in `scripts/jobs/job_sector_signal_publish.bat`;
   bat now calls the new generator). The two older generators were left on disk
   as manual rollback paths at the time — **both deleted 2026-06-18**, and the
@@ -486,8 +486,9 @@ sector_signals  →  /api/sectors/ranking
                                             + Expert Trader Memo → HTML + PDF)
                 →  smtplib → Gmail (REPORT_EMAIL_TO, comma-separated list)
 ```
-Recipients (`REPORT_EMAIL_TO` in `.env`, updated 2026-04-23 to 3-person list):
-`anhchitruong18@gmail.com, hill.nguyen.1373@gmail.com`.
+Recipients: `REPORT_EMAIL_TO` in the local `.env` only. No list is committed and
+there is no fallback in code (2026-08-24, repo went public); empty writes the
+HTML/PDF and skips the send.
 
 ---
 
@@ -647,7 +648,7 @@ returns an empty cartesian product at every threshold (`CLAUDE.md` §22.1).
 ---
 
 ## 12. INHERITED DEFAULTS (set in CLAUDE.md §14)
-Proxy basket = top 5 by mcap. Backfill = 5 years. Execution = top-3 constituent basket. TraderAgent "Minh" authors the daily narrative. Frontend feature-flagged during shadow run. Report recipients: `anhchitruong18@gmail.com, hill.nguyen.1373@gmail.com` (see `.env: REPORT_EMAIL_TO`).
+Proxy basket = top 5 by mcap. Backfill = 5 years. Execution = top-3 constituent basket. TraderAgent "Minh" authors the daily narrative. Frontend feature-flagged during shadow run. Report recipients: `.env: REPORT_EMAIL_TO` only — nothing committed, no code fallback.
 
 ---
 

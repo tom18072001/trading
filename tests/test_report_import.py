@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import importlib
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -115,3 +116,40 @@ def test_charts_pins_the_headless_backend():
 
     importlib.import_module("services.report.charts")
     assert matplotlib.get_backend().lower() == "agg"
+
+
+def test_no_recipient_address_is_committed():
+    """The repo went public on 2026-08-24; a source file is not a mailing list.
+
+    `generate_report.py` used to carry three real addresses as the fallback for
+    `REPORT_EMAIL_TO`, so anyone reading the repo got three inboxes. Removing
+    them is only half the fix — this is the half that stops them coming back.
+
+    The check is deliberately shaped as "any address at all", not "these three
+    addresses". A test naming the addresses would have to contain them, which
+    is the thing being prevented.
+    """
+    src = REPORT_PY.read_text(encoding="utf-8")
+    # Matches a bare email literal. `os.environ.get("REPORT_EMAIL_TO", "")` has
+    # no @-sign, so the honest configuration path passes.
+    found = re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", src)
+    assert not found, (
+        f"generate_report.py contains {len(found)} email address(es). "
+        "Recipients belong in the gitignored .env via REPORT_EMAIL_TO."
+    )
+
+
+def test_an_empty_recipient_list_skips_the_send_instead_of_guessing():
+    """Empty config must mean "send nothing", never "fall back to a default".
+
+    This is the behavioural half. Dropping the hardcoded list could have been
+    written as `or "<some default>"`, which would look fixed and still mail
+    three strangers. The source must branch on an empty list.
+    """
+    src = REPORT_PY.read_text(encoding="utf-8")
+    assert 'os.environ.get("REPORT_EMAIL_TO", "")' in src, (
+        "REPORT_EMAIL_TO must default to the empty string, not to a recipient list"
+    )
+    assert "if not TO_LIST:" in src, (
+        "an empty REPORT_EMAIL_TO must skip the send explicitly"
+    )

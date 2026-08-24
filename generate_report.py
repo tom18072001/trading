@@ -19,12 +19,12 @@ This generator unifies the two into a single list per Tom's directive
     rationale per pick, conviction rating, catalyst + link pointer.
   * Plain-text email body = short actionable summary of BUY list
     (symbol, reason, Daily Insight link).
-  * Default recipients = tka2001@gmail.com, anhchitruong18@gmail.com,
-    hill.nguyen.1373@gmail.com (REPORT_EMAIL_TO env override still
-    works).
+  * Recipients come from REPORT_EMAIL_TO (comma-separated) in `.env`.
+    There is no built-in list: empty means the HTML/PDF are written and
+    no mail is sent.
 
 Outputs:  report/daily_report_<date>.html and .pdf
-Emails:   PDF + HTML + plain-text summary to the 3 recipients.
+Emails:   PDF + HTML + plain-text summary to REPORT_EMAIL_TO.
 
 Usage:
     python generate_report.py              # today (local TZ)
@@ -1492,15 +1492,16 @@ def main(argv: list[str] | None = None) -> None:
         FROM = os.environ.get("REPORT_EMAIL_FROM")
         PW   = os.environ.get("REPORT_EMAIL_PASSWORD")
         # REPORT_EMAIL_TO supports a comma-separated list (multiple recipients in TO header).
-        # Default recipients — 3 people per Tom's directive 2026-04-23.
-        # REPORT_EMAIL_TO env var still overrides for local testing.
-        TO_RAW = os.environ.get(
-            "REPORT_EMAIL_TO",
-            "tka2001@gmail.com,anhchitruong18@gmail.com,hill.nguyen.1373@gmail.com",
-        )
+        # No default recipient list. It used to hardcode three real addresses as
+        # a fallback; the repo went public on 2026-08-24 and a source file is the
+        # wrong place to publish someone's inbox. Configure it in `.env`.
+        TO_RAW = os.environ.get("REPORT_EMAIL_TO", "")
         TO_LIST = [e.strip() for e in TO_RAW.split(",") if e.strip()]
         TO_HEADER = ", ".join(TO_LIST)
-        if not (FROM and PW):
+        if not TO_LIST:
+            print("[report] REPORT_EMAIL_TO is empty — skipping email. Set it in .env "
+                  "(comma-separated). The HTML/PDF above were still written.")
+        elif not (FROM and PW):
             print("[report] SMTP creds missing — skipping email (set REPORT_EMAIL_FROM/PASSWORD in .env).")
         else:
             msg = MIMEMultipart("mixed")

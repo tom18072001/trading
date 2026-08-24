@@ -55,8 +55,13 @@ _trash_*/
 frontend/dist-*/
 
 # Runtime artifacts
+# `*.log` alone does NOT cover `*.log.err` — the job wrappers redirect stderr to
+# that suffix, so one slipped into git and stayed there (a stack trace with
+# absolute Windows paths, tracked since d88cfbf). Both globs, both suffixes.
 report/jobs/*.log
+report/jobs/*.log.*
 report/*.log
+report/*.log.*
 email_log.txt
 daily.json
 refresh.json

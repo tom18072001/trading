@@ -50,7 +50,9 @@ trader agent cần khoá thật.
 Biến môi trường quan trọng (xem `.env`):
 - `DATABASE_PATH` — mặc định `vnstock_market.db` ở root
 - `DATA_SOURCE` — `KBS` (recommended), `VCI` (restricted), `TCBS` (dead)
-- `REPORT_EMAIL_TO` — **comma-separated** list, ví dụ `anhchitruong18@gmail.com,hill.nguyen.1373@gmail.com`
+- `REPORT_EMAIL_TO` — **comma-separated** list, ví dụ `a@example.com,b@example.com`.
+  Bắt buộc nếu muốn gửi mail: không có danh sách mặc định trong code, để trống thì
+  vẫn dựng HTML/PDF nhưng bỏ qua email. Địa chỉ thật nằm ở `.env` local (gitignored).
 - `REPORT_EMAIL_FROM`, `REPORT_EMAIL_PASSWORD` — Gmail App Password
 
 ## Chạy thủ công

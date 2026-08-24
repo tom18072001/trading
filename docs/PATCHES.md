@@ -14,7 +14,9 @@
 
 ## Đang làm
 
-*(trống — plan gần nhất đã đóng 2026-08-24)*
+| plan | phạm vi | trạng thái |
+|---|---|---|
+| **Siết bảo mật sau khi repo public** | `API_REQUIRE_KEY=0` và CORS mở là mặc định — ai đọc code cũng biết endpoint nào ghi được. Rủi ro thật còn thấp vì API bind localhost (§22.4 đã đưa Vite khỏi `0.0.0.0`), nhưng hết thấp ngay khi expose ra ngoài | **ghi nhận, chưa sửa** — Tom chọn không đổi hành vi hôm nay; bật `API_REQUIRE_KEY=1` sẽ làm hỏng frontend dev + 8 job scheduler cho tới khi cấu hình key |
 
 ---
 
@@ -22,6 +24,7 @@
 
 | ngày | plan | kết quả | commit |
 |---|---|---|---|
+| 2026-08-24 | **Repo public — bỏ email khỏi git** | Quét toàn bộ lịch sử trước: không blob nào chứa key thật; `.env.example` là tên file "nhạy cảm" duy nhất từng commit. Hai defect: `generate_report.py` **hardcode 3 địa chỉ thật** làm fallback cho `REPORT_EMAIL_TO` (không đổi hành vi máy này — `.env` đã set nên env thắng, job 17:00 vốn gửi 2 người chứ không phải 3), và một **log runtime lọt qua rule ignore hụt** (`report/jobs/*.log` không khớp `.log.err`). +2 guard, kiểm chứng bằng negative control: tiêm lại địa chỉ fallback thì đúng 2 test đỏ. 328 test, ruff 65. **Địa chỉ vẫn còn trong lịch sử** — Tom chọn không rewrite (đã từng phải purge `cloudflared.exe`), coi như đã lộ | (this) |
 | 2026-08-24 | **Đẩy lên GitHub** | `chore/2026-08-audit` fast-forward `90304b7 → 0c7a6bb`, rồi merge `--no-ff` vào `master`. **Không force-push** — lịch sử đã từng phải purge `cloudflared.exe` nên viết lại lần nữa là rủi ro thừa; merge-base cho thấy 2 commit `master` đi trước chỉ là merge commit, nội dung là tập con, nên không có gì để rebase. Trước mỗi lần push: `git status`/`git ls-files` không thấy `.env`/`*.db`/`*.bak-*`, và quét nội dung diff chỉ ra 3 khớp — cả ba là **tên biến** (`REPORT_EMAIL_PASSWORD`, `LOCAL_API_KEY`), không phải giá trị. Suite trên `master` sau merge: 326 pass | `293b85d` |
 | 2026-08-24 | **Repo clone-được** | CI (`uv`, không phải pip — production chạy `uv run`), devcontainer, mục README "Chạy trên máy mới". Hai defect thật: **`requirements.txt` là tập con thiếu `hmmlearn` + `matplotlib`** (cài theo README thì regime classifier và report render đều chết, mà chỉ lộ lúc job 17:00 chạy) → xoá, giữ `pyproject.toml` + `uv.lock`; và **pytest/ruff chưa từng được khai báo** → clone sạch không chạy nổi test. Suite lần đầu chạy trên interpreter production (3.13): 326 pass. Kiểm chứng bằng bài test duy nhất bắt được lỗi loại này: **clone sạch sang thư mục tạm** → `uv sync --frozen` + `uv run pytest` = **325 pass, 1 skip** (skip là `test_the_live_ranker_still_has_real_features`, đúng thiết kế vì clone sạch chưa có model) | `0c7a6bb` |
 | 2026-08-24 | **Ranh giới module** (§20.3 P3-2 + `ARCHITECTURE.md` §4.1) | **Đo trước rồi mới sửa, và phép đo đổi luôn kế hoạch**: graph `services/` vốn đã là DAG nông (17 module, sâu tối đa 2, 0 vi phạm layer) → **không file nào phải move**; thiếu là *cách giữ*, không phải cấu trúc. Bắt được 2 defect: cycle `services → api → services` và `scripts/seed_data.py` import module đã xoá 4 tháng. Nửa sau: `generate_report.py` **113 → 4** câu lệnh module-level, `import` không còn gửi mail; chỉ tách phần thuần (charts, SQL, formatter) — HTML weave **cố ý giữ nguyên**. Lộ ra defect thứ ba, nặng hơn cả hai: **chạy pytest ghi đè model production** (`fit()` ghi thẳng `models/saved/`, gitignore nên git không thấy, job 17:00 chết). 326 test (+19), ruff 67 → 65 | `4aa783a`, `3c2cfd3` |

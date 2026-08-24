@@ -14,6 +14,64 @@
 
 ---
 
+## 2026-08-24 (15) — the repo went public, so the repo stops carrying inboxes
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `generate_report.py` — the hardcoded recipient fallback and the docstring
+    naming three addresses.
+  - `.gitignore` — `report/jobs/*.log.*` and `report/*.log.*`.
+  - `report/jobs/sector_signal_publish.log.err` — `git rm --cached`.
+  - `.env.example`, `README.md`, `docs/reference/ALGORITHM.md`,
+    `ARCHITECTURE.md`, `CLAUDE.md` §2 — recipient docs.
+  - `tests/test_report_import.py` — +2 guards.
+- Reason: Tom made the repo public mid-session (`private: false`, confirmed via
+  the API). That does not change what is *in* the repo; it changes who can read
+  it, so everything committed had to be re-judged under a different threat
+  model. Tom's instruction: *"để email ở local không push lên git thôi"*.
+- Summary:
+  - **Full-history secret scan first, before touching anything.** `.env.example`
+    is the only sensitive-looking filename ever committed across all refs, and a
+    content scan of every blob for live key shapes (`sk-ant-api…`, `ghp_…`,
+    `github_pat_`, `AKIA…`, PEM headers) returned nothing. The first attempt at
+    that scan was useless — it drowned in base64 chart images from 74 committed
+    report artefacts — which is worth recording: a scan that returns 342 KB of
+    matches has not told you anything.
+  - **`generate_report.py` hardcoded three real addresses** as the fallback for
+    `REPORT_EMAIL_TO`. Removed; the variable now defaults to `""` and an empty
+    list skips the send explicitly, printing why. **No behaviour change on this
+    machine** — `.env` already sets the variable and `os.environ.get` prefers
+    it, so the live 17:00 job was sending to the configured 2 recipients, not
+    the 3 in the source. The dead default was misleading as well as public.
+  - **Two guards, and the second is the load-bearing one.**
+    `test_no_recipient_address_is_committed` matches *any* address rather than
+    the three that were there — a test naming them would have to contain them.
+    `test_an_empty_recipient_list_skips_the_send_instead_of_guessing` exists
+    because the obvious wrong fix is `or "<default>"`, which looks fixed and
+    still mails strangers. Verified by negative control: re-injecting a fallback
+    address fails both, and only those two.
+  - **A tracked runtime log slipped through a near-miss ignore rule.**
+    `report/jobs/*.log` does not match `sector_signal_publish.log.err` — the job
+    wrappers redirect stderr to `.log.err`, a different suffix — so a stack
+    trace with absolute Windows paths had been tracked since `d88cfbf`.
+    Untracked, and both globs widened to `*.log.*`.
+  - Addresses in `MODIFICATION_LOG.md` and `docs/reviews/` are left alone per
+    §21: they are dated records of what was configured when, and rewriting them
+    would erase the record rather than the exposure. `CLAUDE.md:5` keeps Tom's
+    own address in the Owner line — his to publish.
+  - Suite 326 → **328**, ruff unchanged at **65**.
+- Follow-ups:
+  - **Not done, and it is a real limit:** the addresses remain in git history and
+    the repo was public while they were there. Removing them would need
+    `git-filter-repo` plus a force-push, which the standing rule forbids
+    (history has already had to be purged of `cloudflared.exe` once). Tom chose
+    "bỏ hardcode, giữ lịch sử" knowing this. Treat those addresses as disclosed.
+  - `API_REQUIRE_KEY=0` and the open CORS default are now readable by anyone —
+    Tom's call was to log it, not change it today. Low real risk while the API
+    binds localhost (§22.4 already moved Vite off `0.0.0.0`), but it stops being
+    low the moment anything is exposed. Recorded in `docs/PATCHES.md`.
+
+---
+
 ## 2026-08-24 (14) — pushed; the clean-clone test that had never been run
 - Author: Claude Code on behalf of Tom
 - Files:

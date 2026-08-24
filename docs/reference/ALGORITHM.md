@@ -235,9 +235,10 @@ production regression — the sector tables, cards and PDF are unaffected
 - `report/daily_report_<DATE>.html` — inline-styled HTML with embedded charts.
 - `report/daily_report_<DATE>.pdf` — WeasyPrint render of the same HTML.
 
-SMTP: Gmail App Password over SSL:465. `REPORT_EMAIL_TO` is comma-separated;
-current production value = `anhchitruong18@gmail.com,hill.nguyen.1373@gmail.com`.
-Both addresses appear in the `To:` header (not BCC).
+SMTP: Gmail App Password over SSL:465. `REPORT_EMAIL_TO` is comma-separated and
+lives only in the local `.env` — the repo is public, so no recipient list is
+committed and there is no fallback in code. Every configured address appears in
+the `To:` header (not BCC).
 
 The scheduled-task wrapper is `scripts/jobs/job_sector_signal_publish.bat`;
 register it with `scripts/register_report_task.ps1`. Job logs land in
