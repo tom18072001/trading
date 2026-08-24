@@ -440,12 +440,19 @@ As of 2026-04-23:
 
 | Suite | Count | Command |
 |---|---|---|
-| Backend (pytest) | 230 | `python -m pytest tests/` |
+| Backend (pytest) | 233 | `python -m pytest tests/` |
 | Frontend (vitest) | 13 | `cd frontend && npm test` |
-| **Total** | **243** | — |
+| **Total** | **246** | — |
 
-> 2026-08-24: +23. `tests/test_regime_confidence.py` (+10) and
+> 2026-08-24: +26. `tests/test_regime_confidence.py` (+13) and
 > `tests/test_position_edit.py` (+13).
+>
+> Three of the regime tests guard *wording*, not arithmetic, which is unusual
+> enough to justify: `confidence_phrase()` is the only reader-facing sentence
+> that says what the number means, and the four strings it replaced said "HMM
+> confidence 1.00" for months. `test_the_phrase_hedges_exactly_where_
+> calibration_fails` pins the hedge to the measured 0.85 boundary, so removing
+> it requires deleting a test that names the miscalibration.
 >
 > **`hmmlearn` was missing from the interpreter that runs pytest**, while
 > production runs through `uv run` and resolves `.venv`, where it is installed.
@@ -580,6 +587,13 @@ daily table.
 | P3-3 | `.env.example` regenerated from `config.py` | `.env.example` |
 | P3-4 | `rollup_to_daily` no longer loads the whole `sector_flow_ts` table; `_stealth_sectors()` N+1 collapsed to one query | ingest + signal services |
 | P3-5 | ruff config in `pyproject.toml`; 666 findings → 30, all of them real | `pyproject.toml` + call sites |
+
+> **2026-08-24 — the "30" above is stale; the baseline is 66.** Measured, not
+> re-broken: `F401` 14 · `E402` 11 · `B904` 8 · `B905` 5 · `S608` 5 · `E401` 4
+> · `PERF401` 4, then a tail of ones and twos. The 30 was counted before
+> several later features landed, and nobody re-measured it — which is the
+> failure mode a hardcoded count in a document always has. Treat 66 as the
+> number a change must not grow, and re-measure rather than trusting this line.
 
 **Defaults chosen to preserve live behaviour:** `API_REQUIRE_KEY=0`,
 `ALLOW_SHORT_SIGNALS=1`, `TRADING_HALT=0`. Nothing in the daily email changes
@@ -1081,11 +1095,36 @@ carry-forward keeps the last *good* value. The 613 existing rows are left as-is
 and marked `ponytail:`: nothing reads that column, so a backfill would be
 tidying, not repair.
 
-### 25.6 Open
+### 25.6 The wording — closed 2026-08-24 (late)
+
+The four stance strings in `generate_report.py` plus the banner and the plain
+-text body rendered `"HMM confidence {:.2f}"`. After the rewrite they printed
+0.65 instead of 1.00, which is the intended change and also the dangerous one:
+the word "confidence" invites a reader to size on it, and the number is no
+longer a confidence. It is P(this label survives 5 sessions).
+
+`analysis.regime.confidence_phrase()` is the one renderer now — six call sites
+across the banner, the memo and the email body:
+
+```
+was:  Tape đang risk-on (HMM confidence 0.65)
+now:  Tape đang risk-on (~65% khả năng giữ 5 phiên tới)
+```
+
+**It lives in `analysis/regime.py`, not in the report generator**, and that
+placement is the point: the sentence is a property of the formula, so whoever
+changes what the number means owns the words describing it. It is also the only
+way it could be tested — `generate_report.py` is 1,629 module-level lines that
+send mail on `import` (§20.3 P3-2).
+
+Above 0.85 the phrase appends a hedge. That is not padding, it is §25.2's
+measurement: the top bucket predicts 0.90 against a realised 0.70. The boundary
+is pinned by `test_the_phrase_hedges_exactly_where_calibration_fails`, so the
+hedge cannot be dropped without deleting a test that names the reason.
+
+### 25.7 Open
 - `CONF_HORIZON = 5` is asserted, not derived. Nothing measured says one trading
-  week is the right horizon for a regime call.
-- The top confidence bucket needs calibration (25.2).
-- `generate_report.py` renders "HMM confidence {:.2f}" in four stance strings.
-  Those now read 0.65 instead of 1.00, which is the intended change — but the
-  wording ("Tape đang risk-on (HMM confidence 0.65)") was written when the
-  number was always ~1.0 and never had to mean anything.
+  week is the right horizon for a regime call. The phrase now states the horizon
+  out loud, which makes the arbitrariness visible rather than fixing it.
+- The top confidence bucket needs isotonic calibration (25.2). Until it lands
+  the hedge above is the mitigation, and it is a sentence, not a correction.

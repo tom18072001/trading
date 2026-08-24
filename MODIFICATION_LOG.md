@@ -14,6 +14,46 @@
 
 ---
 
+## 2026-08-24 (5) — the report still called it "confidence"
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `analysis/regime.py` (new `confidence_phrase()`)
+  - `generate_report.py` (6 call sites: banner, 4 stance strings, plain-text body)
+  - `tests/test_regime_confidence.py` (+3, now 13)
+  - `CLAUDE.md` §25.6 (new, closes the follow-up), §25.7, §19 counts, §20.2 ruff note
+- Reason: entry (4) changed what `sector_regime.confidence` measures but not
+  what the daily email calls it. Six places rendered `"HMM confidence {:.2f}"`.
+  After the rewrite they printed 0.65 instead of 1.00 — the intended change,
+  and the one that needed the wording fixed most: the word "confidence" invites
+  a reader to size on the number, and it is no longer a confidence. It is
+  P(this label survives 5 sessions). The strings were written when the value
+  was always ~1.0 and never had to mean anything.
+- Summary:
+  - One renderer, in `analysis/regime.py` rather than in the report. The
+    sentence is a property of the formula — whoever changes what the number
+    means owns the words describing it. It is also the only way to test it:
+    `generate_report.py` sends mail on `import` (§20.3 P3-2), so nothing in it
+    is reachable from pytest.
+  - `Tape đang risk-on (HMM confidence 0.65)` → `Tape đang risk-on (~65% khả
+    năng giữ 5 phiên tới)`. The horizon is stated, not implied.
+  - Above 0.85 the phrase appends a hedge naming the miscalibration §25.2
+    measured (0.90 predicted vs 0.70 realised). Pinned by
+    `test_the_phrase_hedges_exactly_where_calibration_fails`, so it cannot be
+    removed without deleting the test that explains it.
+  - Verified against the live row (`risk_on 0.6472` → `~65% khả năng giữ 5
+    phiên tới`) and across the 0.46–0.91 range the formula actually produces.
+  - `CLAUDE.md` §20.2's "666 findings → 30" corrected: the ruff baseline is
+    **66**, measured, with the per-rule breakdown recorded so the next reader
+    re-measures instead of trusting a hardcoded count.
+- Follow-ups:
+  - `CONF_HORIZON = 5` is still asserted, not derived. The phrase now says "5
+    phiên" out loud, which makes the arbitrariness visible, not smaller.
+  - Isotonic calibration of the top bucket. Until then the hedge is a sentence,
+    not a correction.
+  - `generate_report.py` was compile-checked, not run: a full run sends mail.
+
+---
+
 ## 2026-08-24 (4) — regime confidence was a collapsed HMM's posterior
 - Author: Claude Code on behalf of Tom
 - Files:

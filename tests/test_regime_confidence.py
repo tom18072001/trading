@@ -16,7 +16,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from analysis.regime import CONF_HORIZON, RegimeClassifier, _heuristic_regime
+from analysis.regime import (
+    CONF_HORIZON,
+    RegimeClassifier,
+    _heuristic_regime,
+    confidence_phrase,
+)
 
 def _has_hmm() -> bool:
     try:
@@ -175,3 +180,31 @@ def test_a_constant_column_does_not_divide_by_zero():
     label, conf = clf.predict(m)
     assert np.isfinite(conf)
     assert label in {"risk_on", "risk_off", "rotation", "chop"}
+
+
+# ----- how the number is worded (always runs) ------------------------------
+
+def test_the_phrase_never_says_confidence():
+    """The four report strings said "HMM confidence 1.00" back when the number
+    was a collapsed model's posterior. It is a persistence probability now, and
+    the wording has to say so — a reader who sees "confidence" will size on it.
+    """
+    for c in (0.0, 0.3, 0.6472, 0.9):
+        txt = confidence_phrase(c)
+        assert "confidence" not in txt.lower()
+        assert str(CONF_HORIZON) in txt, "the horizon must be stated, not implied"
+
+
+def test_the_phrase_hedges_exactly_where_calibration_fails():
+    """Measured over 300 sessions the top bucket predicts 0.90 against a
+    realised 0.70. The hedge is that measurement, not decoration — it must
+    appear above 0.85 and not below."""
+    assert "nhiều khả năng" in confidence_phrase(0.91)
+    assert "nhiều khả năng" in confidence_phrase(0.85)
+    assert "nhiều khả năng" not in confidence_phrase(0.84)
+
+
+def test_a_missing_confidence_does_not_crash_the_report():
+    """`regime.get('confidence')` is None on a fresh DB, and this runs inside
+    the daily email."""
+    assert confidence_phrase(None).startswith("~0%")

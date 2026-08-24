@@ -57,6 +57,26 @@ from config import REGIME_STATES
 # and stop discriminating.
 CONF_HORIZON = 5
 
+
+def confidence_phrase(conf: float | None) -> str:
+    """Render `confidence` in Vietnamese as the thing it now measures.
+
+    Lives here rather than in the report generator because the wording is a
+    property of the formula: whoever changes what the number means owns the
+    sentence describing it. Every renderer that used to print
+    "HMM confidence 1.00" calls this instead.
+
+    The hedge above 0.85 is not decoration — it is the measured miscalibration
+    of the top bucket (0.90 predicted vs 0.70 realised over 300 sessions).
+    Remove it when isotonic calibration lands, not before.
+    """
+    c = float(conf or 0.0)
+    base = f"~{c:.0%} khả năng giữ {CONF_HORIZON} phiên tới"
+    if c >= 0.85:
+        return f"{base} (thang trên còn lạc quan — đọc là 'nhiều khả năng')"
+    return base
+
+
 # Labels ordered by mean 1d return, ascending — index i is the i-th coldest
 # state. Keeps the mapping deterministic across refits.
 _LABELS_BY_RETURN = ["risk_off", "chop", "rotation", "risk_on"]
