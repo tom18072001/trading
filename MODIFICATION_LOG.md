@@ -14,6 +14,49 @@
 
 ---
 
+## 2026-08-24 (14) — pushed; the clean-clone test that had never been run
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `docs/PATCHES.md` — "Đang làm" is empty; the push row and two real commit
+    hashes replace the `(this)` placeholders.
+- Reason: `origin/master` had been sitting at PR #1 while local ran 4 commits
+  ahead on `chore/2026-08-audit`, so the GitHub copy was not the thing being
+  worked on. Tom's requirement was stronger than "push": *local phải được clone
+  từ GitHub* — the remote must be able to reconstitute a working checkout.
+- Summary:
+  - **The decisive check, run before pushing:** cloned the repo to a temp dir
+    and ran the README verbatim — `uv sync --frozen` then `uv run pytest tests/
+    -q` → **325 passed, 1 skipped**, plus `ruff` 65 (matching the local count)
+    and `main.py --init` succeeding against a fresh DB. The single skip is
+    `test_the_live_ranker_still_has_real_features`, which skips by design when
+    `models/saved/rotation_ranker.json` is absent — correct for a clean clone,
+    since that file is gitignored. Nothing on this machine was needed to make
+    the clone work, which is the property that was previously untested.
+  - `chore/2026-08-audit` pushed as a **fast-forward** `90304b7 → 0c7a6bb`
+    (verified with `merge-base --is-ancestor`, not assumed), then merged into
+    `master` with `--no-ff` and pushed as `293b85d`.
+  - **No force-push, and nothing to rebase.** `master` was 2 commits "ahead",
+    but `git log HEAD..master` showed both are merge commits whose content is
+    already a subset of the branch — so the divergence was topological, not
+    substantive. Checking that first is what turned an apparent conflict into a
+    plain merge. History has previously had to be purged of `cloudflared.exe`;
+    rewriting it again buys nothing and risks the same cleanup.
+  - Security gate before each push, per the standing rule: `git status --short`
+    and `git ls-files` both clean of `.env` / `*.db` / `*.bak-*`, and a content
+    scan of the diff for key-shaped strings. The scan returned three matches and
+    **all three are variable names** — `REPORT_EMAIL_PASSWORD`, `LOCAL_API_KEY`
+    — not values. Worth recording because a scan that returns zero teaches you
+    nothing about whether it works.
+  - Suite re-run on the merged `master` before pushing: **326 passed**.
+- Follow-ups:
+  - CI now runs on `master`; its first real run is this push. If the frontend
+    job is red, it is `npm run build` (`tsc -b`) finding something the 13-test
+    vitest suite does not render — that is the job doing its stated purpose.
+  - `docs/PATCHES.md` "Đang làm" is empty. Per its own rule 1, the next plan
+    adds a row there rather than a plan file in the repo.
+
+---
+
 ## 2026-08-24 (13) — the repo installs the way production installs
 - Author: Claude Code on behalf of Tom
 - Files:
