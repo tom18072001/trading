@@ -14,6 +14,134 @@
 
 ---
 
+## 2026-08-24 (4) — regime confidence was a collapsed HMM's posterior
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `analysis/regime.py` (rewritten)
+  - `services/rotation_model_service.py` (`classify_regime` history window)
+  - `services/macro_service.py` (both VNINDEX fetchers)
+  - new `tests/test_regime_confidence.py` (+10)
+  - `CLAUDE.md` §25 (new), §19 (counts)
+- Reason: Tom — *"do tin cay cua thi truong luon la 100% la sai / toi can cong
+  thuc tinh chuan hon (regime thi truong)"*. `sector_regime.confidence` read
+  0.9999998 on nearly every row while the label flipped risk_off → risk_on →
+  risk_off on consecutive days. A confidence that is always 1.0 carries no
+  information, and one attached to a label that flips weekly is actively
+  misleading.
+- Summary:
+  - **The reported symptom was the third defect, not the first.** The fit had
+    collapsed: features were fed raw, their scales differ ~6× (5d return sd
+    0.028 vs 20d vol sd 0.005), and diagonal Gaussian EM is not scale-invariant.
+    Three of four states blew up to hmmlearn's ceiling covariance of 1000 and
+    all 111 observations landed in the survivor. **With one live state the
+    posterior is 1.0 by construction** — the model was not confident, it was
+    degenerate. Standardising gives occupancy `[154 177 470 251]`, max
+    covariance 2.7.
+  - **Too little history.** 180 calendar days is ~111 bars for a 40-parameter
+    model. Now 1500 (~1050 bars, back to 2022), which spans more than one
+    regime — a model fitted inside a single regime cannot label regimes.
+  - **The number answered the wrong question.** Even after both fixes the state
+    posterior sits at ~0.95: a Gaussian HMM is near-certain *which state a bar
+    is in* whenever the states separate at all. That is a property of the fit,
+    not a reason to act. `confidence` now means **P(this label still holds in 5
+    sessions)** — the filtered posterior propagated through the transition
+    matrix. Measured over 300 sessions: predicted 0.69, realised 0.60,
+    calibrated within a few points across the middle three buckets; range
+    0.46–0.91. Live today: `risk_on 0.6472`.
+  - **Filtered, not smoothed — this closes §20.3 P1-4.** `predict_proba` over
+    the whole panel is forward-backward, so it re-decodes history with hindsight
+    and yesterday's published label could silently change. The last bar of a
+    prefix has no future to smooth over, so `predict_proba(X[:t+1])[-1]` is the
+    filtered posterior using public API only (hmmlearn 0.3.3 has no
+    `_do_forward_pass`).
+  - `fit()` now **refuses** a collapsed fit (>1 empty state) and falls back,
+    rather than publishing its 1.0.
+  - The heuristic fallback returned hardcoded 0.6/0.6/0.5/0.5 — made-up numbers
+    wearing the same field name as measured ones. It now reports the share of
+    the last 10 sessions carrying the same label: same semantics as the HMM
+    path, so the two are comparable and neither overstates itself.
+  - **Correction to an earlier claim in this session.** Mid-investigation I
+    reported that `config.DATA_SOURCE = KBS` answers "VNINDEX" with ~1.79 and
+    that this poisoned the classifier. Both halves were wrong, and the fix
+    docstrings said so before they were corrected. Measured: KBS returns 1784.24
+    and VCI 1784.29 for the same day **when given a date range**. And
+    `classify_regime` overwrites `macro_df` with `fetch_vnindex_daily()` before
+    use, so `macro_anchors.vnindex` never reached the classifier at all. The
+    real defect there is narrower: `MacroService._fetch_vnindex` asked for
+    `today..today`, one bad read on 2026-04-16 returned 1.82, and `ingest_now`'s
+    carry-forward — which cannot distinguish a *missing* value from a *wrong*
+    one — copied it into the next 613 rows. Fixed with a 10-day window plus a
+    `VNINDEX_MIN_PLAUSIBLE = 200.0` floor so a bad read returns None and
+    carry-forward keeps the last **good** value.
+  - The 613 existing rows are left as-is and marked `ponytail:` — nothing reads
+    that column, so a backfill would be tidying, not repair.
+- Verification: 217 backend tests pass (207 → +10). `python main.py --regime`
+  writes `risk_on conf=0.6472`; `GET /api/sectors/regime` returns it. ruff
+  unchanged at the 66-finding baseline.
+- Follow-ups:
+  - **`hmmlearn` was missing from the system interpreter that runs pytest**, so
+    every prior regime test had been exercising the heuristic while production
+    (which runs `uv run`, resolving `.venv`) ran the HMM. Installed, and the new
+    tests skip rather than silently pass when it is absent. Worth an environment
+    check in CI — a test suite that runs a different code path than production
+    is a suite that agrees with itself.
+  - The top confidence bucket is overconfident (0.90 predicted vs 0.70 actual).
+    Read >0.85 as "likely", not "certain". Isotonic calibration would fix it and
+    needs more history than 300 sessions to fit honestly.
+  - `CONF_HORIZON = 5` is asserted, not derived. Nothing measured says one
+    trading week is the right horizon for a regime call.
+  - §19's "~30 ruff findings" (§20.2 P3-5) is stale — the baseline is 66 now,
+    grown by later test files, not by this pass.
+
+## 2026-08-24 (3) — edit the entry price; mark the book to market
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `services/trading_state.py` (`update_position`)
+  - `api/routers/state.py` (`PATCH /positions/{symbol}`, `GET /positions/pnl`)
+  - `frontend/src/api/client.ts`, `frontend/src/lib/tradingState.ts`
+  - `frontend/src/components/KillSwitch.tsx`
+  - new `tests/test_position_edit.py` (+13)
+  - `CLAUDE.md` §22.10 (the "no P&L yet" note), §19 (counts)
+- Reason: Tom — *"toi thay muc daily insight co danh dau/vao lenh / can keep
+  track phan nay / cho toi sua gia vao lenh va man hinh kiem soat cac lenh da
+  vao"*. §22.10 shipped the book but stored no way to correct an entry price and
+  no current price, so the "control screen" was a list, not a control.
+- Summary:
+  - `update_position` is a **separate verb from `add_position` on purpose**:
+    `add_position` stamps `opened_at` to today and drops the symbol from the
+    watchlist, both wrong when you are only correcting a price you typed from
+    memory. The price stamped by "Đã vào lệnh" on Daily Insight is the previous
+    close, which is almost never your fill — that is the whole reason this
+    exists.
+  - Partial semantics: `None` means "leave alone", so a negative number is the
+    explicit clear. The alternative — omitted means clear — would silently wipe
+    `qty` on every price edit.
+  - `GET /positions/pnl` marks the book against `PicksUniverseService().peek()`,
+    **never `get_snapshot()`**: a cold cache must return in milliseconds, not
+    block for minutes behind the 18 req/min KBS throttle (the trap
+    `api/routers/insight.py` documents at `/daily`).
+  - It returns `priced` and `count` separately. A P&L computed over 1 of 3 rows
+    must not be readable as the book's P&L, and the header says so when they
+    differ.
+  - Inline cell editing (commit on blur/Enter, revert on Escape) rather than a
+    per-row save button: two editable numbers per row do not justify a form, and
+    commit-on-blur means the value you can see is the value on disk.
+  - `ponytail:` on the P&L handler — last close, not intraday, and no fees or
+    the §18.2/10 sell tax. It is a position tracker, not the backtest cost model.
+- Verification: 230 backend tests pass (217 → +13), `npx tsc --noEmit` clean,
+  13/13 vitest pass, ruff at baseline. Endpoints exercised against the live
+  server: `/api/state/positions/pnl` returns `priced: 1, count: 1` with
+  `as_of: 2026-08-24`.
+- Follow-ups:
+  - **Not verified in a browser.** Both dev servers were already running outside
+    the preview harness, so this pass is endpoint- and type-level only. The
+    inline-edit interaction wants a visual check.
+  - Still no exit price, so realised P&L does not exist — only unrealised. That
+    is the next thing to add if performance attribution is wanted.
+  - A pnl route test pins that `/positions/pnl` is not shadowed by
+    `/positions/{symbol}`; if a GET is ever added to the parameterised route,
+    order matters.
+
 ## 2026-08-24 — §16.11's next experiment ran; the named suspect was wrong
 - Author: Claude Code on behalf of Tom
 - Files:

@@ -5,6 +5,37 @@
 > change must be logged in `MODIFICATION_LOG.md`.
 
 ## CHANGELOG
+- **2026-08-24 (2) — Regime confidence: a collapsed model reporting certainty.**
+  Behaviour change, no schema change, no contract change (`GET
+  /api/sectors/regime` keeps its shape; the `confidence` *value* now spans
+  0.46–0.91 instead of sitting at 0.9999998). Three compounding defects in
+  `analysis/regime.py`: features fed raw to a diagonal Gaussian HMM collapsed
+  3 of 4 states to hmmlearn's ceiling covariance — **with one live state the
+  posterior is 1.0 by construction** — on only ~111 bars of history, and the
+  number reported was the state posterior, which answers "which state is this
+  bar in" rather than "is this call worth acting on". Now: standardised
+  features, 1500 days of history (`services/rotation_model_service.py`), a fit
+  that **refuses** to publish when >1 state is empty, and `confidence` =
+  P(label holds in 5 sessions) via the transition matrix. Uses the **filtered**
+  posterior of the last bar, which closes §20.3 P1-4 (labels were back-painted
+  by forward-backward decoding). The heuristic fallback's hardcoded
+  0.6/0.6/0.5/0.5 is now a measured label-persistence share. Also
+  `services/macro_service.py`: both VNINDEX fetchers get a date range and a
+  `VNINDEX_MIN_PLAUSIBLE = 200.0` floor — one bad single-day read on 2026-04-16
+  was laundered into 613 of 623 `macro_anchors` rows by `ingest_now`'s
+  carry-forward, which cannot tell a missing value from a wrong one. See
+  `CLAUDE.md` §25.
+- **2026-08-24 — Position book gains editing and mark-to-market.** Contract
+  change: `/api/state/*` gains `PATCH /state/positions/{symbol}` (partial edit;
+  `None` leaves a field, a negative clears it) and `GET
+  /state/positions/pnl`. No schema change — `data/trading_state.json` already
+  carried `entry_price`/`qty`, they were just unreachable after creation.
+  `update_position` is deliberately distinct from `add_position`, which
+  restamps `opened_at` and drops the symbol from the watchlist. The P&L handler
+  prices from `PicksUniverseService().peek()` — never `get_snapshot()`, which
+  would block behind the 18 req/min KBS throttle — and returns `priced` and
+  `count` separately so a partial mark cannot be read as the book's P&L.
+  Unrealised only; no exit price is stored.
 - **2026-08-23 (late, 6) — §16.1 stealth gate: AND → score.** Behaviour change,
   no schema change. `analysis/stealth.py` stops requiring all five §16.1
   conditions and emits a `conditions_met` score (0-5); stealth fires at
@@ -473,7 +504,7 @@ the email report) and for backward-compat.
 file rather than the DB:
 | Router | Key endpoints |
 |---|---|
-| `state.py` | `GET /api/state`; `POST /api/state/{halt,capital,positions,watchlist}`; `DELETE /api/state/positions/{symbol}`. Every endpoint returns the whole state, so the client never merges. Backed by `services/trading_state.py` → `data/trading_state.json`. |
+| `state.py` | `GET /api/state`; `POST /api/state/{halt,capital,positions,watchlist}`; `PATCH`/`DELETE /api/state/positions/{symbol}`; `GET /api/state/positions/pnl`. Every mutating endpoint returns the whole state, so the client never merges. `/positions/pnl` is a literal path sharing a prefix with `/positions/{symbol}` — it must stay declared as the only GET on that prefix. Backed by `services/trading_state.py` → `data/trading_state.json`. |
 
 **Removed (legacy, kept in `_trash_20260422/`):** `/api/stocks/*`, `/api/trade/*`, symbol parts of `/api/ml/*`, and the old `/api/agent/*` briefing (replaced by `/api/insight/*` + `trader_agent`).
 

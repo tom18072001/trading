@@ -440,9 +440,34 @@ As of 2026-04-23:
 
 | Suite | Count | Command |
 |---|---|---|
-| Backend (pytest) | 207 | `python -m pytest tests/` |
+| Backend (pytest) | 230 | `python -m pytest tests/` |
 | Frontend (vitest) | 13 | `cd frontend && npm test` |
-| **Total** | **220** | — |
+| **Total** | **243** | — |
+
+> 2026-08-24: +23. `tests/test_regime_confidence.py` (+10) and
+> `tests/test_position_edit.py` (+13).
+>
+> **`hmmlearn` was missing from the interpreter that runs pytest**, while
+> production runs through `uv run` and resolves `.venv`, where it is installed.
+> So every regime test before this date exercised the heuristic fallback while
+> the scheduled job ran the HMM — a suite agreeing with itself about a code path
+> nobody ships. Installed now; the HMM tests `skipif` rather than silently pass
+> when it is absent.
+>
+> The load-bearing regime test is
+> `test_fit_does_not_collapse_on_a_real_length_panel`, which pins the *cause*
+> (three of four states at hmmlearn's ceiling covariance) rather than the
+> symptom Tom reported (confidence stuck at 1.0) — the symptom is a consequence
+> and a future refactor could reproduce it a different way. The fixture is a
+> deliberate two-regime path: a single-regime random walk is exactly the input
+> that collapsed in production, so it cannot tell a working model from a broken
+> one.
+>
+> On the book: `test_edit_does_not_restamp_the_open_date` is the one carrying
+> the feature — it is the whole reason `update_position` exists separately from
+> `add_position`. `test_pnl_route_is_not_shadowed_by_the_symbol_route` guards
+> FastAPI route ordering: `/positions/pnl` and `/positions/{symbol}` share a
+> prefix, and if the literal ever loses you get a position named "pnl".
 
 > 2026-08-23 (late, 6): +14 in `tests/test_stealth_gate.py` — §16.1 after it
 > stopped being a conjunction. The load-bearing one is
@@ -568,7 +593,7 @@ DO change behaviour — they implement §16.9, which was never enforced.
 | ~~P0-5~~ | **CLOSED 2026-08-23** — `foreign_net` was backfilled by commit `b4d1d90`. Measured: **12,616 / 13,470 rows non-zero**, spanning 2023-03-13 → 2026-08-21; `foreign_hit_20d` spans 0.0 → 1.0 with 2,742 rows clearing the §16.1 0.6 threshold. The three `FEATURE_COLS` entries are no longer constant. **Consequence nobody logged at the time:** `analysis/stealth.py` drops cond2 whenever `foreign_net` is all-zero, so the backfill silently took the stealth gate from 3 evaluable conditions to 5 — a behaviour change that arrived as a side effect of a data change. That asymmetry is now explicit in the code (numerator *and* denominator) and pinned by `test_unevaluable_condition_does_not_raise_the_bar`. |
 | ~~P1-1~~ | **CLOSED 2026-08-23**, in the direction of neither number. Doctrine said N=5 / bottom 40%, `analysis/stealth.py` shipped N=3 / bottom 60% — but under a five-way AND **both give zero sectors over 3.5 years**, so the disagreement was never worth what it cost to argue about. §16.1 is a score now; the scanner, `api/routers/stealth.py` and the UI presets read the same two knobs. |
 | P1-3 | Breadth over 5 names takes 6 discrete values (§18.1/6, still open). |
-| P1-4 | Regime labels are back-painted — Viterbi re-decodes the whole history each run, so yesterday's label can change. Use the filtered posterior for the last bar. |
+| ~~P1-4~~ | **CLOSED 2026-08-24** (§25.3). The published label is the filtered posterior of the last bar — `predict_proba(X[:t+1])[-1]`, which has no future to smooth over — so it no longer changes with hindsight. Found while chasing a different symptom: confidence pinned at 1.0. The back-painting was the *third* defect in that chain; the first was a collapsed fit that made the posterior 1.0 by construction. |
 | P2-2 | Two rate-limit buckets in one process: `utils/vnstock_gate` and `picks_universe_service._kbs_throttle`. `/insight/refresh` takes no `job_lock` at all, so a UI refresh overlapping the intraday job runs at 2× the KBS ceiling. |
 | P2-3 | The "intraday" job fetches `interval="1D"` and re-downloads 120 days every 15 minutes (~3,750 calls/day against an 18/min gate). Either fetch real 15m bars or admit it is an EOD pipeline and fix §4/§8. |
 | P3-2 | `generate_report.py` is 1,629 module-level lines with zero tests, and it is the one output read every day. Extract the decision layer. |
@@ -798,6 +823,23 @@ The book stores no exit price, so there is no P&L yet. That is the next thing to
 add if performance attribution is wanted — it is a deliberate stop, not an
 oversight.
 
+> **2026-08-24 — half of that is now done.** The book was a list, not a control:
+> you could mark a pick but not correct the price, and the price it stamped is
+> the *previous close*, which is almost never your fill. `PATCH
+> /api/state/positions/{symbol}` edits entry price and quantity in place, and
+> `GET /api/state/positions/pnl` marks the book against the picks snapshot.
+>
+> `update_position` is deliberately **not** `add_position`: that one restamps
+> `opened_at` to today and drops the symbol from the watchlist, both wrong when
+> you are fixing a typo. `None` means "leave this field alone", so clearing one
+> takes an explicit negative — the alternative silently wipes `qty` on every
+> price edit.
+>
+> The response carries `priced` and `count` separately, because a P&L over 1 of
+> 3 rows is not the book's P&L, and the header says so when they differ.
+> Unrealised only: **still no exit price**, so realised attribution remains the
+> next thing to add.
+
 ## 23. Backtest controls — and `flow_z` was `flow_raw` in disguise — 2026-08-23
 
 ### 23.1 What was unreachable
@@ -950,3 +992,100 @@ day, along with a new `conditions_met` entry for the §16.1 score.
   a formula or a link.
 - Report run history is in memory only. It survives no restart; the log file on
   disk is the durable record.
+
+## 25. Regime confidence — a collapsed model reporting certainty — 2026-08-24
+
+Tom: *"do tin cay cua thi truong luon la 100% la sai"*. Correct, and the
+reported symptom was the **third** defect in the chain, not the first.
+
+### 25.1 What was actually wrong
+
+| # | defect | consequence |
+|---|---|---|
+| 1 | features fed **raw** to a diagonal Gaussian HMM | 3 of 4 states blew up to hmmlearn's ceiling covariance (1000); all 111 bars landed in the survivor |
+| 2 | **180 days** of history (~111 bars) for a 40-parameter model | fitted inside a single regime — a regime model that has never seen a regime change |
+| 3 | `confidence` = the **state posterior** | answers "which state is this bar in", not "is this call worth acting on" |
+
+Defect 1 is why the number was 1.0: **with one live state the posterior is 1.0
+by construction.** The model was not confident, it was degenerate. Feature
+scales differ ~6× (5d return sd 0.028 vs 20d vol sd 0.005) and diagonal
+Gaussian EM is not scale-invariant — the wide column dominates the likelihood,
+the narrow states never win an observation, their covariances run to the
+ceiling. Standardising gives occupancy `[154 177 470 251]`, max covariance 2.7.
+
+History is now 1500 days (~1050 bars, back to 2022). `fit()` **refuses** a
+collapsed fit (>1 empty state) and falls back rather than publishing its 1.0.
+
+### 25.2 The formula
+
+Even with 1 and 2 fixed, the state posterior sits at ~0.95 — a Gaussian HMM is
+near-certain which state a bar is in whenever the states separate at all. That
+is a property of the fit, not a reason to size a position. Meanwhile the label
+flipped 26 times in 260 sessions.
+
+`confidence` now means **P(this label still holds in `CONF_HORIZON` = 5
+sessions)** — the filtered posterior propagated through the transition matrix,
+summed over every state sharing the label.
+
+| | value |
+|---|---|
+| range over 300 sessions | 0.46 – 0.91 (was: 0.9999998 on nearly every row) |
+| mean predicted | 0.69 |
+| mean realised (label actually held) | 0.60 |
+| live 2026-08-24 | `risk_on 0.6472` |
+
+Calibration by bucket: `[0.55,0.70)` predicted 0.64 / actual 0.63,
+`[0.70,0.85)` 0.81 / 0.79 — good in the middle. **The top bucket is
+overconfident: 0.90 predicted, 0.70 actual.** Read >0.85 as "likely", not
+"certain". Isotonic calibration would fix it and needs more than 300 sessions
+to fit honestly.
+
+### 25.3 Filtered, not smoothed — this closes §20.3 P1-4
+
+P1-4: *"Regime labels are back-painted — Viterbi re-decodes the whole history
+each run, so yesterday's label can change. Use the filtered posterior for the
+last bar."*
+
+`predict_proba` over the whole panel is forward-backward, so it re-decodes
+history with hindsight. The last bar of a **prefix** has no future to smooth
+over, so `predict_proba(X[:t+1])[-1]` *is* the filtered posterior — using
+public API only (hmmlearn 0.3.3 has no `_do_forward_pass`).
+
+### 25.4 The heuristic fallback was lying too
+
+It returned hardcoded 0.6 / 0.6 / 0.5 / 0.5 — four made-up numbers wearing the
+same field name as a measured one. It now reports the share of the last 10
+sessions carrying the same label: the same question the HMM path answers,
+measured directly, so the two are comparable.
+
+This matters more than it looks: **`hmmlearn` was absent from the interpreter
+running pytest** while production resolves `.venv` through `uv run`, where it is
+installed. Every regime test before 2026-08-24 exercised the fallback while the
+scheduled job ran the HMM.
+
+### 25.5 A correction, and the narrower defect underneath it
+
+Mid-investigation this session I claimed `config.DATA_SOURCE = KBS` answers
+"VNINDEX" with ~1.79 and that this poisoned the classifier. **Both halves were
+wrong.** Measured: KBS returns 1784.24 and VCI 1784.29 for the same day *when
+given a date range*. And `classify_regime` overwrites `macro_df` with
+`fetch_vnindex_daily()` before use, so `macro_anchors.vnindex` never reached the
+classifier at all.
+
+The real defect is narrower and still worth fixing. `MacroService._fetch_vnindex`
+asked for `today..today`; one bad read on 2026-04-16 returned 1.82; and
+`ingest_now`'s carry-forward — which **cannot distinguish a missing value from a
+wrong one** — copied it into the next 613 of 623 rows. Fixed with a 10-day
+window plus `VNINDEX_MIN_PLAUSIBLE = 200.0`, so a bad read returns None and
+carry-forward keeps the last *good* value. The 613 existing rows are left as-is
+and marked `ponytail:`: nothing reads that column, so a backfill would be
+tidying, not repair.
+
+### 25.6 Open
+- `CONF_HORIZON = 5` is asserted, not derived. Nothing measured says one trading
+  week is the right horizon for a regime call.
+- The top confidence bucket needs calibration (25.2).
+- `generate_report.py` renders "HMM confidence {:.2f}" in four stance strings.
+  Those now read 0.65 instead of 1.00, which is the intended change — but the
+  wording ("Tape đang risk-on (HMM confidence 0.65)") was written when the
+  number was always ~1.0 and never had to mean anything.
