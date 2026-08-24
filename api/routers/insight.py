@@ -27,6 +27,7 @@ from services.picks_universe_service import (
     get_picks_universe,
 )
 from services.trader_agent import get_trader_agent
+from services import insight_refresh as _insight_refresh
 
 log = logging.getLogger(__name__)
 
@@ -429,3 +430,10 @@ def insight_refresh_status(run_id: str | None = None):
 def insight_delta():
     data = insight_daily()
     return {"rows": data["deltas"]}
+
+
+# The refresh runner's last stage returns this same payload. Push the builder
+# down to it here instead of letting it import back up — `services -> api`
+# was a real cycle, quiet only because both ends imported lazily. See
+# `services/insight_refresh.py`'s module docstring.
+_insight_refresh.set_payload_builder(insight_daily)

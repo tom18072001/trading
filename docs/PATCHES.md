@@ -16,7 +16,7 @@
 
 | plan | phạm vi | trạng thái |
 |---|---|---|
-| **Ranh giới module** | Nhóm `services/` theo domain (`ingest / features / decide / report / book / agent`), mỗi package khai báo public API; `tests/test_module_boundaries.py` quét AST chặn import ngược chiều; tách `generate_report.py` (1640 dòng module-level, gửi mail khi `import` — §20.3 P3-2) | **chưa bắt đầu** — rủi ro cao nhất trong 4 phase, cố ý để sau cùng. Mỗi lần move một commit. |
+| **Ranh giới module** | Còn lại: tách `generate_report.py` (1640 dòng module-level, gửi mail khi `import` — §20.3 P3-2) thành `services/report/{data,charts,render}.py` + `main()` | **một nửa xong** (`ARCHITECTURE.md` §4.1). Ranh giới đã có test chặn — nhưng **đo trước rồi mới sửa, và phép đo đổi luôn kế hoạch**: graph `services/` vốn đã là DAG nông (17 module, sâu tối đa 2, 0 vi phạm layer), nên **không file nào phải move**. Thiếu là *cách giữ*, không phải cấu trúc. Bắt được 2 defect: cycle `services → api → services` và `scripts/seed_data.py` import module đã xoá 4 tháng |
 | **Repo clone-được** | `.github/workflows/ci.yml` (pytest + ruff + vitest), `.devcontainer/devcontainer.json`, mục README "Chạy trên máy mới" — DB 22 MB không nằm trong repo nên clone xong app chạy nhưng **rỗng** nếu không backfill | **chưa bắt đầu** — làm sau khi cấu trúc ổn định, CI mới bảo vệ đúng thứ |
 
 ---

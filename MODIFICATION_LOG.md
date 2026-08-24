@@ -14,6 +14,62 @@
 
 ---
 
+## 2026-08-24 (11) — the service layer's arrows stop being folklore
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `tests/test_module_boundaries.py` — **new**, 42 tests (AST, no imports)
+  - `services/insight_refresh.py` — `set_payload_builder()`; stage 4 no longer
+    imports the router
+  - `api/routers/insight.py` — registers `insight_daily` as that builder
+  - `scripts/seed_data.py` — **deleted**
+  - `ARCHITECTURE.md` §4.1 — the layer table as a contract
+- Reason: Tom — *"làm microservice để khi cập nhật các tính năng và thay đổi
+  không bị biến dạng các phần còn lại"* / *"sau agent AI sửa cũng dễ dàng hơn"*.
+  Architecture chosen earlier: **hard boundaries, one process** — not process
+  splitting.
+- Summary:
+  - **Measured before moving anything, and the measurement changed the plan.**
+    The service graph is *already* a shallow DAG: 17 modules, max depth 2, and
+    every edge already legal under the proposed layer table. So the planned
+    reshuffle into `ingest/ features/ decide/ report/ book/ agent/` would have
+    moved 17 files, rewritten every import across `api/`, `main.py`,
+    `generate_report.py` and `scripts/`, and risked the exact failure
+    `MODIFICATION_LOG.md` 2026-07-19 already records (a path move leaving Task
+    Scheduler shortcuts pointing at a dead directory) — to arrive at the graph
+    that exists today. What the layer lacked was not structure; it was a way to
+    **stay** structured. The table is declared and enforced; no file moved.
+  - **The check found the one real violation, and it was a cycle.**
+    `insight_refresh` did `from api.routers.insight import insight_daily`
+    *inside* a function while `api.routers.insight` imports `insight_refresh` at
+    module level. Both ends lazy, so Python never complained — and the service's
+    own docstring said "this file deliberately has no dependency on FastAPI".
+    Inverted via `set_payload_builder()`: the router pushes down at import time.
+    Stage 4 with no builder returns the refresh block alone rather than raising,
+    which is what a unit test or a script importing the runner sees.
+  - **And a dead import ruff structurally cannot see.** `scripts/seed_data.py`
+    imported `services.data_service`, deleted 2026-04-22 (Phase 16) — broken for
+    four months because nothing runs it. `F401` flags imports that are *unused*;
+    nothing flagged one that is *unresolvable*. The script seeded the retired
+    170-symbol `stocks` table, so it was deleted, not repaired.
+  - **Function-local imports are counted deliberately.** Both defects were
+    invisible at module level. Deferring an import hides a dependency from the
+    reader without removing it.
+  - Two tests guard the table itself: a new module with no layer fails, and a
+    layer entry naming a module that no longer exists fails. Without the second,
+    the table slowly becomes a description of a repo that used to be.
+  - `test_the_book_layer_stays_dependency_free` is split out from the generic
+    check because its reason is operational: `trading_state` holds the
+    kill-switch and the scheduler reads it off disk with no HTTP client (§22.10).
+- Verification: `python -m pytest tests/ -q` → **307 passed** (265 + 42). Ruff
+  **68 → 67** (the deleted script carried one). Cycle fix confirmed live:
+  `ir._payload_builder is r.insight_daily` → True.
+- Follow-ups: `generate_report.py` (1,640 module-level lines, mails on import —
+  §20.3 P3-2) is **not** split. It is the one remaining structural offender and
+  wants its own commit; the boundary test does not cover it because it is not
+  under `services/`.
+
+---
+
 ## 2026-08-24 (10) — a repo that can say what plan it is on
 - Author: Claude Code on behalf of Tom
 - Files:

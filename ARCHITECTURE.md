@@ -309,7 +309,10 @@ Trading/
 │   ├── backfill_close_idx.py
 │   ├── backfill_foreign.py
 │   ├── replay_stealth.py             # re-emit stealth events from history
-│   ├── seed_data.py                  # seeds sectors + constituents table
+│   │                                 # (seed_data.py deleted 2026-08-24 — it
+│   │                                 #  seeded the retired 170-symbol `stocks`
+│   │                                 #  table via services.data_service, gone
+│   │                                 #  since Phase 16)
 │   ├── check_db.py                   # integrity + schema diff
 │   ├── create_key.py                 # API key bootstrap
 │   ├── fix_close_idx.py              # one-shot close_idx repair
@@ -366,6 +369,59 @@ Trading/
 │  vnstock + macro fetchers                    │
 └──────────────────────────────────────────────┘
 ```
+
+### 4.1 Service-layer boundaries — enforced, not aspirational (2026-08-24)
+
+The box labelled SERVICE LAYER above is 17 modules, and until now the arrows
+inside it were folklore. They are a **contract** now, declared in
+`tests/test_module_boundaries.py` and checked by an AST walk on every test run.
+
+| layer | modules | may import from |
+|---|---|---|
+| `ingest` | `sector_ingest_service` · `fast_ingest` · `macro_service` · `foreign_flow` | — |
+| `features` | `flow_feature_service` · `flow/` | `ingest` |
+| `decide` | `rotation_model_service` · `sector_signal_service` · `picks_universe_service` · `picks_scoring` · `picks_news` · `unified_picks` · `backtest_service` | `ingest`, `features`, `decide` |
+| `book` | `trading_state` · `risk_service` | — |
+| `report` | `report_runner` | `decide`, `book` |
+| `agent` | `trader_agent` · `insight_refresh` | `decide`, `agent` |
+
+Two rules beyond the table:
+
+- **No module under `services/` may import `api`, `main` or `generate_report`.**
+- **Every `from services.X import …` anywhere in the repo must resolve.**
+
+Non-`services` packages — `config`, `database`, `analysis`, `utils`, `models` —
+are unrestricted. They are shared leaves, not layers; gating them would be
+ceremony.
+
+**The table is descriptive first.** It was read off the graph that already
+existed rather than imposed on it, so no module moved and no import path
+changed. That is the finding, not a shortcut: the service layer was already a
+shallow DAG (17 modules, max depth 2). What it lacked was a way to *stay* one.
+
+**Two real defects fell out on the first run:**
+
+1. `services/insight_refresh.py` did `from api.routers.insight import
+   insight_daily` **inside** a function, and `api/routers/insight.py` imports
+   `insight_refresh` — a genuine `services → api → services` cycle, quiet only
+   because both ends were lazy. Its own module docstring claimed "this file
+   deliberately has no dependency on FastAPI". Inverted: the router now calls
+   `insight_refresh.set_payload_builder(insight_daily)` at import time, so the
+   arrow points one way and stage 4 degrades to the refresh block alone when no
+   builder is registered (a unit test, or a script importing the runner without
+   the API).
+2. `scripts/seed_data.py` imported `services.data_service`, deleted 2026-04-22
+   in Phase 16 — broken for four months because nothing runs it. The whole
+   script targeted the retired 170-symbol `stocks` table, so it was deleted
+   rather than repaired. Ruff cannot catch this: `F401` finds imports that are
+   *unused*, not imports that are *unresolvable*.
+
+The `book` layer's emptiness is load-bearing rather than tidy, and has its own
+test saying why: `trading_state` holds the kill-switch, and the scheduler reads
+it straight off disk with no HTTP client (`CLAUDE.md` §22.10). If it grew a
+dependency on the model layer, halting the 17:00 publish would start to require
+the model layer to import cleanly — exactly the situation you are in when you
+want to halt it.
 
 ---
 

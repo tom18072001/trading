@@ -25,6 +25,13 @@ at a time — the second caller just reads the running run's state.
 
 This file deliberately has no dependency on FastAPI; the router imports the
 public helpers directly so the runner is unit-testable in isolation.
+
+Stage 4 needs the `/daily` payload, which the router builds. It used to reach
+*up* for it — `from api.routers.insight import insight_daily`, inside the
+function, which made `services -> api -> services` a real import cycle that only
+stayed quiet because both ends were lazy. The router now pushes its builder down
+via `set_payload_builder()` at import time, so the arrow points one way and the
+sentence above is true again.
 """
 from __future__ import annotations
 
@@ -52,6 +59,24 @@ _ALL_STAGES = (
     STAGE_QUEUED, STAGE_PUBLISH, STAGE_UNIVERSE,
     STAGE_AGENT, STAGE_ASSEMBLE, STAGE_DONE,
 )
+
+
+# ---------- Payload builder (injected by the router) -----------------------
+
+#: Stage 4 assembles the same dict `GET /api/insight/daily` returns. That
+#: builder lives in the router, one layer up, so the router registers it here
+#: rather than the service importing it back down — see the module docstring.
+#: None means "not registered", which is what a unit test or a script that
+#: imports this module without the API sees; stage 4 then returns the refresh
+#: block alone instead of raising.
+_payload_builder: "Callable[[], dict[str, Any]] | None" = None
+
+
+def set_payload_builder(fn: "Callable[[], dict[str, Any]] | None") -> None:
+    """Register the `/daily` payload builder. Called once by
+    `api.routers.insight` at import time."""
+    global _payload_builder
+    _payload_builder = fn
 
 
 # ---------- Run state ------------------------------------------------------
@@ -332,8 +357,7 @@ def _default_pipeline(run: RefreshRun) -> dict[str, Any]:
 
     # --- Stage 4: assemble /daily payload ---
     set_progress(run, STAGE_ASSEMBLE, "Đang tổng hợp kết quả…")
-    from api.routers.insight import insight_daily
-    data = insight_daily()
+    data = _payload_builder() if _payload_builder is not None else {}
     payload = {
         **data,
         "refresh": {
@@ -390,6 +414,7 @@ __all__ = [
     "STAGE_ERROR",
     "get_refresh_runner",
     "reset_refresh_runner_for_tests",
+    "set_payload_builder",
     "set_progress",
     "update_progress_counts",
 ]
