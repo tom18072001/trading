@@ -844,6 +844,7 @@ had been running a file deleted on 2026-06-18. What survives:
 
 ```
 README.md · CLAUDE.md · ARCHITECTURE.md · MODIFICATION_LOG.md · AGENTS.md   ← root, entry points
+docs/PATCHES.md         ← plan lifecycle: what is running, what is done (2026-08-24)
 specs/                  ← one topic per file, referenced from 5 .py docstrings; untouched
 docs/reference/         ← ALGORITHM.md, GLOSSARY_VI.md
 docs/reviews/           ← the dated reviews (§21: dated records keep their names)
@@ -852,6 +853,45 @@ docs/reviews/           ← the dated reviews (§21: dated records keep their na
 **No Python file moved.** `scripts/jobs/*.bat` invoke `main.py` from the repo
 root under Task Scheduler, and `MODIFICATION_LOG.md` 2026-07-19 already records
 one path move that left shortcuts pointing at a dead directory.
+
+> **2026-08-24 (10) — the four documents now divide cleanly.** Tom asked for
+> "một file update patch chung" and for the repo to say **what the current plan
+> is**, which nothing did: a finished plan left a `MODIFICATION_LOG.md` entry
+> and a `CLAUDE.md` section, and an *unfinished* one left nothing at all. So
+> "what are we doing now" was only answerable by reading a plan file outside the
+> repo, in `~/.claude/plans/`, which no reviewer or agent would ever find.
+>
+> | file | answers | shape |
+> |---|---|---|
+> | `CLAUDE.md` | what the system **must** be | doctrine, amended in place |
+> | `ARCHITECTURE.md` | what the contracts **are** | layers + dated changelog |
+> | `MODIFICATION_LOG.md` | what **changed**, and why | append-only, one entry per change |
+> | `docs/PATCHES.md` | which plan is **running**, which is **done** | two tables, one line per plan |
+>
+> `PATCHES.md` deliberately holds **one line per plan** and points elsewhere for
+> the reasoning. A patch index that grows into a second changelog is a second
+> changelog, and two changelogs disagree — which is the exact failure §21 logged
+> for versioned filenames and §20.4 logged for plan-vs-code drift.
+>
+> **The audit that came with it found the retired docs were mostly not retired.**
+> Of 23 stale-looking matches, 19 are dated changelog entries in
+> `ARCHITECTURE.md` / `CLAUDE.md` / `ALGORITHM.md` recording that OpenClaw *was*
+> retired and the 170-symbol system *was* replaced — §21 protects those, and
+> rewriting them would erase the record that the change happened. The genuinely
+> wrong content was concentrated elsewhere and is fixed: two specs describing
+> things that never shipped or shipped differently (`SPEC_INTRADAY_VNSTOCK.md`,
+> `REDESIGN_PHASE15.md`), one spec carrying Ollama defaults dropped a day
+> earlier (`trader_agent.md`), one spec naming an endpoint that was never built
+> (`daily-insight.md` §4.4 `send-gmail`), and `GLOSSARY_VI.md`.
+>
+> **`GLOSSARY_VI.md` was the dangerous one**, because it is the file written for
+> the person who is not reading the code. It still taught the 5/5 stealth gate
+> (unreachable — §16.1), still defined `confidence` as "how sure the model is"
+> (it is P(label survives 5 sessions) — §25.2), described the kill-switch as
+> firing *automatically* after three sentinel hits (it is manual — §22.10), and
+> said T+2.5 in calendar days (it is 2 *sessions*, holiday-aware). Every one of
+> those would have led a reader to act. Corrected, each pointing at the section
+> that governs it.
 
 
 ### 22.8 One design system, one action vocabulary — 2026-08-23

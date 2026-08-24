@@ -3,6 +3,14 @@
 Status: ACTIVE (2026-04-18). Replaces the legacy OpenClaw "Trung" agent.
 Module: `services/trader_agent.py`.
 
+> **Default transport corrected 2026-08-24.** The `local` section below was
+> written for Ollama on `:11434` with `qwen3:8b`. **Those defaults were dropped
+> on 2026-08-23** — Ollama was never running on this box, so the agent had been
+> failing on every run. `local` names the *transport*, not where the model runs:
+> it points at 9Router (`LOCAL_BASE_URL` default `http://localhost:20128/v1`),
+> a local router fronting hosted Claude models, `LOCAL_MODEL` default
+> `claude-opus-5`. See `CLAUDE.md` §14, which is the source of truth for this.
+
 ## 1. Purpose & non-goals
 
 **Purpose.** Produce a short, structured BUY/AVOID recommendation for today
@@ -30,9 +38,10 @@ selects one of three transports:
 Plain `httpx` POST to an OpenAI-compatible `/chat/completions` endpoint —
 Ollama, LM Studio and llama.cpp's server all speak this shape.
 
-- `LOCAL_BASE_URL` (default `http://localhost:11434/v1`), `LOCAL_MODEL`
-  (default `qwen3:8b`), `LOCAL_API_KEY` (Ollama ignores it; LM Studio wants
-  a non-empty value).
+- `LOCAL_BASE_URL` (default `http://localhost:20128/v1` — 9Router; was
+  `:11434` for Ollama until 2026-08-23), `LOCAL_MODEL` (default
+  `claude-opus-5`; was `qwen3:8b`), `LOCAL_API_KEY` (empty = no
+  `Authorization` header; LM Studio wants a non-empty value).
 - No API key, no per-call cost, no internet egress, **no `claude_agent_sdk`
   subprocess**. `cost_usd` is reported as `0.0`.
 - `temperature=0.3`, non-streaming — the reply is ~500 tokens and the caller
@@ -40,10 +49,11 @@ Ollama, LM Studio and llama.cpp's server all speak this shape.
 - Errors are made actionable: connection refused → "is Ollama running?";
   HTTP error → status + body + "is model '<tag>' pulled?".
 
-Sizing note: an 8B at Q4 is ~5GB and stays fully on a 6GB card. Expect
-~20–40s for a full VN JSON reply, comfortably inside the 120s wall. A
-6GB-VRAM / 32GB-RAM box can go bigger with a small-active-param MoE
-(e.g. Qwen3.6 35B-A3B) via CPU-expert offload — raise `AGENT_TIMEOUT_SEC`.
+Sizing note (applies only if you point `LOCAL_BASE_URL` at an actual local
+model server, which the shipped default does not): an 8B at Q4 is ~5GB and
+stays fully on a 6GB card. Expect ~20–40s for a full VN JSON reply, inside the
+120s wall. A 6GB-VRAM / 32GB-RAM box can go bigger with a small-active-param
+MoE via CPU-expert offload — raise `AGENT_TIMEOUT_SEC`.
 
 ### `glm`
 

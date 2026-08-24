@@ -1,6 +1,19 @@
 # Feature E — Daily Insight
 
 > Route `/insight` • replaces Briefing • Phase 15.
+>
+> **Status: SHIPPED, with three deltas from what this file describes.**
+> Reconciled 2026-08-24; the spec text below is left intact as the original
+> intent, with the deltas marked inline.
+> 1. The narrative is written by `services.trader_agent.TraderAgent` ("Minh"),
+>    not the OpenClaw "Trung" worker, which was retired 2026-04-18 (`CLAUDE.md`
+>    §14, `specs/trader_agent.md`).
+> 2. `POST /api/insight/send-gmail` (§4.4) **was never built.** Sending the
+>    daily report on demand is `POST /api/state/report/send` — an operator
+>    action alongside the kill-switch, running `generate_report.py` as a
+>    subprocess (`CLAUDE.md` §24.3).
+> 3. `/api/insight/refresh` is async since 2026-04-20 — see §4.5, which is
+>    current.
 
 ## 1. Question this view answers
 **"Hôm nay có gì đáng chú ý tôi chưa biết, và tôi nên làm gì?"**
@@ -16,7 +29,8 @@
 
 ## 3. Layout (top-to-bottom)
 1. **Headline narrative** (LLM-composed, top of page): 4–8 sentences,
-   written by OpenClaw "Trung" agent. Must reference specific sectors, z
+   written by `services.trader_agent` "Minh" (was: OpenClaw "Trung"; delta 1
+   above). Must reference specific sectors, z
    values, and (if applicable) historical analogues.
 2. **Top 3 deltas vs yesterday** — cards:
    - Biggest `flow_z20` change
@@ -27,8 +41,8 @@
 3. **Action list** — 3 bullet points the trader should execute/check today.
 4. **Raw data drawer** (collapsed): the old Briefing JSON for users who want
    to verify.
-5. **Send to Gmail button** — same OpenClaw Gmail template, kept for
-   compatibility.
+5. **Send to Gmail button** — shipped as `POST /api/state/report/send`, not as
+   an `/insight` endpoint (delta 2 above).
 
 ## 4. Backend contract
 
@@ -75,7 +89,11 @@ response:
   }
 ```
 
-### 4.4 `POST /api/insight/send-gmail` (keeps legacy OpenClaw Gmail flow)
+### 4.4 ~~`POST /api/insight/send-gmail`~~ — NOT BUILT
+Superseded by `POST /api/state/report/send` (`CLAUDE.md` §24.3). It runs
+`generate_report.py` as a subprocess, because that file mails as a side effect
+of `import` (§20.3 P3-2), and it lives under `/state/*` because sending the
+report is an operator action, not model output.
 
 ### 4.5 Async refresh (2026-04-20)
 The old `POST /api/insight/refresh` ran the full pipeline (publish signals →

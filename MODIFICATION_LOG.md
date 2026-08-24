@@ -14,6 +14,51 @@
 
 ---
 
+## 2026-08-24 (10) — a repo that can say what plan it is on
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `docs/PATCHES.md` — **new.** Two tables: "Đang làm" / "Đã xong"
+  - `CLAUDE.md` §22.7 — the four-document division of labour; the audit result
+  - `docs/reference/GLOSSARY_VI.md` — stealth gate, confidence, kill-switch,
+    T+2, stealth presets
+  - `specs/daily-insight.md`, `specs/trader_agent.md`,
+    `specs/SPEC_INTRADAY_VNSTOCK.md`, `specs/REDESIGN_PHASE15.md` — status
+    headers naming what shipped differently or never shipped
+- Reason: Tom — *"các tài liệu retired xóa đi, các plan mới nhớ ghi lại, plan
+  nào xong thì ghi lại vào 1 file update patch chung, plan cũ xóa đi, plan hiện
+  tại đang là gì"*.
+- Summary:
+  - **The gap was the unfinished plan, not the finished one.** A completed plan
+    already left two records (a log entry, a `CLAUDE.md` section). A plan *in
+    progress* left none — so "what is being worked on" lived only in
+    `~/.claude/plans/*.md`, outside the repo, where no reviewer or future agent
+    would look. `docs/PATCHES.md` is one line per plan with the commit hashes,
+    and it points at `MODIFICATION_LOG.md` for the reasoning rather than
+    repeating it. A patch index that grows into a second changelog is a second
+    changelog, and two changelogs disagree.
+  - **Most "retired" docs were not retired.** 19 of 23 stale-looking matches are
+    dated changelog lines recording that OpenClaw *was* replaced and the
+    170-symbol system *was* retired. §21 protects dated records; deleting them
+    erases the evidence the change happened. Left alone deliberately.
+  - **`GLOSSARY_VI.md` was the file actually carrying wrong instructions**, and
+    it is the one written for the reader who is not reading the code. Four
+    corrections, each of which would have changed how someone acted: the stealth
+    gate was taught as 5/5 (measured unreachable — 0.3% of rows, longest run 2
+    sessions against a 3-session rule); `confidence` was defined as model
+    certainty (it is P(label survives 5 sessions), and the 1.00 it used to print
+    was a *collapsed* HMM, not a confident one); the kill-switch was described
+    as firing automatically after three sentinel hits (it is manual, from
+    `/positions?tab=risk` or `TRADING_HALT`); and T+2.5 was stated in calendar
+    days when settlement counts trading days. Added the §16.14 warning that
+    `ACCUMULATE` has not beaten the base rate and reads as a watchlist.
+- Verification: `python -m pytest tests/ -q` → **265 passed**. Stale-doc grep
+  returns only §21-protected dated records plus four sentences whose subject
+  *is* the retirement. `git status --short | grep -Ei "\.env|\.db|\.bak"` empty.
+- Follow-ups: Phase 2 (module boundaries) and Phase 4.2 (CI + devcontainer) are
+  the two rows left in `PATCHES.md` → "Đang làm".
+
+---
+
 ## 2026-08-24 (9) — the book can follow a trade, not just record one
 - Author: Claude Code on behalf of Tom
 - Files:
