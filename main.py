@@ -119,6 +119,28 @@ def cmd_risk_sentinel() -> None:
             print(f"  - {b}")
 
 
+def cmd_daily_watch(top_n: int = 5) -> None:
+    """Sổ + shortlist, ghi ra report/watch_<date>.md và data/watch_latest.json.
+
+    Không gửi email (Tom 2026-09-16: "tạm thời chưa cần nhận email, để sau").
+    Logic ở services/daily_watch_service.py — skill chỉ gọi lệnh này rồi tóm tắt,
+    nó không sinh lại code phân tích.
+    """
+    from services import daily_watch_service
+
+    payload = daily_watch_service.run(top_n=top_n)
+    alerts = payload["alerts"]
+    print(f"[main] daily_watch: {len(payload['book']['positions'])} vị thế, "
+          f"{len(alerts)} cần quyết định, {len(payload['shortlist'])} ứng viên "
+          f"(dữ liệu phiên {payload['data_as_of']})")
+    for a in alerts:
+        sr = a.get("sell_range") or {}
+        print(f"  - {a['kind']}: {a['symbol']} @ {a['last']} "
+              f"(cửa sổ bán {sr.get('sell_from')} -> {sr.get('sell_by')})")
+    for f in payload.get("_written", []):
+        print(f"  -> {f}")
+
+
 # ---------- compound commands (ad-hoc only) ----------
 
 def cmd_ingest() -> None:
@@ -165,6 +187,10 @@ def main() -> None:
                         help="Write signals (job: sector_signal_publish)")
     parser.add_argument("--risk-sentinel", dest="risk_sentinel", action="store_true",
                         help="Stop-loss breach scan (job: sector_risk_sentinel)")
+    parser.add_argument("--daily-watch", dest="daily_watch", action="store_true",
+                        help="Sổ + shortlist ra file (job: daily_watch)")
+    parser.add_argument("--top", type=int, default=5,
+                        help="Số ứng viên trong --daily-watch (mặc định 5)")
     # compound (ad-hoc)
     parser.add_argument("--ingest", action="store_true",
                         help="Shorthand: --macro + --intraday + --eod-rollup")
@@ -191,6 +217,7 @@ def main() -> None:
     if args.rotation_predict:  cmd_rotation_predict();  ran = True
     if args.publish:           cmd_publish();           ran = True
     if args.risk_sentinel:     cmd_risk_sentinel();     ran = True
+    if args.daily_watch:       cmd_daily_watch(args.top); ran = True
     if not ran:
         parser.print_help()
 

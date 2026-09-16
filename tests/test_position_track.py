@@ -19,7 +19,10 @@ from datetime import date
 import pytest
 from fastapi.testclient import TestClient
 
-from api.routers.state import SETTLEMENT_SESSIONS, _track
+# Chuyển khỏi api/routers/state.py ngày 2026-09-16: job có lịch cần đúng định
+# nghĩa "đã chạm stop chưa", mà không gọi được một route (§22.11).
+from services.position_tracking import SETTLEMENT_SESSIONS
+from services.position_tracking import track as _track
 from services import trading_state
 from utils.clock import next_trading_day, sessions_between
 

@@ -99,6 +99,21 @@ $CanonicalJobs = @(
         Cron    = "0 17 * * 1-5"
     },
     @{
+        # Added 2026-09-16 on Tom's request: book + stop alerts + shortlist to
+        # report/watch_<date>.md. No email yet ("tam thoi chua can nhan email").
+        #
+        # NOTE the trigger below is -Weekly Mon..Fri, not -Daily like every job
+        # above it. Those say "1-5" in Cron but register a -Daily trigger, so
+        # they DO fire at weekends -- harmlessly, since there is no new session.
+        # This one is honest about it because Tom asked for Mon-Fri explicitly.
+        Name    = "daily_watch"
+        Bat     = "job_daily_watch.bat"
+        Trigger = { New-ScheduledTaskTrigger -Weekly -At "17:30" `
+                        -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday }
+        Cron     = "30 17 * * 1-5"
+        RunLevel = "Limited"
+    },
+    @{
         Name    = "sector_risk_sentinel"
         Bat     = "job_sector_risk_sentinel.bat"
         Trigger = {
@@ -151,8 +166,14 @@ if (-not $KeepLegacy) {
 # ---------- step 2: register canonical set --------------------------------
 Write-Host "[2/2] Registering canonical section 8 jobs ..." -ForegroundColor Cyan
 
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME `
-                -LogonType Interactive -RunLevel Highest
+# Per-job run level. Everything defaults to Highest (that is what the original
+# eight registered as), but a job that only runs python and writes files does
+# not need privilege -- and at Limited it registers WITHOUT an elevated shell,
+# which is why daily_watch could be added on 2026-09-16 without one.
+function Get-JobPrincipal([string]$level) {
+    New-ScheduledTaskPrincipal -UserId $env:USERNAME `
+        -LogonType Interactive -RunLevel $level
+}
 $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
                 -DontStopIfGoingOnBatteries -StartWhenAvailable `
                 -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
@@ -166,6 +187,11 @@ foreach ($job in $CanonicalJobs) {
 
     $taskName = "$NamePrefix$($job.Name)"
     $trigger  = & $job.Trigger
+    # PS 5.1: `if` is a statement, not an expression -- it cannot be passed
+    # inline as an argument. Assign first.
+    $runLevel = 'Highest'
+    if ($job.RunLevel) { $runLevel = $job.RunLevel }
+    $principal = Get-JobPrincipal $runLevel
     $action   = New-ScheduledTaskAction -Execute "cmd.exe" `
                     -Argument ("/c `"{0}`"" -f $bat) `
                     -WorkingDirectory $TradingRoot

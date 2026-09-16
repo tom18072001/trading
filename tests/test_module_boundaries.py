@@ -53,6 +53,10 @@ LAYER: dict[str, str] = {
     "picks_news": "decide",
     "unified_picks": "decide",
     "backtest_service": "decide",
+    # sell_range says WHEN to sell -- that is an opinion, so "decide". It imports
+    # nothing from services/ (only utils.clock), so it would also satisfy "book";
+    # the layer is chosen by what it means, not by what it happens to import.
+    "sell_range": "decide",
     # book — what the operator actually did. Deliberately depends on nothing:
     # the kill-switch must be readable by the scheduler process, which has no
     # HTTP client and must not drag the model layer in to read one bool (§22.10).
@@ -60,6 +64,15 @@ LAYER: dict[str, str] = {
     "risk_service": "book",
     # report / agent — the two output surfaces.
     "report_runner": "report",
+    # position_tracking marks the book against snapshot prices, so it needs BOTH
+    # book and decide — which is exactly what "report" is allowed and what "book"
+    # is not. It is not in "book" on purpose: that layer must stay importable by
+    # the scheduler with no model layer behind it (see the test below).
+    "position_tracking": "report",
+    # daily_watch_service composes position_tracking (report) with the picks
+    # layer (decide) — it is the read-model behind the daily_watch job and the
+    # skill. Nothing imports it, so it is a leaf of the report layer.
+    "daily_watch_service": "report",
     # package: the pure pieces pulled out of generate_report.py on 2026-08-24
     # (charts, SQL reads, formatters). Imports nothing from services/ — it is
     # given its cursor and its data rather than fetching them, which is what
@@ -77,7 +90,10 @@ ALLOWED: dict[str, set[str]] = {
     "features": {"ingest"},
     "decide": {"ingest", "features", "decide"},
     "book": set(),
-    "report": {"decide", "book"},
+    # "report" includes itself for the same reason "decide" does: composing two
+    # read-models is normal and does not create an upward edge. Added 2026-09-16
+    # when daily_watch_service began building on position_tracking.
+    "report": {"decide", "book", "report"},
     "agent": {"decide", "agent"},
 }
 
