@@ -238,6 +238,21 @@ def render(payload: dict[str, Any]) -> str:
               f"| {sr.get('sessions_held') or '—'} "
               f"| {_fmt(sr.get('band_lo'))} – {_fmt(sr.get('band_hi'))} "
               f"| {sr.get('sell_from') or '—'} → {sr.get('sell_by') or '—'} |")
+        no_date = [p.get("symbol") for p in b["positions"]
+                   if (p.get("sell_range") or {}).get("peak_basis") != "since_entry"]
+        if no_date:
+            a("")
+            a(f"> 🟠 **{', '.join(no_date)} chưa có ngày mua**, nên không tính được "
+              "cửa sổ bán lẫn range giá — range neo ở đỉnh *kể từ lúc vào lệnh*, và "
+              "không có ngày vào lệnh thì không có đỉnh nào để neo. Điền bằng "
+              "`PATCH /api/state/positions/{symbol}` với `opened_at`.")
+        no_px = [p.get("symbol") for p in b["positions"] if p.get("last") is None]
+        if no_px:
+            a("")
+            a(f"> 🟠 **{', '.join(no_px)} không có giá** — ngoài universe của hệ "
+              "thống, nên không chấm được P&L và không theo dõi được. "
+              "Universe là bộ lọc **mua**; dùng nó làm danh sách **theo dõi** là một "
+              "defect đã ghi nhận, chưa sửa.")
         a("")
         a(f"Chấm được **{b['priced']}/{b['count']}** vị thế"
           + (f" · tổng P&L {_fmt(b['total_pnl_pct'], '%')}" if b["total_pnl_pct"] is not None else ""))

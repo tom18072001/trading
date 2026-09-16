@@ -146,7 +146,8 @@ def set_capital(capital_mn: float) -> dict[str, Any]:
 def add_position(symbol: str, sector_code: str = "", side: str = "BUY",
                  entry_price: float | None = None, qty: float | None = None,
                  note: str = "", stop: float | None = None,
-                 target: float | None = None, thesis: str = "") -> dict[str, Any]:
+                 target: float | None = None, thesis: str = "",
+                 opened_at: str | None = None) -> dict[str, Any]:
     """Idempotent on (symbol, side): re-marking a pick updates it, not duplicates.
 
     `stop` / `target` / `thesis` are the recommendation the pick was made on.
@@ -175,7 +176,12 @@ def add_position(symbol: str, sector_code: str = "", side: str = "BUY",
         # opened_at). Chỉ khi SỬA mức mới cần đóng dấu ngày.
         "stop_set_at": None,
         "target_set_at": None,
-        "opened_at": today_str(),
+        # `opened_at` quyết định cửa sổ bán 20-40 phiên, nên đóng dấu hôm nay cho
+        # một lệnh đã mua từ lâu là **bịa một ngày**: cửa sổ sẽ nói "mở sau 20
+        # phiên" cho một vị thế đáng lẽ đã tới hạn. Nhận ngày thật nếu caller
+        # biết; chuỗi rỗng = "không biết", và `sell_range.advise()` để cửa sổ là
+        # None thay vì đoán.
+        "opened_at": today_str() if opened_at is None else (opened_at.strip() or None),
     }
     with _lock:
         s = _read()
@@ -239,7 +245,9 @@ def update_position(symbol: str, side: str = "BUY", *,
             if thesis is not None:
                 p["thesis"] = thesis.strip()
             if opened_at is not None:
-                p["opened_at"] = opened_at.strip()
+                # Chuỗi rỗng = xoá về "không biết", cùng quy ước với số âm ở các
+                # trường giá. Không có nó thì một ngày đã đóng dấu nhầm là vĩnh viễn.
+                p["opened_at"] = opened_at.strip() or None
         if not found:
             raise ValueError(f"no open {side} position for {sym}")
         _write(s)

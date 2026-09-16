@@ -71,9 +71,9 @@ def advise(position: dict, path: list[dict], atr_pct: float | None,
     from utils.clock import next_trading_day, sessions_between, to_market_date
 
     out: dict[str, Any] = {
-        "peak": None, "band_lo": None, "band_hi": None, "give_back": None,
-        "sell_from": None, "sell_by": None, "sessions_held": None,
-        "phase": "unknown", "note": "",
+        "peak": None, "peak_basis": None, "band_lo": None, "band_hi": None,
+        "give_back": None, "sell_from": None, "sell_by": None,
+        "sessions_held": None, "phase": "unknown", "note": "",
     }
 
     entry = position.get("entry_price")
@@ -81,8 +81,14 @@ def advise(position: dict, path: list[dict], atr_pct: float | None,
     peak = max(closes + ([entry] if entry else [])) if (closes or entry) else None
     out["peak"] = peak
 
+    # Range neo ở ĐỈNH KỂ TỪ KHI MUA. Không biết ngày mua thì `track()` trả cả
+    # đuôi 30 phiên, nên "đỉnh" là đỉnh 30 phiên — một con số khác hẳn, và với
+    # một vị thế đang lỗ nó nằm TRÊN giá hiện tại và đọc ra thành target. Đánh
+    # dấu cơ sở thay vì im lặng: một dải tính sai vẫn in ra đẹp như dải tính đúng.
+    out["peak_basis"] = "since_entry" if position.get("opened_at") else "recent_window"
+
     a = _atr_frac(atr_pct)
-    if peak and a:
+    if peak and a and out["peak_basis"] == "since_entry":
         out["band_lo"] = round(peak * (1 - BAND_ATR * a), 2)
         out["band_hi"] = round(peak * (1 + BAND_ATR * a), 2)
         out["give_back"] = round(peak * (1 - GIVE_BACK_ATR * a), 2)
@@ -110,6 +116,10 @@ def advise(position: dict, path: list[dict], atr_pct: float | None,
                                "Ngoài khung này không factor nào sống sót phép đo.")
         except (ValueError, TypeError):
             pass
+
+    if out["peak_basis"] != "since_entry":
+        out["note"] = ("chưa biết ngày mua — không tính được cửa sổ bán, và range "
+                       "giá cũng không tính (đỉnh phải đo từ lúc vào lệnh).")
 
     if last and out["give_back"] and last <= out["give_back"]:
         out["note"] += (f"  Giá đã nhả quá {GIVE_BACK_ATR}×ATR từ đỉnh "
