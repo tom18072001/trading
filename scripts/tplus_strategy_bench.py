@@ -34,6 +34,7 @@ sys.path.insert(0, str(ROOT))
 
 PANEL_DB = ROOT / "data" / "price_panel.db"
 
+from analysis.bench import SLIPPAGE_BPS_PER_SIDE  # noqa: E402
 from config import BACKTEST_FEE_BPS, BACKTEST_SELL_TAX_BPS  # noqa: E402
 from scripts.ticker_alpha_bench import build_features, load_panel  # noqa: E402
 
@@ -245,19 +246,163 @@ def summarise(t: pd.DataFrame, label: str, years: float) -> dict:
         "held": t["held"].mean(),
         "tgt": (t["exit"] == "target").mean(),
         "stp": (t["exit"] == "stop").mean(),
+        "exit_band": (t["exit"].isin(["band", "trend"])).mean(),
         "total": t["ret"].sum() * 100,
         "by_year": t.groupby(t["date"].dt.year)["ret"].mean() * 100,
     }
 
 
+
+# ---------------------------------------------------------------------------
+# Range ban truot len (2026-09-16, theo yeu cau cua Tom: "bo stop nhung phai
+# dua khuyen nghi range ban ... range co the thay doi theo thoi gian neu no van
+# co song len").
+#
+# DAY KHONG PHAI STOP LO, va su khac biet la ca van de:
+#   - stop lo  neo o GIA VAO, ton tai tu phien dau, gioi han khoan LO.
+#   - range ban neo o DINH da dat duoc, chi ton tai SAU khi da lai >= arm_atr,
+#     va gioi han phan NHA LAI. Truoc khi arm, lenh khong co muc thoat nao ca —
+#     dung nghia "bo stop": mot lenh am khong bao gio bi quet ra.
+#
+# `hi_atr` la canh tren cua range (muc cang gia de ban vao). No khong phai dieu
+# kien thoat trong phep do nay: khi con trend, dinh tu dich len nen canh tren
+# cung dich len, va "ban vao canh tren" la mot quyet dinh cua nguoi doc chu
+# khong phai mot luat co the do bang gia dong cua.
+# ---------------------------------------------------------------------------
+
+def run_trail(entries, f, p, *, lo_atr: float, max_hold: int, min_dv: float,
+              cost: float, arm_atr: float = 1.0, trend_exit: bool = False,
+              ) -> pd.DataFrame:
+    op, lo, cl = p["open"], p["low"], p["close"]
+    atr = f["atr_pct"] / 100.0
+    sma20 = f["sma20"]
+    elig = (f["dv20"] > min_dv) & entries.fillna(False) & atr.notna()
+
+    OP, LO, CL = op.values, lo.values, cl.values
+    S20 = sma20.values
+    A, E = atr.values, elig.values
+    dates, syms = op.index, list(op.columns)
+
+    out = []
+    for i in range(len(dates) - max_hold - 2):
+        row = np.flatnonzero(E[i])
+        if row.size == 0:
+            continue
+        for j in row:
+            entry, a = OP[i + 1, j], A[i, j]
+            if not np.isfinite(entry) or entry <= 0 or not np.isfinite(a) or a <= 0:
+                continue
+            arm_at = entry * (1 + arm_atr * a)
+            peak, armed = entry, False
+            held, px, why = max_hold, CL[i + max_hold, j], "time"
+            for k in range(1, max_hold + 1):
+                c, low_k = CL[i + k, j], LO[i + k, j]
+                if np.isfinite(c):
+                    peak = max(peak, c)
+                if peak >= arm_at:
+                    armed = True
+                if armed:
+                    band_lo = peak * (1 - lo_atr * a)
+                    if np.isfinite(low_k) and low_k <= band_lo:
+                        held, px, why = k, band_lo, "band"
+                        break
+                    # Trend gay = ban, du chua cham canh duoi. Day la nghia cua
+                    # "neu no van co song len" doc nguoc lai.
+                    if trend_exit and np.isfinite(c) and np.isfinite(S20[i + k, j]) \
+                            and c < S20[i + k, j]:
+                        held, px, why = k, c, "trend"
+                        break
+            if not np.isfinite(px):
+                continue
+            out.append((dates[i], syms[j], entry, px / entry - 1 - cost, held, why))
+    return pd.DataFrame(out, columns=["date", "symbol", "entry", "ret", "held", "exit"])
+
+
+def random_control_trail(entries, f, p, seed: int = 7, **kw):
+    rng = np.random.default_rng(seed)
+    per_day = entries.fillna(False).sum(axis=1)
+    pool = (f["dv20"] > kw["min_dv"]) & f["atr_pct"].notna()
+    fake = pd.DataFrame(False, index=entries.index, columns=entries.columns)
+    for d, k in per_day[per_day > 0].items():
+        cand = pool.columns[pool.loc[d].values]
+        if len(cand) == 0:
+            continue
+        pick = rng.choice(cand, size=min(int(k), len(cand)), replace=False)
+        fake.loc[d, pick] = True
+    return run_trail(fake, f, p, **kw)
+
+
+TRAIL_VARIANTS = {
+    # ten                         (lo_atr, arm_atr, trend_exit)
+    "khong stop, thoat theo gio":  (None,   None,   False),   # nen so sanh (26.10)
+    "range nha 1.5xATR":           (1.5,    1.0,    False),
+    "range nha 2.5xATR":           (2.5,    1.0,    False),
+    "range nha 3.5xATR":           (3.5,    1.0,    False),
+    "range nha 2.5 + arm 2.0":     (2.5,    2.0,    False),
+    "range nha 2.5 + gay trend":   (2.5,    1.0,    True),
+    "chi gay trend thi ban":       (99.0,   1.0,    True),
+}
+
+
+def main_trail(args, f, p, idx, years, cost) -> int:
+    print(f"panel {p['close'].shape[1]} symbols, window {idx[0].date()} .. "
+          f"{idx[-1].date()} ({years:.1f}y)")
+    print(f"cost {cost*100:.2f}% round trip | max hold {args.max_hold} phien")
+    print("KHONG co stop lo trong bat ky bien the nao duoi day: muc thoat chi ton "
+          "tai SAU khi lenh da lai >= arm_atr x ATR.\n")
+
+    rules = ({args.rule: RULES[args.rule]} if args.rule else RULES)
+    for rname, fn in rules.items():
+        ent = fn(f).fillna(False).astype(bool)
+        ent.loc[ent.index < pd.Timestamp(args.start)] = False
+        print("=" * 104)
+        print(f"LUAT VAO LENH: {rname}   (max hold {args.max_hold})")
+        print("=" * 104)
+        print(f"{'hinh hoc thoat':30s} {'n':>6s} {'mean%':>7s} {'med%':>7s} "
+              f"{'win':>6s} {'held':>5s} {'band%':>6s} {'excess':>7s}  theo nam")
+        rows = []
+        for vname, (lo_a, arm_a, tx) in TRAIL_VARIANTS.items():
+            if lo_a is None:
+                t = run(ent, f, p, target_atr=99.0, stop_atr=99.0,
+                        max_hold=args.max_hold, min_dv=args.min_dv, cost=cost)
+                c = random_control(ent, f, p, target_atr=99.0, stop_atr=99.0,
+                                   max_hold=args.max_hold, min_dv=args.min_dv,
+                                   cost=cost)
+            else:
+                kw = {"lo_atr": lo_a, "arm_atr": arm_a, "trend_exit": tx,
+                      "max_hold": args.max_hold, "min_dv": args.min_dv, "cost": cost}
+                t = run_trail(ent, f, p, **kw)
+                c = random_control_trail(ent, f, p, **kw)
+            st, sc = summarise(t, vname, years), summarise(c, vname, years)
+            if not st["n"]:
+                continue
+            st["excess"] = st["mean"] - sc["mean"]
+            st["ctrl_by_year"] = sc["by_year"]
+            rows.append(st)
+        for st in sorted(rows, key=lambda r: -r["excess"]):
+            by = st["by_year"] - st["ctrl_by_year"]
+            cells = " ".join(f"{int(y) % 100}:{v:+.2f}" for y, v in by.items())
+            band = (st["exit_band"] if "exit_band" in st else 0) * 100
+            print(f"{st['label']:30s} {st['n']:>6d} {st['mean']:>7.2f} "
+                  f"{st['median']:>7.2f} {st['win']:>6.2f} {st['held']:>5.1f} "
+                  f"{band:>6.0f} {st['excess']:>+7.2f}  {cells}")
+        print()
+    return 0
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--max-hold", type=int, default=3)
     ap.add_argument("--min-dv", type=float, default=5e6)
-    ap.add_argument("--slippage-bps", type=float, default=15,
+    # Mặc định lấy từ config qua analysis/bench.py (§18.2/9 = 30bps/chiều), KHÔNG
+    # phải 15 gõ tay. Ba script từng chạy ở 15 và một script ở 0, nên cùng một
+    # lệnh được chấm ở 0,40% / 0,70% / 1,00% tuỳ script nào chạy.
+    ap.add_argument("--slippage-bps", type=float, default=SLIPPAGE_BPS_PER_SIDE,
                     help="per side; 15bps is a liquid HOSE name at the open")
     ap.add_argument("--start", default="2023-01-01")
     ap.add_argument("--geometry", default="")
+    ap.add_argument("--trail", action="store_true",
+                    help="do range ban truot len thay vi hinh hoc target/stop co dinh")
+    ap.add_argument("--rule", default="", help="chi mot luat vao lenh")
     args = ap.parse_args()
 
     cost = FEE_ROUND_TRIP + 2 * args.slippage_bps / 10_000.0
@@ -271,6 +416,9 @@ def main() -> int:
           f"({years:.1f}y)")
     print(f"cost {cost*100:.2f}% round trip (fees {FEE_ROUND_TRIP*100:.2f}% + "
           f"slippage {2*args.slippage_bps/100:.2f}%) | max hold {args.max_hold} sessions\n")
+
+    if args.trail:
+        return main_trail(args, f, p, idx, years, cost)
 
     geos = ({args.geometry: GEOMETRIES[args.geometry]} if args.geometry else GEOMETRIES)
     for gname, (ta, sa) in geos.items():

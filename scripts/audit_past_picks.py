@@ -33,13 +33,12 @@ sys.path.insert(0, str(ROOT))
 PANEL_DB = ROOT / "data" / "price_panel.db"
 PICKS_CSV = ROOT / "data" / "past_picks.csv"
 
-from config import (  # noqa: E402
-    BACKTEST_FEE_BPS,
-    BACKTEST_SELL_TAX_BPS,
-    BACKTEST_SETTLEMENT_LAG,
-)
+from config import BACKTEST_SETTLEMENT_LAG  # noqa: E402
 
-ROUND_TRIP = (2 * BACKTEST_FEE_BPS + BACKTEST_SELL_TAX_BPS) / 10_000.0
+# Trước 2026-09-16 đây là phí+thuế thôi, KHÔNG slippage — nên cột "net%" của
+# script này là 0,40%/vòng trong khi ticker_alpha_bench chấm 1,00%. Một cột tên
+# là "net" mà thiếu hơn nửa chi phí thì tệ hơn là không có cột đó.
+from analysis.bench import TOTAL_COST as ROUND_TRIP  # noqa: E402
 HORIZONS = (1, 2, 3, 5, 10, 15)
 
 
@@ -144,7 +143,7 @@ def main() -> int:
           f"{d['date'].nunique()} report dates "
           f"({d['date'].min().date()} .. {d['date'].max().date()})")
     print("entry = next session OPEN (report is written after the close it quotes)")
-    print(f"cost: {ROUND_TRIP*100:.2f}% round trip, before slippage | "
+    print(f"cost: {ROUND_TRIP*100:.2f}% round trip (phí + thuế + slippage) | "
           f"T+{BACKTEST_SETTLEMENT_LAG} settlement\n")
 
     print(f"{'hold':>6s} {'picks%':>8s} {'BASE%':>8s} {'excess%':>9s} "

@@ -38,17 +38,17 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from config import (  # noqa: E402
-    BACKTEST_FEE_BPS,
-    BACKTEST_SELL_TAX_BPS,
-)
+from analysis.bench import TOTAL_COST as COST  # noqa: E402
 from scripts.ticker_alpha_bench import (  # noqa: E402
     FACTORS,
     build_features,
     load_panel,
 )
 
-COST = (2 * BACKTEST_FEE_BPS + BACKTEST_SELL_TAX_BPS) / 10_000.0 + 2 * 0.0015
+# COST từng là `... + 2 * 0.0015` gõ tay ở đây, trong khi ticker_alpha_bench lấy
+# BACKTEST_SLIPPAGE_MIN_PCT = 0.003 từ config. Hai bench chấm cùng một lệnh ở
+# 0,70% và 1,00% một vòng — lệch 3,8 điểm %/năm ở khung 20 phiên, lớn hơn cả
+# biên +1,0pp mà ensemble tuyên bố vượt VNINDEX. Nay một nguồn: analysis/bench.py.
 
 # Everything build_features produces that is a per-name characteristic. Price
 # levels and moving averages are excluded: an absolute price is not a feature,

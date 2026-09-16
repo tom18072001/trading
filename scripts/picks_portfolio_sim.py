@@ -29,6 +29,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from analysis.bench import SLIPPAGE_BPS_PER_SIDE  # noqa: E402
 from config import (  # noqa: E402
     BACKTEST_FEE_BPS,
     BACKTEST_SELL_TAX_BPS,
@@ -148,7 +149,8 @@ def main() -> int:
     ap.add_argument("--max-hold", type=int, default=20)
     ap.add_argument("--stop-atr", type=float, default=0.0, help="0 = no stop")
     ap.add_argument("--min-dv", type=float, default=5e6)
-    ap.add_argument("--slippage-bps", type=float, default=15)
+    # Mặc định từ config qua analysis/bench.py (§18.2/9), không gõ tay 15.
+    ap.add_argument("--slippage-bps", type=float, default=SLIPPAGE_BPS_PER_SIDE)
     ap.add_argument("--start", default="2023-01-01")
     ap.add_argument("--rules", default="")
     args = ap.parse_args()

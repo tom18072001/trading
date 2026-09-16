@@ -22,6 +22,10 @@ output/
 # PicksUniverseService cache (2026-08-23). Rebuilt from vnstock on demand and
 # machine-local; it is a cache, not a source of truth. See CLAUDE.md 22.6.
 data/snapshots/picks_universe.json
+# Bench output (2026-09-16): artifact mỗi lần chạy, sinh lại bằng
+# `ticker_alpha_bench.py --json`. .gitignore KHÔNG có comment cuối dòng —
+# viết chung một dòng thì pattern gồm cả khoảng trắng và không khớp gì cả.
+data/bench_*.json
 # Operator state (2026-08-23): kill-switch flag, position book, watchlist.
 # One trader, one machine — this is Tom's book, not repo content.
 data/trading_state.json
@@ -87,6 +91,10 @@ _audit/*.log
 # sector_intraday_flow.log.1 alone was 78,662 lines. Regenerate with
 # `python generate_report.py` instead of versioning the artefacts.
 report/daily_report_*
+# Daily watch output (2026-09-16). Sinh lai bang `main.py --daily-watch`; ban
+# moi ngay mot file nen commit vao la rac tang tuyen tinh.
+report/watch_*.md
+data/watch_latest.json
 report/secv5_*
 report/sector_flow_*
 report/SAMPLE_*

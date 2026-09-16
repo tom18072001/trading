@@ -39,16 +39,20 @@ sys.path.insert(0, str(ROOT))
 
 PANEL_DB = ROOT / "data" / "price_panel.db"
 
-from config import (  # noqa: E402
-    BACKTEST_FEE_BPS,
-    BACKTEST_SELL_TAX_BPS,
-    BACKTEST_SETTLEMENT_LAG,
-    BACKTEST_SLIPPAGE_MIN_PCT,
-)
+from config import BACKTEST_SETTLEMENT_LAG  # noqa: E402
 
-ROUND_TRIP = (2 * BACKTEST_FEE_BPS + BACKTEST_SELL_TAX_BPS) / 10_000.0
-SLIPPAGE = 2 * BACKTEST_SLIPPAGE_MIN_PCT          # paid on the way in and out
-TOTAL_COST = ROUND_TRIP + SLIPPAGE
+# Chi phí và registry sống ở analysis/bench.py — MỘT định nghĩa. Bản sao gõ tay
+# trong ticker_ranker_experiment.py từng chấm cùng một lệnh ở 0,70% thay vì
+# 1,00%, lệch 3,8 điểm %/năm ở khung 20 phiên (xem docstring file đó).
+from analysis.bench import (  # noqa: E402
+    FACTORS,
+    TOTAL_COST,
+    cost_banner,
+    factor_meta,
+    judge,
+    load_plugins,
+    register,
+)
 
 HORIZONS = (2, 3, 5, 10, 20)
 
@@ -139,14 +143,7 @@ def build_features(p: dict) -> dict[str, pd.DataFrame]:
 # ============================== factors ======================================
 # Every factor returns a score frame. HIGHER = more attractive long.
 
-FACTORS: dict = {}
-
-
-def register(name):
-    def deco(fn):
-        FACTORS[name] = fn
-        return fn
-    return deco
+# FACTORS / register: import từ analysis.bench ở đầu file.
 
 
 @register("A_shipped_score")
@@ -579,13 +576,88 @@ def evaluate(scores, f, p, topk, min_dv, horizons=HORIZONS, min_names=30) -> dic
     return out
 
 
+
+def _print_verdicts(names, results, horizons) -> None:
+    """Phán quyết theo doctrine. Bảng ở trên cần người đọc; cái này thì không.
+
+    Đây là phần "AI native": một phiên sau chỉ cần đọc cột cuối, không phải nhớ
+    §16.12 và §18.7 nói gì.
+    """
+    from analysis.bench import (VNINDEX_CAGR, cost_drag_per_year,
+                                rebalances_per_year)
+    for h in horizons:
+        rows = [(n, judge(n, h, results[n][h])) for n in sorted(names)
+                if results[n].get(h)]
+        if not rows:
+            continue
+        print(f"\n{'=' * 104}")
+        print(f"PHÁN QUYẾT, thoát +{h} phiên   "
+              f"({rebalances_per_year(h):.1f} vòng/năm, "
+              f"phí ăn {cost_drag_per_year(h)*100:.1f}%/năm, "
+              f"trần VNINDEX {VNINDEX_CAGR*100:.1f}%/năm)")
+        print("=" * 104)
+        print(f"{'factor':26s} {'quy năm':>9s}  {'phán quyết':<14s} lý do trượt")
+        for n, v in sorted(rows, key=lambda t: -t[1].annualised_net):
+            print(f"{n:26s} {v.annualised_net*100:>+8.1f}%  {v.label:<14s} "
+                  f"{'' if v.label == 'VƯỢT TRẦN' else v.reason}")
+        kept = [n for n, v in rows if not v.failed_necessary]
+        print(f"\n  qua được 2 tiêu chí BẮT BUỘC (§16.12 từng năm + §18.7 đơn điệu): "
+              f"{len(kept)}/{len(rows)}"
+              + (" — " + ", ".join(kept) if kept else ""))
+
+
+def _write_json(path, names, results, horizons, args) -> None:
+    import json
+    from analysis.bench import TOTAL_COST, VNINDEX_CAGR
+    out = {
+        "config": {"topk": args.topk, "min_dv": args.min_dv,
+                   "total_cost": TOTAL_COST, "vnindex_cagr": VNINDEX_CAGR,
+                   "horizons": list(horizons)},
+        "factors": {},
+    }
+    for n in sorted(names):
+        meta = factor_meta(n)
+        out["factors"][n] = {"source": meta.get("source", ""),
+                             "doc": meta.get("doc", ""), "horizons": {}}
+        for h in horizons:
+            r = results[n].get(h)
+            if not r:
+                continue
+            v = judge(n, h, r)
+            out["factors"][n]["horizons"][str(h)] = {
+                "excess": r["excess"], "net_per_trade": r["pick_net"],
+                "annualised": v.annualised_net, "ic": r["ic"], "ic_t": r["ic_t"],
+                "hit": r["hit"], "n_days": r["n_days"],
+                "quintiles": [float(x) for x in r["quintiles"]],
+                "by_year": {str(int(y)): float(r["by_year"].loc[y, "excess"])
+                            for y in r["by_year"].index},
+                "verdict": v.label,
+                "failed": [c.key for c in v.criteria if not c.passed],
+            }
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(out, fh, ensure_ascii=False, indent=1)
+    print(f"\nJSON -> {path}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--topk", type=int, default=5)
     ap.add_argument("--min-dv", type=float, default=5e6)
     ap.add_argument("--only", default="")
     ap.add_argument("--horizons", default="2,3,5,10,20")
+    ap.add_argument("--verdict", action="store_true",
+                    help="chấm mỗi factor theo tiêu chí doctrine và in phán quyết")
+    ap.add_argument("--json", default="",
+                    help="ghi kết quả ra JSON để so được giữa các lần chạy")
+    ap.add_argument("--no-plugins", action="store_true",
+                    help="bỏ qua scripts/factors/")
     args = ap.parse_args()
+
+    if not args.no_plugins:
+        plugins = load_plugins()
+        if plugins:
+            print(f"nạp thêm {len(plugins)} thuật toán từ scripts/factors/: "
+                  + ", ".join(plugins))
 
     horizons = tuple(int(x) for x in args.horizons.split(","))
     bad = [h for h in horizons if h < BACKTEST_SETTLEMENT_LAG]
@@ -598,8 +670,7 @@ def main() -> int:
     p = load_panel()
     print(f"panel: {p['close'].shape[1]} symbols x {p['close'].shape[0]} sessions "
           f"({p['close'].index.min().date()} .. {p['close'].index.max().date()})")
-    print(f"cost: round-trip {ROUND_TRIP*100:.2f}% + slippage {SLIPPAGE*100:.2f}% "
-          f"= {TOTAL_COST*100:.2f}%   |  T+{BACKTEST_SETTLEMENT_LAG} settlement honoured")
+    print(cost_banner())
     f = build_features(p)
 
     names = [n for n in FACTORS if not args.only or n in args.only.split(",")]
@@ -666,6 +737,11 @@ def main() -> int:
         cells = [(f"{by.loc[y, 'excess'] * 100:>+9.2f}" if y in by.index else f"{'':>9s}")
                  for y in yrs]
         print(f"{n:26s} " + " ".join(cells))
+
+    if args.verdict:
+        _print_verdicts(names, results, horizons)
+    if args.json:
+        _write_json(args.json, names, results, horizons, args)
     return 0
 
 
