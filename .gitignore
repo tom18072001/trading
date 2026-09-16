@@ -26,6 +26,10 @@ data/snapshots/picks_universe.json
 # `ticker_alpha_bench.py --json`. .gitignore KHÔNG có comment cuối dòng —
 # viết chung một dòng thì pattern gồm cả khoảng trắng và không khớp gì cả.
 data/bench_*.json
+# Kho lưu trữ watch (2026-09-16): một file một ngày, để audit khuyến nghị cũ.
+# Gitignore vì nó chứa SỔ CỦA TOM (mã, giá vốn, khối lượng) — cùng lý do
+# data/trading_state.json bị ignore, và repo này public.
+data/watch/
 # Operator state (2026-08-23): kill-switch flag, position book, watchlist.
 # One trader, one machine — this is Tom's book, not repo content.
 data/trading_state.json

@@ -123,10 +123,10 @@ def cmd_daily_watch(top_n: int = 5) -> None:
     """Sổ + shortlist, ghi ra report/watch_<date>.md và data/watch_latest.json.
 
     Không gửi email (Tom 2026-09-16: "tạm thời chưa cần nhận email, để sau").
-    Logic ở services/daily_watch_service.py — skill chỉ gọi lệnh này rồi tóm tắt,
+    Logic ở daily_watch/ — module riêng, skill chỉ gọi lệnh này rồi tóm tắt,
     nó không sinh lại code phân tích.
     """
-    from services import daily_watch_service
+    from daily_watch import service as daily_watch_service
 
     payload = daily_watch_service.run(top_n=top_n)
     alerts = payload["alerts"]

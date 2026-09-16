@@ -278,6 +278,8 @@ Python 3.11, FastAPI, SQLAlchemy 2.0 + SQLite (WAL), vnstock ≥3.2, LightGBM, h
 Trading/
 ├── CLAUDE.md                         # Approved redesign spec (source of truth)
 ├── docs/doctrine/                    # Chứng cứ tách khỏi CLAUDE.md (§27), một file một mục §
+├── daily_watch/                      # Module riêng (2026-09-16): báo cáo, đề xuất mua, đề xuất bán.
+│                                  #   Đọc services/, không bao giờ ngược lại (có test giữ).
 ├── ARCHITECTURE.md                   # This file
 ├── MODIFICATION_LOG.md               # Append-only change log
 ├── README.md                         # Quickstart
@@ -646,7 +648,7 @@ is the single source of truth for registration.
 | 6 | `sector_signal_publish` | `0 17 * * 1-5` | `main.py --publish` → `generate_report.py` | `SectorSignalService.publish()` + unified-picks email |
 | 7 | `sector_risk_sentinel` | `*/30 9-15 * * 1-5` | `main.py --risk-sentinel` | `SectorRiskService.stoploss_breaches()` |
 | 8 | `rotation_train` | `0 2 * * *` | `main.py --train` | `RotationModelService.train_ranker()` |
-| 9 | `daily_watch` | `30 17 * * 1-5` | `main.py --daily-watch` | `daily_watch_service.run()` -> `report/watch_<date>.md` |
+| 9 | `daily_watch` | `30 17 * * 1-5` | `main.py --daily-watch` | `daily_watch.service.run()` -> `report/watch_<date>.md` + `data/watch/<date>.json` |
 
 Verified 2026-09-16 against `Get-ScheduledTask -TaskPath '\SectorFlow\'`:
 exactly these 9 are registered, no more and no fewer.

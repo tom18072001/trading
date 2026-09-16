@@ -127,7 +127,8 @@ def mark_book(positions: list[dict] | None = None) -> dict[str, Any]:
     backtest. `close_position()` mới là chỗ trừ chi phí, vì đó là nơi con số
     quyết định lãi/lỗ thật.
     """
-    from services import sell_range, trading_state
+    from daily_watch import sell_range
+    from services import trading_state
 
     rows = trading_state.get_state()["positions"] if positions is None else positions
     as_of, prices, paths, atrs = _snapshot_prices()
@@ -141,7 +142,7 @@ def mark_book(positions: list[dict] | None = None) -> dict[str, Any]:
         tr = track(p, paths.get(sym) or [], last)
         row = {**p, "last": last, "pnl_pct": None, "pnl_vnd": None, "value": None, **tr}
         # Khuyến nghị bán thay cho stop-loss (Tom, 2026-09-16). Cửa sổ thời gian
-        # là luật đo được; range giá là tham chiếu — xem services/sell_range.py.
+        # là luật đo được; range giá là tham chiếu — xem daily_watch/sell_range.py.
         row["sell_range"] = sell_range.advise(p, tr["path"], atrs.get(sym), last)
         row["_atr_pct"] = atrs.get(sym)   # dùng cho dự phóng; tiền tố _ = nội bộ
         if last and entry:

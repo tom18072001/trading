@@ -21,17 +21,33 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
 from config import BASE_DIR
-from services import position_tracking, trading_state
+from daily_watch import positions as position_tracking
+from services import trading_state
 
 log = logging.getLogger(__name__)
 
 WATCH_JSON = Path(BASE_DIR) / "data" / "watch_latest.json"
 WATCH_DIR = Path(BASE_DIR) / "report"
+
+#: Kho lưu trữ để **audit về sau**. Một file một ngày, không ghi đè ngày khác.
+#:
+#: Đây là lỗ §26.1 đã ghi và chưa từng vá: *"Không có gì trong repo trả lời được
+#: câu hỏi"* — không bảng nào lưu một pick, nên khi Tom hỏi picks có tốt không
+#: thì phải viết `extract_past_picks.py` để bới 174 pick ra khỏi kho HTML báo
+#: cáo. Lần này lưu có cấu trúc ngay từ đầu.
+#:
+#: **Kho tự chấm được theo thời gian**: mỗi ngày ghi cả khuyến nghị LẪN giá của
+#: mọi mã nó nhắc tới, nên N ngày lưu trữ tự cho một chuỗi giá để đối chiếu
+#: khuyến nghị cũ — không cần nguồn giá thứ hai, không cần panel cập nhật tay.
+#:
+#: Chạy lại trong ngày thì ghi đè ngày đó (bản 17:30 theo lịch là bản cuối).
+#: `generated_ts` cho biết bản nào.
+ARCHIVE_DIR = Path(BASE_DIR) / "data" / "watch"
 
 #: Khung giữ được trình bày, và **cùng một danh sách mã cho cả hai** — đây là
 #: kết quả đo, không phải lười. Quét 41 factor ở 4 khung
@@ -107,7 +123,7 @@ def _shortlist(top_n: int) -> tuple[list[dict], dict[str, Any]]:
 def _window_if_bought() -> dict[str, str | None]:
     """Cửa sổ bán cho một lệnh mở ở phiên giao dịch kế tiếp."""
     try:
-        from services.sell_range import HOLD_MAX_SESSIONS, HOLD_MIN_SESSIONS
+        from daily_watch.sell_range import HOLD_MAX_SESSIONS, HOLD_MIN_SESSIONS
         from utils.clock import next_trading_day, today
         d0 = next_trading_day(today(), 1)
         return {"sell_from": next_trading_day(d0, HOLD_MIN_SESSIONS).isoformat(),
@@ -149,6 +165,10 @@ def build(top_n: int = 5) -> dict[str, Any]:
         } for a in alerts],
         "book": book,
         "shortlist": picks,
+        # Giá đóng của mọi mã kho này nhắc tới, lưu lại để N ngày lưu trữ tự cho
+        # một chuỗi giá — `scripts/audit_watch.py` chấm khuyến nghị cũ bằng chính
+        # các bản lưu sau nó, không cần nguồn giá thứ hai.
+        "marks": _marks(book, picks),
         "shortlist_meta": meta,
         "horizons": list(HORIZONS),
     }
@@ -161,8 +181,8 @@ def _attach_projection(book: dict[str, Any]) -> None:
     giữ 16 phiên thì "mở cửa sổ bán" là 4 phiên nữa, lệnh giữ 30 phiên thì đã
     qua. Một bảng mốc cố định sẽ in ra ngày vô nghĩa cho nửa số lệnh.
     """
-    from services.sell_range import (HOLD_MAX_SESSIONS, HOLD_MIN_SESSIONS,
-                                     projection)
+    from daily_watch.sell_range import (HOLD_MAX_SESSIONS, HOLD_MIN_SESSIONS,
+                                        projection)
     for p in book["positions"]:
         sr = p.get("sell_range") or {}
         held = sr.get("sessions_held")
@@ -177,6 +197,18 @@ def _attach_projection(book: dict[str, Any]) -> None:
                 sess.add(d)
         p["projection"] = projection(p.get("last"), p.get("_atr_pct"),
                                      tuple(sorted(sess)), marks)
+
+
+def _marks(book: dict[str, Any], picks: list[dict]) -> dict[str, float]:
+    """Giá đóng của mọi mã xuất hiện trong bản tin hôm nay."""
+    m: dict[str, float] = {}
+    for p in book.get("positions", []):
+        if p.get("last") is not None:
+            m[p["symbol"]] = p["last"]
+    for p in picks:
+        if p.get("close") is not None:
+            m[p["symbol"]] = p["close"]
+    return m
 
 
 def _fmt(v: Any, unit: str = "", nd: int = 2) -> str:
@@ -352,12 +384,16 @@ def render(payload: dict[str, Any]) -> str:
 def run(top_n: int = 5, write: bool = True) -> dict[str, Any]:
     """Dựng, ghi ra đĩa, trả payload. Đây là thứ `main.py --daily-watch` gọi."""
     payload = build(top_n=top_n)
+    payload["generated_ts"] = datetime.now().isoformat(timespec="seconds")
     if write:
         WATCH_DIR.mkdir(parents=True, exist_ok=True)
         WATCH_JSON.parent.mkdir(parents=True, exist_ok=True)
+        ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+        blob = json.dumps(payload, ensure_ascii=False, indent=1, default=str)
         md = WATCH_DIR / f"watch_{payload['generated_at']}.md"
+        arch = ARCHIVE_DIR / f"{payload['generated_at']}.json"
         md.write_text(render(payload), encoding="utf-8")
-        WATCH_JSON.write_text(json.dumps(payload, ensure_ascii=False, indent=1,
-                                         default=str), encoding="utf-8")
-        payload["_written"] = [str(md), str(WATCH_JSON)]
+        WATCH_JSON.write_text(blob, encoding="utf-8")
+        arch.write_text(blob, encoding="utf-8")
+        payload["_written"] = [str(md), str(WATCH_JSON), str(arch)]
     return payload

@@ -697,7 +697,7 @@ lượng vị thế đã chặn đuôi rồi.
 >
 > **Đã ship:** `is_valid_long_pick` và sàn R:R giữ nguyên (chúng là bộ lọc
 > *sàng lọc*, không phải lệnh bán), nhưng **sổ vị thế không còn stop và không
-> còn cảnh báo stop**. Thay bằng `services/sell_range.py`: một **cửa sổ thời
+> còn cảnh báo stop**. Thay bằng `daily_watch/sell_range.py`: một **cửa sổ thời
 > gian** (luật) và một **range giá trượt lên** (tham chiếu).
 >
 > **Range bán trượt cũng được đo, và nó cũng thua.** Câu hỏi tự nhiên là liệu

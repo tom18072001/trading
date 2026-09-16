@@ -11,7 +11,8 @@ import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from services import position_tracking, report_runner, trading_state
+from daily_watch import positions as position_tracking
+from services import report_runner, trading_state
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/state", tags=["state"])
@@ -125,7 +126,7 @@ def remove_position(symbol: str, side: str = "BUY"):
 #: T+2 cash settlement on HOSE — you may sell on the 2nd session after the buy.
 @router.get("/positions/pnl")
 def positions_pnl():
-    """Sổ được chấm theo giá đóng gần nhất — logic ở services/position_tracking.
+    """Sổ được chấm theo giá đóng gần nhất — logic ở daily_watch/positions.py.
 
     Nó rời khỏi file này ngày 2026-09-16 vì job cảnh báo stop hằng ngày cần đúng
     định nghĩa "đã chạm stop chưa", mà một job Task Scheduler không gọi được một

@@ -14,6 +14,55 @@
 
 ---
 
+## 2026-09-16 (11) — kho lưu trữ để audit, và module rời khỏi services/
+- Author: Claude Code on behalf of Tom
+- Files: `daily_watch/` (mới — `service.py`, `positions.py`, `sell_range.py`,
+  `audit.py`, `__init__.py`, `README.md`), `api/routers/state.py`, `main.py`,
+  `tests/test_module_boundaries.py`, `tests/test_position_track.py`,
+  `.claude/skills/theo-doi-hang-ngay/SKILL.md`, `ARCHITECTURE.md`, `.gitignore`.
+- Reason: Tom — *"phải lưu trữ về sau để audit và evolve skill sau này; mục tiêu
+  skill là báo cáo, đề xuất mua, đề xuất bán"*, rồi *"lưu các model và code liên
+  quan của cái này thành 1 folder riêng… không cần html, chỉ cần trả lời chat"*.
+
+### Kho lưu trữ: vá đúng lỗ §26.1, ở đầu nguồn
+§26.1 ghi rằng khi Tom hỏi *"picks có tốt không"* thì **không có gì trong repo
+trả lời được** — không bảng nào lưu một pick, nên phải viết
+`extract_past_picks.py` bới 174 pick ra khỏi kho HTML, và dựng thêm một panel
+giá. `data/watch/<ngày>.json` lưu có cấu trúc ngay từ lần chạy đầu.
+
+Nó **tự chấm được**: mỗi bản lưu ghi cả khuyến nghị lẫn `marks` — giá đóng của
+mọi mã nó nhắc tới — nên N bản lưu tự cho một chuỗi giá. `daily_watch/audit.py`
+chấm khuyến nghị cũ bằng chính các bản lưu sau nó: **không cần nguồn giá thứ
+hai, không cần panel cập nhật tay**, hai thứ từng làm hỏng phép đo trước đây.
+
+Script từ chối in số khi chưa đủ dữ liệu thay vì in số 0 — với 1 bản lưu nó nói
+"chưa chấm được", và docstring nói thẳng đây là **nhật ký có chấm điểm**, không
+phải một biên độ alpha (§26.8: một sổ ~100 lệnh còn đổi dấu hai lần).
+
+`data/watch/` **gitignore**: nó chứa sổ của Tom (mã, giá vốn, khối lượng) và
+repo này public — cùng lý do `data/trading_state.json` bị ignore.
+
+### Module rời services/ — và cái giá của nó được nói ra
+Tom yêu cầu lần này là lần thứ hai; lần đầu tôi giữ ở `services/` vì bảng phân
+tầng trong `test_module_boundaries.py` kiểm được nó. Rời đi là **mất lớp kiểm
+đó**, nên phải thay bằng thứ khác chứ không im lặng bỏ: guard mới
+`test_services_never_import_the_daily_watch_module` giữ **hướng** phụ thuộc —
+`daily_watch/` đọc `services/`, không bao giờ ngược lại. Negative control: thêm
+một `from daily_watch import …` vào `services/trading_state.py` thì đúng test đó
+đỏ. Đây chính là cycle mà bảng phân tầng tồn tại để chặn.
+
+371 test (376 − 6 test tham số của 3 module rời đi, + 1 guard).
+
+Không sinh HTML và không gửi email: đầu ra là markdown (để tóm tắt vào chat) và
+JSON. `generate_report.py` là đường HTML/PDF riêng, module này không đụng tới.
+
+- Kiểm chứng: task `SectorFlow_daily_watch` chạy lại qua Task Scheduler sau khi
+  dời → `LastTaskResult 0`. 371 test, ruff 65, smoketest 6/6.
+- Follow-up: `daily_watch/audit.py` mới có 1 bản lưu nên chưa chấm được gì. Nó
+  bắt đầu có ích sau ~20 phiên chạy theo lịch.
+
+---
+
 ## 2026-09-16 (10) — dự phóng các ngày tới: lịch và biên độ, không có hướng
 - Author: Claude Code on behalf of Tom
 - Files: `services/sell_range.py`, `services/daily_watch_service.py`,

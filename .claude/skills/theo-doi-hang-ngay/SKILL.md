@@ -1,20 +1,31 @@
 ---
 name: theo-doi-hang-ngay
-description: Chạy bản theo dõi hằng ngày cho sổ cổ phiếu của Tom và tóm tắt lại — khuyến nghị bán (cửa sổ 20-40 phiên + range giá trượt lên) cho các mã đang nắm, danh sách ứng viên mới, và ghi nhận khi Tom mua hoặc bán. Dùng khi Tom hỏi "hôm nay thế nào", "nên bán mã nào chưa", "quét cho tôi", "tôi vừa mua X", "tôi đã bán X", hoặc khi cần đọc lại kết quả của scheduled task daily_watch. Không dùng stop-loss — đã bỏ có chủ ý kèm phép đo.
+description: Ba việc — báo cáo sổ, đề xuất mua, đề xuất bán. Chạy bản theo dõi hằng ngày cho sổ cổ phiếu của Tom và tóm tắt lại; khuyến nghị bán (cửa sổ 20-40 phiên + range giá trượt lên) cho các mã đang nắm, danh sách ứng viên mới, và ghi nhận khi Tom mua hoặc bán. Dùng khi Tom hỏi "hôm nay thế nào", "nên bán mã nào chưa", "quét cho tôi", "tôi vừa mua X", "tôi đã bán X", hoặc khi cần đọc lại kết quả của scheduled task daily_watch. Không dùng stop-loss — đã bỏ có chủ ý kèm phép đo.
 ---
 
 # Theo dõi hằng ngày
 
+**Ba việc, không hơn** (Tom, 2026-09-16):
+
+| # | việc | nguồn |
+|---|---|---|
+| 1 | **Báo cáo** — sổ hôm nay ra sao | mục 2 bản tin |
+| 2 | **Đề xuất mua** — mã nào đáng xem | mục 3 bản tin (`shortlist`) |
+| 3 | **Đề xuất bán** — mã đang nắm, bán khi nào | `sell_range` từng vị thế |
+
+Mọi thứ khác — giải thích thuật toán, bàn về chi phí, đo một ý tưởng mới — là
+việc của tài liệu và của bench, không phải của bản tin hằng ngày.
+
 **Skill này không phân tích. Nó chạy code đã có và tóm tắt kết quả.**
 
-Toàn bộ logic nằm ở ba module đã commit, đã test, chạy lần nào cũng ra cùng
-một số:
+Toàn bộ logic nằm ở **`daily_watch/`** — một module riêng, đã commit, đã test,
+chạy lần nào cũng ra cùng một số. Đọc `daily_watch/README.md` trước khi sửa gì.
 
 | module | trả lời |
 |---|---|
-| `services/daily_watch_service.py` | dựng bản tin: sổ + cảnh báo + ứng viên |
-| `services/position_tracking.py` | chấm sổ theo giá gần nhất, đường giá từ ngày vào lệnh |
-| `services/sell_range.py` | **bán lúc nào** — cửa sổ thời gian (luật) + range giá (tham chiếu) |
+| `daily_watch/service.py` | dựng bản tin: sổ + cảnh báo + ứng viên |
+| `daily_watch/positions.py` | chấm sổ theo giá gần nhất, đường giá từ ngày vào lệnh |
+| `daily_watch/sell_range.py` | **bán lúc nào** — cửa sổ thời gian (luật) + range giá (tham chiếu) |
  Đừng viết lại phép tính nào ở đây: một phân tích được sinh lại mỗi lần
 chạy là một phân tích khác nhau mỗi lần chạy, và hai kết quả không so được với
 nhau. Nếu công thức cần đổi thì sửa module, không sửa prompt.
@@ -31,6 +42,25 @@ Ghi ra hai file:
 
 Scheduled task `SectorFlow_daily_watch` chạy lệnh này lúc **17:30, T2-T6**. Nếu
 Tom hỏi vào lúc khác, cứ chạy lại — nó rẻ và không gửi gì đi đâu.
+
+### Lưu trữ để audit — mỗi lần chạy đều ghi, đừng bỏ qua
+
+Bản thứ ba, `data/watch/<ngày>.json`, là **kho lưu trữ**: một file một ngày,
+không ghi đè ngày khác. Nó tồn tại vì §26.1 — khi Tom hỏi *"picks có tốt
+không"*, repo **không trả lời được**, phải bới 174 pick ra khỏi kho HTML.
+
+Kho **tự chấm được**: mỗi bản lưu ghi cả khuyến nghị lẫn `marks` (giá đóng mọi
+mã nó nhắc tới), nên N bản lưu tự cho một chuỗi giá.
+
+```bash
+uv run python daily_watch/audit.py --hold 20
+```
+
+Khi Tom hỏi *"khuyến nghị trước đây thế nào"*, chạy lệnh này — **đừng tự nhớ và
+đừng tự tính lại**. Nếu nó nói chưa đủ dữ liệu thì trả lời đúng như thế; một con
+số dựng từ 2 bản lưu là nhiễu, không phải câu trả lời (§26.8).
+
+Kho **gitignore** vì nó chứa sổ của Tom và repo này public.
 
 ## 2. Tóm tắt cho Tom
 
@@ -94,7 +124,7 @@ range lên theo, không cần ai can thiệp.
 
 Ngoài cơ chế đó, được **đề xuất** dịch range, với ba ràng buộc:
 
-1. **Đề xuất, không tự sửa.** Không đụng `services/sell_range.py`, không đụng
+1. **Đề xuất, không tự sửa.** Không đụng `daily_watch/sell_range.py`, không đụng
    hằng số. Nói con số đề xuất và lý do, để Tom quyết.
 2. **Nói rõ đó là phán đoán, không phải phép đo.** Mọi hằng số trong module đều
    truy được về một bảng đo; một con số anh đề xuất thì không, và phải nói thế.
@@ -171,7 +201,9 @@ không chắc Tom muốn cái nào — sai hướng này thì mất luôn lịch
   là phân vị đo được, không phải nút vặn.
 - **Không gửi email.** Tom chưa muốn (2026-09-16); task chỉ ghi file.
 - **Không tự dựng lại stop.** Nó bị bỏ có chủ ý, có phép đo đứng sau.
-- **Không viết lại công thức range bán.** Nó ở `services/sell_range.py`; đổi ý
+- **Không xoá hay sửa file trong `data/watch/`.** Nó là bằng chứng cho phần
+  audit sau này; một bản lưu bị sửa là một bản lưu không dùng được.
+- **Không viết lại công thức range bán.** Nó ở `daily_watch/sell_range.py`; đổi ý
   nghĩa thì sửa module rồi đo lại bằng `tplus_strategy_bench.py --trail`.
 - **Không trích cạnh trên của range như số đã kiểm chứng.** `band_hi` = +1×ATR
   trên đỉnh là chọn cho dễ đọc, không đo được. Cạnh dưới và cửa sổ thời gian thì
