@@ -14,6 +14,40 @@
 
 ---
 
+## 2026-09-16 (12) — range bán không cần ngày mua, và band_hi là nhánh chết
+- Author: Claude Code on behalf of Tom
+- Files: `daily_watch/sell_range.py`, `daily_watch/service.py`,
+  `.claude/skills/theo-doi-hang-ngay/SKILL.md`.
+- Reason: Tom — *"ngày mua có quan trọng không, tôi cần estimate range bán thôi
+  mà"*. Câu hỏi đúng, và tôi sai ở một nửa.
+
+### Ràng buộc thừa
+Tôi neo range vào "đỉnh **kể từ lúc mua**", rồi khi thiếu ngày mua thì chặn luôn
+cả range. Nhưng range giá là tính chất của **mã**, không phải của lệnh: đỉnh
+swing gần đây của một mã ở đâu thì nó ở đó, không phụ thuộc Tom mua lúc nào.
+
+Thứ **thật sự** cần ngày mua chỉ có `sell_from`/`sell_by` — chúng đếm phiên kể
+từ lúc vào lệnh, không có gì thay thế được. Và ngay cả nó cũng chịu được ước
+lượng: cửa sổ rộng 20 phiên nên lệch vài ngày gần như không đổi gì. Bản tin nói
+câu đó thay vì đòi một ngày chính xác.
+
+### Nhánh chết tự tạo ra, bắt được ngay khi nhìn output
+Sau khi mở lại range, 3/4 mã báo "trong vùng bán". Lý do: `peak` tính cả phiên
+gần nhất, nên `last <= peak` **luôn đúng theo định nghĩa** — `band_hi` (đỉnh +
+1×ATR) không bao giờ chạm tới được, "trên vùng bán" là nhánh chết, và "trong
+vùng bán" bật cho mọi mã đang ở gần đỉnh. Một trạng thái luôn đúng không nói lên
+điều gì.
+
+Đỉnh nay tính trên mọi phiên **trừ phiên gần nhất**, nên lập đỉnh mới hôm nay sẽ
+đẩy giá lên phần trên của vùng hoặc vượt hẳn. Live: hai vị thế **trên vùng**
+(vừa lập đỉnh), một **trong vùng**, một **dưới vùng** — cả ba trạng thái đều tới
+được và mỗi cái nói một điều khác nhau.
+
+- Kiểm chứng: 371 test, ruff 65. Phân bố `band_status` trên sổ thật: đủ cả ba
+  trạng thái, cộng các mã chưa có giá.
+
+---
+
 ## 2026-09-16 (11) — kho lưu trữ để audit, và module rời khỏi services/
 - Author: Claude Code on behalf of Tom
 - Files: `daily_watch/` (mới — `service.py`, `positions.py`, `sell_range.py`,

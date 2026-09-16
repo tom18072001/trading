@@ -105,8 +105,13 @@ băng neo ở đỉnh. Nên khi tóm tắt:
 Trả lời bằng **ba con số theo đúng thứ tự này**, lấy từ `sell_range` của vị thế:
 
 1. **Cửa sổ bán** `sell_from → sell_by`. Đây là luật. Nếu chưa tới, nói còn mấy
-   phiên nữa và nói thẳng *"luật đo được là giữ hết khung"*.
-2. **Range tham chiếu** `band_lo – band_hi`. Nói rõ đây là tham chiếu.
+   phiên nữa và nói thẳng *"luật đo được là giữ hết khung"*. **Thiếu ngày mua thì
+   không có cửa sổ** — nói ra, và nói rằng một ngày **ước lượng là đủ** (cửa sổ
+   rộng 20 phiên, lệch vài ngày gần như không đổi gì).
+2. **Range tham chiếu** `band_lo – band_hi` kèm `band_status` (trên / trong /
+   dưới vùng bán). Nói rõ đây là tham chiếu. **Range KHÔNG cần ngày mua** — nó
+   neo ở đỉnh swing gần đây, là tính chất của *mã* chứ không phải của lệnh; khi
+   thiếu ngày mua, `peak_basis` là `recent_window` và chỉ cần nói ra điều đó.
 3. **Mức nhả quá sâu** `give_back`. Chỉ nhắc khi giá đang gần hoặc đã dưới nó.
 
 Ba điều không được làm khi trả lời câu này:

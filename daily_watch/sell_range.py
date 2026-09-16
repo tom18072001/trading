@@ -72,26 +72,49 @@ def advise(position: dict, path: list[dict], atr_pct: float | None,
 
     out: dict[str, Any] = {
         "peak": None, "peak_basis": None, "band_lo": None, "band_hi": None,
-        "give_back": None, "sell_from": None, "sell_by": None,
-        "sessions_held": None, "phase": "unknown", "note": "",
+        "band_status": None, "give_back": None, "sell_from": None,
+        "sell_by": None, "sessions_held": None, "phase": "unknown", "note": "",
     }
 
     entry = position.get("entry_price")
     closes = [b["close"] for b in path if b.get("close")]
-    peak = max(closes + ([entry] if entry else [])) if (closes or entry) else None
+
+    # Đỉnh tính trên mọi phiên TRỪ phiên gần nhất.
+    #
+    # Bản đầu tính cả phiên hôm nay, và điều đó làm `band_hi` **không bao giờ
+    # chạm tới được**: đỉnh luôn ≥ giá hôm nay theo định nghĩa, nên "trên vùng
+    # bán" là nhánh chết và "trong vùng bán" bật cho mọi mã đang ở gần đỉnh —
+    # một trạng thái luôn đúng không nói lên điều gì.
+    #
+    # Bỏ phiên cuối ra thì cả ba trạng thái đều tới được: lập đỉnh mới hôm nay
+    # sẽ đẩy giá lên phần trên của vùng hoặc vượt hẳn.
+    prior = closes[:-1] if len(closes) > 1 else closes
+    peak = max(prior + ([entry] if entry else [])) if (prior or entry) else None
     out["peak"] = peak
 
-    # Range neo ở ĐỈNH KỂ TỪ KHI MUA. Không biết ngày mua thì `track()` trả cả
-    # đuôi 30 phiên, nên "đỉnh" là đỉnh 30 phiên — một con số khác hẳn, và với
-    # một vị thế đang lỗ nó nằm TRÊN giá hiện tại và đọc ra thành target. Đánh
-    # dấu cơ sở thay vì im lặng: một dải tính sai vẫn in ra đẹp như dải tính đúng.
+    # Cơ sở của đỉnh, nói ra chứ không im lặng — nhưng KHÔNG chặn range.
+    #
+    # Range giá là tính chất của MÃ, không phải của lệnh: đỉnh swing gần đây của
+    # một mã ở đâu thì nó ở đó, không phụ thuộc Tom mua lúc nào. Bản đầu neo range
+    # vào "đỉnh kể từ khi mua" rồi thiếu ngày thì chặn cả range — một ràng buộc
+    # thừa, và nó lấy mất đúng thứ Tom cần ("tôi cần estimate range bán thôi mà").
+    #
+    # Thứ THẬT SỰ cần ngày mua là `sell_from`/`sell_by`, vì chúng đếm phiên kể từ
+    # lúc vào lệnh và không có gì thay thế được.
     out["peak_basis"] = "since_entry" if position.get("opened_at") else "recent_window"
 
     a = _atr_frac(atr_pct)
-    if peak and a and out["peak_basis"] == "since_entry":
+    if peak and a:
         out["band_lo"] = round(peak * (1 - BAND_ATR * a), 2)
         out["band_hi"] = round(peak * (1 + BAND_ATR * a), 2)
+        # `give_back` trả lời "sóng lên đã kết thúc chưa", nên nó đo từ đỉnh của
+        # CHÍNH đợt sóng đó. Trên cửa sổ gần đây nó vẫn đọc được, chỉ là đang nói
+        # về đợt sóng của thị trường chứ không phải của lệnh Tom.
         out["give_back"] = round(peak * (1 - GIVE_BACK_ATR * a), 2)
+        if last:
+            out["band_status"] = ("trên vùng bán" if last > out["band_hi"]
+                                  else "trong vùng bán" if last >= out["band_lo"]
+                                  else "dưới vùng bán")
 
     opened = position.get("opened_at")
     if opened:
@@ -118,8 +141,11 @@ def advise(position: dict, path: list[dict], atr_pct: float | None,
             pass
 
     if out["peak_basis"] != "since_entry":
-        out["note"] = ("chưa biết ngày mua — không tính được cửa sổ bán, và range "
-                       "giá cũng không tính (đỉnh phải đo từ lúc vào lệnh).")
+        out["note"] = ("chưa biết ngày mua nên KHÔNG có cửa sổ bán — đó là thứ duy "
+                       "nhất bị thiếu. Range giá vẫn dùng được: nó neo ở đỉnh ~30 "
+                       "phiên gần nhất, tức đỉnh của thị trường chứ không phải đỉnh "
+                       "kể từ lúc anh vào lệnh. Một ngày mua ƯỚC LƯỢNG là đủ — cửa "
+                       "sổ rộng 20 phiên nên lệch vài ngày gần như không đổi gì.")
 
     if last and out["give_back"] and last <= out["give_back"]:
         out["note"] += (f"  Giá đã nhả quá {GIVE_BACK_ATR}×ATR từ đỉnh "

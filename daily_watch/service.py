@@ -261,23 +261,29 @@ def render(payload: dict[str, Any]) -> str:
           "hoặc `POST /api/state/positions`.")
     else:
         a("")
-        a("| mã | vào | gần nhất | P&L | phiên | range bán (tham chiếu) | cửa sổ bán |")
+        a("| mã | vào | gần nhất | P&L | range bán (tham chiếu) | giá đang | cửa sổ bán |")
         a("|---|---|---|---|---|---|---|")
         for p in b["positions"]:
             sr = p.get("sell_range") or {}
+            star = "" if sr.get("peak_basis") == "since_entry" else " *"
             a(f"| **{p.get('symbol')}** | {_fmt(p.get('entry_price'))} "
               f"| {_fmt(p.get('last'))} | {_fmt(p.get('pnl_pct'), '%')} "
-              f"| {sr.get('sessions_held') or '—'} "
-              f"| {_fmt(sr.get('band_lo'))} – {_fmt(sr.get('band_hi'))} "
+              f"| {_fmt(sr.get('band_lo'))} – {_fmt(sr.get('band_hi'))}{star} "
+              f"| {sr.get('band_status') or '—'} "
               f"| {sr.get('sell_from') or '—'} → {sr.get('sell_by') or '—'} |")
         no_date = [p.get("symbol") for p in b["positions"]
                    if (p.get("sell_range") or {}).get("peak_basis") != "since_entry"]
         if no_date:
             a("")
-            a(f"> 🟠 **{', '.join(no_date)} chưa có ngày mua**, nên không tính được "
-              "cửa sổ bán lẫn range giá — range neo ở đỉnh *kể từ lúc vào lệnh*, và "
-              "không có ngày vào lệnh thì không có đỉnh nào để neo. Điền bằng "
-              "`PATCH /api/state/positions/{symbol}` với `opened_at`.")
+            a(f"> `*` **{', '.join(no_date)} chưa có ngày mua.** Thứ duy nhất bị "
+              "thiếu là **cửa sổ bán** — nó đếm phiên kể từ lúc vào lệnh nên không "
+              "có gì thay thế được. **Range giá vẫn dùng được**: nó neo ở đỉnh ~30 "
+              "phiên gần nhất, tức đỉnh của thị trường chứ không phải đỉnh kể từ "
+              "lúc anh vào lệnh.")
+            a(">")
+            a("> Một ngày mua **ước lượng là đủ** — cửa sổ rộng 20 phiên, lệch vài "
+              "ngày gần như không đổi gì. `PATCH /api/state/positions/{symbol}` "
+              "với `opened_at`.")
         no_px = [p.get("symbol") for p in b["positions"] if p.get("last") is None]
         if no_px:
             a("")
