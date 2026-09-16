@@ -14,6 +14,50 @@
 
 ---
 
+## 2026-09-16 (4) — a learned ranker wins pooled and loses 2026; the ensemble does not
+- Author: Claude Code on behalf of Tom
+- Files: `scripts/ticker_ranker_experiment.py` (new), `scripts/ticker_alpha_bench.py`
+  (+2 size variants). No production path touched.
+- Reason: Tom, *"cập nhật code và backend mô hình dự đoán hiện tại ... tập trung
+  profit"*, having agreed to the four-week horizon.
+- Summary:
+  - **The VN-4 size lead is settled, and it does not ship.** Tested a second
+    time, now on top of the shipped ordering rather than the bare score: adding
+    a dollar-volume tilt lifts pooled excess at +20 from +0.49% to +0.61% and
+    **breaks 2025 (-0.80)**, the same year it broke the first time. Two
+    independent tests failing in the same place is a result, not noise.
+  - **A LightGBM lambdarank over 23 features, walk-forward with a 22-session
+    purge, beats the hand-built blend decisively when pooled** -- excess +1.38%
+    against +0.64%, IC t = 8.1, monotone quintiles, over 73,754 out-of-sample
+    rows from 2023-11 to 2026-08. **And it loses 2026 at every capacity
+    setting** (-1.39 at 15 leaves, -1.42 at 7, -0.76 at 31). Shrinking the model
+    does not fix it, which is what makes it a regime problem rather than an
+    overfit -- 25.9 already identified 2026 as the high-volatility stretch where
+    every model here degrades.
+  - **The ensemble is the thing that qualifies.** A 50/50 rank average of the
+    learned score and the shipped blend is positive in all four years at every
+    capacity tried, best at the MOST regularised setting (leaves 7:
+    +3.73 / +1.98 / +0.12 / +1.38), excess **+1.25%**, net **+1.23% per trade**,
+    quintiles monotone. Two weakly-correlated orderings averaged is the cheapest
+    robustness available, and it is the natural answer when one wins pooled and
+    the other wins the year the first one loses. Annualised at a four-week
+    cadence that is roughly **+16.7%/yr** -- the first configuration measured in
+    26 that exceeds VNINDEX buy-and-hold (15.7% CAGR), though on five names
+    rather than an index.
+  - **Nothing shipped.** The experiment writes no model artifact on purpose:
+    `RotationRanker.fit()` saves to `config.SAVED_MODELS_DIR` unconditionally
+    and once left the 17:00 job with a three-feature model while the suite
+    stayed green (19). A production path needs a training job, a versioned
+    artifact, the 23 features computed at prediction time (`_build_ticker_row`
+    produces about six), a retrain cadence and the drift monitor 18.3/16 asks
+    for. That is its own change, recorded in `docs/PATCHES.md`.
+- Follow-ups:
+  - Build the ensemble path. It is the largest measured profit item still open.
+  - 2026 runs only to August in the panel, so its cell is the thinnest; the
+    learned ranker's failure there should be re-checked once the year closes.
+
+---
+
 ## 2026-09-16 (3) — PNJ and PLX: the question the interrupted session never answered
 - Author: Claude Code on behalf of Tom
 - Files: none (measurement only, recorded here rather than in `CLAUDE.md`

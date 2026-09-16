@@ -505,6 +505,27 @@ def _(f):
     ])
 
 
+@register("Y_shipped_plus_small")
+def _(f):
+    """SHIPPED ordering + the VN-4 size tilt, at the horizon that now matters.
+
+    `Factors and anomalies in the Vietnamese stock market` (Pacific-Basin Finance
+    Journal 82, 2023) puts ln(ME) at -0.11, p<0.01. An earlier test added size to
+    the per-row score alone and it failed 2025. This asks the question again
+    against what actually ships, which is a different baseline.
+    """
+    base = FACTORS["X_prop_obv"](f)
+    return (base.rank(axis=1, pct=True)
+            - 0.5 * f["dv20"].rank(axis=1, pct=True))
+
+
+@register("Y_shipped_plus_small_light")
+def _(f):
+    base = FACTORS["X_prop_obv"](f)
+    return (base.rank(axis=1, pct=True)
+            - 0.25 * f["dv20"].rank(axis=1, pct=True))
+
+
 # ============================== evaluation ===================================
 
 NQ = 5  # quintiles -- 18.7 wants monotonicity across score buckets
