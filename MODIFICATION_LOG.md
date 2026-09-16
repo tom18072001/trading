@@ -14,6 +14,395 @@
 
 ---
 
+## 2026-09-16 (10) — dự phóng các ngày tới: lịch và biên độ, không có hướng
+- Author: Claude Code on behalf of Tom
+- Files: `services/sell_range.py`, `services/daily_watch_service.py`,
+  `services/position_tracking.py`, `.claude/skills/theo-doi-hang-ngay/SKILL.md`.
+- Reason: Tom — *"cập nhật skill"*, rồi *"tôi muốn bạn đưa đề xuất và dự đoán
+  trong các ngày tới để dễ tham chiếu"*.
+
+### Ranh giới là toàn bộ thiết kế
+`sell_range.projection()` trả về **lịch** (phiên nào tới hạn gì) và **biên độ**
+giá theo ATR của chính mã đó, giãn theo căn bậc hai số phiên — đúng cách §16.15
+dựng `atr_scaled`, và là tính chất của bước ngẫu nhiên chứ không phải một ý kiến
+về giá. Nó **không** trả về hướng, và docstring nói rõ là không nên sửa để trả:
+không rule nào trong repo thắng VNINDEX risk-adjusted (§26.9), nên một con số
+"giá sẽ là X" là bịa — và bịa một cách nghe rất thuyết phục, vì nó đứng cạnh
+những con số có bằng chứng.
+
+Bản tin in kèm hai cảnh báo: đây là biên độ không phải dự báo, và ATR là biên độ
+**ngày** chứ không phải độ lệch chuẩn nên ±% không đọc được như khoảng tin cậy.
+SKILL.md §3c liệt kê thẳng "được nói gì / cấm nói gì", vì phần này là chỗ dễ
+trượt nhất khi tóm tắt.
+
+Mốc phiên tính theo lịch **của từng lệnh**, không phải một bộ mốc cố định: lệnh
+giữ 16 phiên thì "mở cửa sổ bán" là 4 phiên nữa. Một bảng mốc cố định sẽ in ngày
+vô nghĩa cho nửa số lệnh.
+
+### Lệch còn sót từ đợt bỏ stop
+Bảng **ứng viên** vẫn in `stop | target | R:R` trong khi sổ đã bỏ stop. Chúng là
+sản phẩm phụ của bộ lọc sàng lọc (`is_valid_long_pick` đòi `stop < entry` để
+tính sàn R:R), không phải mức bán — in chúng cạnh một cuốn sổ không có stop là
+mời người đọc dùng làm mức bán, đúng thứ §26.10 vừa bác. Thay bằng `ATR%/phiên`
+(quyết định range rộng bao nhiêu sau khi mua) và **cửa sổ bán nếu mua phiên tới**.
+
+SKILL.md cũng được bổ sung: `sell_range.py` vào bảng module, §3 "khi Tom hỏi nên
+bán lúc nào", §3b "dịch range lên — phần Tom cho phép dùng phán đoán" (đề xuất
+chứ không tự sửa, nói rõ là phán đoán không phải phép đo, không biến thành luật
+thoát), và một ghi chú rằng P&L realised trừ 0,40%/vòng chứ **không** trừ
+slippage nên lạc quan hơn con số bench.
+
+- Kiểm chứng: 376 test, ruff 65, smoketest 6/6. Bản tin vị thế đầu tiên hiện 4 mốc: 1 phiên
+  · 4 phiên **mở cửa sổ bán** · 5 phiên · 24 phiên
+  **hết khung**, mỗi mốc kèm biên độ.
+- Follow-up: dự phóng mới gắn cho vị thế đang mở. Ứng viên chỉ có cửa sổ bán dự
+  kiến, chưa có biên độ — thêm được nếu Tom cần so hai mã trước khi mua.
+
+---
+
+## 2026-09-16 (9) — bỏ stop, thay bằng cửa sổ bán; và range trượt cũng thua
+- Author: Claude Code on behalf of Tom
+- Files: `services/sell_range.py` (mới), `services/position_tracking.py`,
+  `services/daily_watch_service.py`, `main.py`, `scripts/tplus_strategy_bench.py`,
+  `.claude/skills/theo-doi-hang-ngay/SKILL.md`, `CLAUDE.md` §26.10,
+  `tests/test_module_boundaries.py`.
+- Reason: Tom đảo quyết định §26.10 trong cùng ngày — *"bỏ stop nhưng phải đưa
+  khuyến nghị range bán (range có thể thay đổi theo thời gian nếu bạn cảm thấy
+  nó vẫn có sóng lên)"*.
+
+### Câu hỏi tự nhiên, và nó được đo chứ không được đoán
+Một băng neo ở **đỉnh** có tốt hơn một stop neo ở **giá vào** không?
+`scripts/tplus_strategy_bench.py --trail` (mới) chấm 7 hình học thoát trên
+3.446 lệnh, luật vào lệnh đang ship, chi phí 1,00%/vòng, khung 40 phiên:
+
+| hình học | mean%/lệnh | excess | 2026 |
+|---|---|---|---|
+| **KHÔNG stop, giữ hết khung** | **+1,77** | **+0,59** | +1,25 |
+| range nhả 3,5×ATR | +1,07 | +0,49 | +1,05 |
+| chỉ gãy trend thì bán | +0,87 | +0,37 | +1,08 |
+| range nhả 2,5×ATR | +0,18 | +0,18 | +0,46 |
+| range nhả 1,5×ATR | −1,29 | +0,09 | +0,04 |
+
+**Giữ hết khung thắng mọi biến thể, và càng chặt càng tệ — đơn điệu.** Cùng kết
+quả ở khung 20. Kết luận tổng quát hơn cả hai lần Tom quyết định: **một luật
+thoát bằng mức giá, dù neo ở đâu, vẫn là một cái stop và vẫn tốn tiền.**
+
+`run_trail()` cố ý **không có stop lỗ nào**: mức thoát chỉ tồn tại sau khi lệnh
+đã lãi ≥ `arm_atr`×ATR. Một lệnh âm không bao giờ bị quét ra — đó mới đúng nghĩa
+"bỏ stop", và nếu không tách bạch thế thì biến thể "range" sẽ lén mang theo một
+cái stop ở những phiên đầu và phép đo sẽ đo nhầm thứ khác.
+
+### Ship: một luật và một tham chiếu, gọi tên khác nhau
+`services/sell_range.py` trả về hai nhóm, và docstring nói rõ chỉ **một** là luật:
+- `sell_from` / `sell_by` — **cửa sổ 20-40 phiên. LUẬT.** Ngoài khoảng đó không
+  factor nào sống sót (§26.9 + quét 10/20/40/60 cùng ngày).
+- `band_lo` / `band_hi` — ±1×ATR quanh **đỉnh đã đạt**, tự trượt lên khi giá lên.
+  **THAM CHIẾU, không phải luật** — thoát cơ học tại đây đã đo và thua.
+- `give_back` 3,5×ATR dưới đỉnh — mức **ít tốn nhất** trong các băng, không phải
+  mức tốt. Báo như tin về *luận điểm*, không phải lệnh bán.
+
+`breaches()` đổi thành `alerts()` với 3 loại theo thứ tự khẩn: quá hạn → nhả quá
+sâu → trong cửa sổ bán. Không còn cảnh báo stop. Tên cũ giữ làm alias.
+
+- Kiểm chứng: bench chạy lại sau khi dọn biến thừa cho **cùng byte kết quả**.
+  376 test, ruff 65. Vị thế đó đã xoá stop/target; bản tin hiện range tham chiếu và
+  cửa sổ bán của nó.
+- Follow-ups:
+  - `band_hi` (+1×ATR trên đỉnh) là con số **chọn cho dễ đọc**, không phải đo
+    được — một ATR là "một nhịp thường của chính mã đó". Nó chỉ là tham chiếu
+    nên không ảnh hưởng P&L, nhưng đừng trích nó như một mức đã kiểm chứng.
+  - Phần "nếu bạn cảm thấy nó vẫn có sóng lên" hiện do **đỉnh** đảm nhiệm (range
+    tự trượt khi giá lập đỉnh mới). Biến thể gãy-trend có đo (`chỉ gãy trend thì
+    bán`, +0,87) và **thua** giữ hết khung, nên không ship thành luật.
+
+---
+
+## 2026-09-16 (8) — stop mới bị chấm lên quá khứ: cảnh báo giả trên lệnh đang thắng
+- Author: Claude Code on behalf of Tom
+- Files: `services/trading_state.py`, `services/position_tracking.py`,
+  `api/routers/state.py`.
+- Reason: Tom báo đã mua một mã và hỏi stop đề xuất. **Lần đầu dùng thật
+  tính năng vừa dựng hôm nay, nó báo sai ngay.**
+
+### Defect
+Đặt stop cho vị thế đó (đang lãi, giá **trên** stop). Bản tin báo
+**"🔴 <mã> — ĐÃ CHẠM STOP"**.
+
+`hit_stop` được định nghĩa là *"đã từng chạm kể từ lúc vào lệnh"*, và mã đó có
+xuống dưới mức ấy đầu tháng 9. Nhưng mức stop **được đặt hôm nay** — nó chưa tồn tại
+lúc giá ở dưới đó. Mức stop không lưu ngày hiệu lực, nên phép kiểm âm thầm coi nó
+luôn luôn tồn tại và chấm nó lên cả quãng giá trước đó.
+
+Đây là **back-painting**, đúng họ lỗi §20.3 P1-4 / §25.3 — ở đó là nhãn regime
+được vẽ lại bằng hindsight, ở đây là mức stop. Và hậu quả tệ hơn im lặng: **một
+cảnh báo stop giả trên một lệnh đang thắng bảo người đọc bán một lệnh đang chạy
+tốt.** Nó cũng sẽ nổ **mỗi lần trail stop**, tức là đúng vào những lệnh có lãi.
+
+### Sửa
+`stop_set_at` / `target_set_at` trên mỗi vị thế: ngày mức đó bắt đầu có hiệu
+lực. `track()` chỉ quét đường giá **từ ngày đó**. `None` rơi về `opened_at`, nên
+mọi dòng ghi trước hôm nay vẫn đúng — mức của chúng quả thật có hiệu lực từ lúc
+mở lệnh, và không cần migration.
+
+Dấu ngày chỉ đóng khi giá trị **thực sự đổi**, không phải mỗi lần gọi
+`update_position` — sửa `qty` không được reset cửa sổ quan sát của stop.
+
+### Hai thứ khác rơi ra cùng lúc
+- **`thesis` đặt được lúc mở lệnh nhưng không sửa được ở đâu cả** — không có ở
+  `update_position` lẫn `PositionPatch`. Mà luận điểm là đúng thứ phải sửa khi
+  lệnh tiến triển (vào lệnh rồi, giờ sát target). Một trường viết-một-lần rồi cũ đi là
+  một trường sẽ nói dối. Cùng lỗi §22.10 đã ghi cho giá vào lệnh. Nay sửa được.
+- Giá vào lệnh trong sổ là **giá đóng phiên trước**, không phải
+  giá khớp của Tom. Đúng thứ §22.10 cảnh báo, và đúng lý do
+  `update_position` tồn tại.
+
+- Kiểm chứng: **negative control** — bỏ `stop_set_at` khỏi row thì `hit_stop`
+  quay lại `True` trên đúng vị thế đó; có nó thì `False`. 374 test, ruff 65.
+- Follow-up: `daily_prices` chỉ có giá đóng, không có high/low (`ponytail` đã
+  ghi), nên một cú xuyên stop trong phiên rồi đóng lại trên mức vẫn không được
+  ghi nhận. Với sổ swing chấm theo giá đóng thì chấp nhận được; với stop đặt ở
+  sàn thì không.
+
+---
+
+## 2026-09-16 (7) — task theo dõi hằng ngày + skill, và logic stop rời khỏi route
+- Author: Claude Code on behalf of Tom
+- Files: `services/position_tracking.py` (mới), `services/daily_watch_service.py`
+  (mới), `.claude/skills/theo-doi-hang-ngay/SKILL.md` (mới),
+  `scripts/jobs/job_daily_watch.bat` (mới), `api/routers/state.py`, `main.py`,
+  `scripts/cleanup_scheduled_tasks.ps1`, `tests/test_module_boundaries.py`,
+  `tests/test_position_track.py`, `CLAUDE.md` §8, `ARCHITECTURE.md`, `.gitignore`.
+- Reason: Tom — quét hằng ngày tìm mã triển vọng theo khung 4/8 tuần; mã đã mua
+  thì lưu riêng và **cảnh báo khi chạm stop**; theo dõi tiếp cho tới khi Tom báo
+  đã bán; báo cáo T2-T6. Và: *"skill sẽ phải gắn với 1 folder code riêng thay vì
+  bắt AI gen lại code mỗi lần chạy — AI chỉ có trách nhiệm run schedule và tổng
+  hợp lại"*.
+
+### Defect cấu trúc phải sửa trước
+Logic "đã chạm stop chưa" nằm trong `_track()` — một hàm **private trong
+`api/routers/state.py`**. Một job Task Scheduler không gọi được hàm nằm trong
+route: process scheduler không có HTTP client (cùng lý do `trading_state` đọc
+thẳng đĩa, §22.10). Viết lại nó trong job sẽ là **hai định nghĩa của cùng một
+câu hỏi**, và chúng sẽ lệch trong im lặng — §22.11 đã ghi đúng bài học này cho
+bar breakout, §16.15 cho đơn vị ATR, và hôm nay `analysis/bench.py` cho chi phí.
+Nay ở `services/position_tracking.py`; route và job là hai caller của một hàm.
+
+### Khung giữ: đo rồi mới đề xuất
+Tom cho phép "4 tuần/8 tuần hoặc range bạn đề xuất". Quét 41 factor × 4 khung
+(`ticker_alpha_bench.py --horizons 10,20,40,60 --verdict`):
+
+| giữ | factor qua 2 tiêu chí bắt buộc | quy năm |
+|---|---|---|
+| 10 phiên | **không cái nào** | — |
+| 20 phiên | `X_prop_obv` | +5,9% |
+| **40 phiên** | `X_prop_obv` | **+11,7%** |
+| 60 phiên | **không cái nào** | — |
+
+**Cùng một factor thắng ở 20 và 40**, nên hai khung *không* cho hai danh sách
+khác nhau — chỉ khác thời gian giữ, và bản tin nói đúng như vậy thay vì dựng ra
+hai bảng giả. Khoảng dùng được hẹp: dưới 20 và trên 40 đều không có gì sống sót.
+8 tuần đáng **gấp đôi** 4 tuần, nhất quán với §26.9 (phí khấu hao trên ít vòng
+hơn nhanh hơn tốc độ alpha/lệnh giảm).
+
+### Skill không chứa logic — đó là yêu cầu, không phải phong cách
+`SKILL.md` chỉ: chạy `main.py --daily-watch`, đọc file kết quả, tóm tắt theo thứ
+tự khẩn cấp, và ghi nhận mua/bán qua API. Nó **không** có công thức nào. Mục 5
+liệt kê thẳng những việc không được làm, trong đó có "không sửa `MIN_BUY_SCORE`
+để danh sách dài ra" — một phân tích sinh lại mỗi lần chạy là một phân tích khác
+nhau mỗi lần chạy.
+
+### Lỗ thật, do chạy thật mới thấy
+Lần chạy đầu: **vị thế đầu tiên trong sổ không có `stop`** — nên nó sẽ không bao giờ được
+cảnh báo, đúng thứ Tom vừa yêu cầu. Bản tin nay nói thẳng câu đó cho mọi vị thế
+thiếu stop, thay vì im lặng báo "không có gì chạm stop".
+
+Cảnh báo "dữ liệu không phải phiên hôm nay" cũng sai: nó bắn mỗi sáng, vì phiên
+hôm nay chưa đóng. Nay đếm bằng **phiên** và chỉ cảnh báo khi trễ > 1.
+
+- Task: `SectorFlow_daily_watch`, **30 17 * * 1-5**, trigger `-Weekly Mon..Fri`
+  thật (8 job cũ ghi Cron `1-5` nhưng đăng ký `-Daily`, nên có chạy cuối tuần).
+  `RunLevel = Limited` — job chỉ chạy python và ghi file, và ở mức đó đăng ký
+  được **không cần shell admin**; `cleanup_scheduled_tasks.ps1` nay nhận
+  `RunLevel` theo từng job.
+- Kiểm chứng: chạy thật qua Task Scheduler → `LastTaskResult 0`, file sinh ra,
+  log có dòng kết quả. Hai endpoint mà skill hướng dẫn (`POST /positions`,
+  `POST /positions/{symbol}/close`) đã gọi thử bằng `TestClient` → 200, và dữ
+  liệu thử đã dọn. `cleanup_scheduled_tasks.ps1` kiểm bằng AST parser thật, sau
+  khi tokenizer bỏ sót một lỗi ngữ pháp: PS 5.1 coi `if` là **câu lệnh**, nên
+  `Get-JobPrincipal (if (...) {...})` không hợp lệ dù token hợp lệ.
+- 374 test, ruff 65, smoketest 6/6.
+- Follow-ups:
+  - **Chưa gửi email** (Tom: *"tạm thời chưa cần… để sau"*). Khi cần thì đi qua
+    `generate_report.py` chứ không dựng trình gửi thứ hai (§2).
+  - Hình học stop/target vẫn là SWING (chỉnh cho 20 phiên). Nếu Tom chuyển sang
+    giữ 40 phiên thì cần một profile riêng — **chưa đo**, và §26.10 vừa chốt giữ
+    stop nên câu hỏi mở là *hình học nào rẻ nhất*, không phải có hay không.
+  - `report/watch_*.md` ghi mỗi ngày một file, chưa có dọn cũ.
+
+---
+
+## 2026-09-16 (6) — hai bench chấm cùng một lệnh ở hai mức phí; và bộ khung để thêm thuật toán
+- Author: Claude Code on behalf of Tom
+- Files: `analysis/bench.py` (mới), `scripts/factors/` (mới: `__init__.py`,
+  `README.md`), `scripts/ticker_alpha_bench.py`, `scripts/ticker_ranker_experiment.py`,
+  `CLAUDE.md` §26.6/§26.9/§26.10, `docs/doctrine/26-ticker-picks.md`,
+  `docs/PATCHES.md`, `README.md`. Không đụng đường production.
+- Reason: Tom — *"test các tính năng thuật toán, cần xây dựng AI native để sau AI
+  chỉ cần đưa thuật toán và code thuật toán sẽ … trả lời giúp tôi hàng ngày"*, và
+  *"tôi vẫn nghĩ cần stoploss"*.
+
+### Defect tìm được trên đường, và nó đắt hơn cả việc được giao
+Không phải hai script mà **năm**, ở **bốn** mức chi phí khác nhau:
+
+| script | chi phí/vòng | vì sao |
+|---|---|---|
+| `ticker_alpha_bench.py` | **1,00%** | lấy `BACKTEST_SLIPPAGE_MIN_PCT` từ config — đúng §18.2/9 |
+| `ticker_ranker_experiment.py` | 0,70% | gõ tay `2 * 0.0015` |
+| `tplus_strategy_bench.py` | 0,70% | `--slippage-bps` mặc định 15 |
+| `picks_portfolio_sim.py` | 0,70% | `--slippage-bps` mặc định 15 |
+| `audit_past_picks.py` | **0,40%** | không tính slippage — mà cột vẫn tên `net%` |
+
+Một cột tên là "net" nhưng thiếu hơn nửa chi phí thì tệ hơn là không có cột đó.
+Cả năm nay lấy từ `analysis/bench.py`; hai script có CLI vẫn override được,
+nhưng **mặc định** là con số doctrine.
+
+Ở khung 20 phiên đó là **3,8 điểm %/năm**. Hệ quả cụ thể: con số ensemble
+*"+16,7%/năm — lần đầu vượt VNINDEX 15,7%"* trong `docs/PATCHES.md` tính bằng
+bản **rẻ hơn**; dưới hằng số của chính `config` nó là **~12,9%, thua index**.
+Cái được tuyên bố là cột mốc hoá ra là một sai số đơn vị, y như §16.15.
+
+**0,70% không phải "số cũ hợp lệ", nó mâu thuẫn với §18.2/9** — một BLOCKER đã
+được chốt. Nay `analysis/bench.py` là nguồn duy nhất và cả hai bench import nó.
+`CLAUDE.md` §26.6 mang bảng đính chính (T+3: 58,8% → **84,0%/năm**), và
+`docs/doctrine/26-ticker-picks.md` mang cảnh báo ở đầu file để không ai đọc số
+cũ mà tưởng đúng. **Mọi `excess` không đổi** — excess là hiệu hai lợi suất gộp
+nên chi phí triệt tiêu; chỉ net/lệnh và quy năm sai, đúng bằng 0,30%/lệnh.
+
+### Bộ khung: thêm thuật toán không phải sửa bench
+- `analysis/bench.py` giữ **chi phí + registry + phán quyết** ở một chỗ.
+- `scripts/factors/*.py`: một file một ý tưởng, `@register(...)`, bench tự nạp.
+  Kiểm bằng file thử (`ZZ_probe`) — nạp đúng, metadata đúng — rồi xoá.
+- `--verdict` chấm theo **tiêu chí doctrine**, không phải ngưỡng tôi nghĩ ra:
+  thắng base rate gộp (§16.12) · **thắng base rate TỪNG NĂM (§16.12, bắt buộc)**
+  · **quintile đơn điệu (§18.7, bắt buộc)** · IC |t|≥2 (§26.2) · dương sau chi
+  phí (§26.6) · vượt VNINDEX 15,7% (§26.9).
+- Báo cáo bằng **quy năm**, không phải %/lệnh: +0,2%/lệnh ở T+3 là thảm hoạ còn
+  ở 8 tuần là tốt, nên %/lệnh không so sánh được giữa các khung giữ.
+- `--json` để so được giữa các lần chạy.
+
+### Kết quả lần chạy đầu — 41 factor, khung 20 phiên, chi phí 1,00%
+**1/41 qua được hai tiêu chí bắt buộc**, và đó là `X_prop_obv` — đúng thứ tự
+đang ship (§26.9). Kết quả đến từ tiêu chí, không từ việc tôi chọn.
+
+| factor | quy năm | theo năm | đơn điệu | phán quyết |
+|---|---|---|---|---|
+| `Y_shipped_plus_small` | **+7,5%** | 23:+0,76 24:+1,52 **25:−0,80** 26:+1,26 | có | REJECT |
+| `X_prop_small_obv` | +6,9% | 23:+0,45 24:+1,59 **25:−0,90** 26:+1,54 | có | REJECT |
+| **`X_prop_obv`** | **+5,9%** | 23:+0,39 24:+0,56 **25:+0,13** 26:+1,24 | có | **EDGE, DƯỚI TRẦN** |
+| `A_shipped_score` (điểm cũ) | −14,2% | âm mọi năm | không | REJECT |
+
+> **Bộ khung tự chứng minh giá trị ở đúng một dòng**: factor kiếm nhiều tiền
+> nhất (`Y_shipped_plus_small`, +7,5%) **âm 2025**, nên trượt. Xếp theo tiền thì
+> chọn nhầm — hai tiêu chí bắt buộc là thứ chặn lại. Đây là §16.12 được **thi
+> hành** thay vì phải nhớ, và nó cũng là §26.9 đã ghi (size tilt hỏng 2025).
+
+Thứ tự đang ship đo lại dưới chi phí đúng: excess +0,49% (không đổi), net
++0,47%/lệnh, **quy năm +5,9%** thay vì +10,1%. **Vẫn thua VNINDEX 15,7%.**
+
+### Stop-loss: Tom giữ (§26.10 đóng)
+Phép đo nói bỏ stop lời hơn (+36,2% vs −5,2% trên book 5 mã, drawdown cũng thấp
+hơn). Tom giữ. **Không đổi dòng code nào** — `is_valid_long_pick`, sàn R:R, thang
+stop→target trên thẻ, `hit_stop` trong sổ đều nguyên vẹn.
+
+Đây là lựa chọn **trên** chứng cứ chứ không bỏ qua chứng cứ: backtest không nhìn
+thấy margin call, gap-down theo tin, hay ngày không ngồi trước màn hình — ba thứ
+stop tồn tại để chặn và không thứ nào có trong bảng. Tail per-trade (−47% không
+stop vs −15% có stop) đứng về phía quyết định.
+
+Cái giá ~0,86 điểm %/lệnh **ở lại doctrine**, được chấp nhận có ý thức: nó
+chuyển từ *defect chưa biết* sang *chi phí đã biết*. Và nó mở ra việc đáng làm
+hơn — đã chốt giữ thì câu hỏi không còn là *có hay không* mà là **hình học nào
+rẻ nhất**; mới đo 4 hình học cố định, chưa đo trailing, stop theo thời gian,
+stop chỉ kích hoạt sau khi lãi, hay stop theo ATR động.
+
+- Kiểm chứng: 370 test, ruff 65 (cả hai không đổi — +6 F401 do đợt sửa này sinh
+  ra đã dọn hết), cơ chế plugin kiểm bằng file thử rồi xoá, `ticker_ranker_
+  experiment.py` import lại đúng `COST = 0.01`.
+- Follow-ups:
+  - **Chưa dựng đường production cho ensemble.** Theo ý Tom (*"backend, frontend
+    để riêng"*), đợt này chỉ đo. Và con số biện minh cho nó vừa mất 3,8 điểm
+    %/năm, nên phải đo lại trước khi dựng.
+  - Bench mới chạy khung 20. Nên quét 10/20/40/60 để bảng §26.9 nhất quán ở chi
+    phí đúng.
+  - `scripts/tplus_strategy_bench.py` và `picks_portfolio_sim.py` chưa kiểm xem
+    có gõ lại hằng số chi phí không.
+
+---
+
+## 2026-09-16 (5) — CLAUDE.md tách làm hai: luật ở lại, chứng cứ ra `docs/doctrine/`
+- Author: Claude Code on behalf of Tom
+- Files: `CLAUDE.md` (133.621 → 48.092 B), `docs/doctrine/*.md` (9 file mới,
+  119.552 B), `docs/PATCHES.md`, `AGENTS.md`, `ARCHITECTURE.md`. Không đụng code.
+- Reason: `CLAUDE.md` được khai là CACHED và *"DO NOT modify mid-session"*, nhưng
+  đã tới **135.718 B ≈ 33.400 token nạp lại mỗi lượt** — gấp 13 lần ngân sách
+  10 KB mà `claude/CLAUDE.md` mẹ đặt ra. Transcript đo được hậu quả: `4b2f418e`
+  hết context **5 lần trong một ngày**, `9245140a` 3 lần. **72% (96 KB) là hậu
+  kiểm có ngày tháng**, không phải luật đang có hiệu lực.
+- Summary:
+  - **Nguyên tắc cắt, áp cho từng khối**: *nếu một agent không bao giờ đọc đoạn
+    này, nó có làm sai không?* Có → ở lại. Chỉ giải thích *vì sao* luật đó có →
+    chuyển đi. Kết quả: **−64%**, ~21.000 token mỗi lượt.
+  - **Mọi heading `##` ở lại** (25/25, cộng §27 mới). Số hiệu mục bị trỏ quá
+    nhiều để đổi — §16.1 104 lần, §18.2 99, §22.11 23 — nên tách mà làm gãy
+    tham chiếu thì đổi một vấn đề lấy một vấn đề khác. **58 mục con được trỏ đều
+    tra được**: hoặc còn heading thật, hoặc có dòng trong bảng tra §27.1.
+  - **9 file doctrine, nguyên văn.** Không tóm tắt, không sửa số, không sửa ngày:
+    một hậu kiểm được viết lại là một hậu kiểm không còn là chứng cứ.
+  - **§18.1-18.5 cố ý KHÔNG đẩy hết đi.** 24 finding là *yêu cầu còn mở*, không
+    phải chứng cứ, và §18.8 bắt mọi thay đổi phải trích số hiệu finding nó đóng.
+    Giữ lại dưới dạng mục lục một dòng mỗi finding + trạng thái (mở / đóng ở đâu),
+    2,2 KB thay vì 7,1 KB, và §18.2 lấy lại heading của nó.
+  - **Cảnh báo vận hành được giữ nguyên văn trong `CLAUDE.md`**, không rút gọn
+    thành dòng trỏ: §16.14 (`ACCUMULATE` chưa có edge đo được → là watchlist,
+    không phải lệnh), §16.12 (phải thắng NO GATE **trong từng năm**), §26.6
+    (T+3 không thể có lãi), §26.9 (vẫn không thắng index), §26.10 (câu hỏi bỏ
+    stop đang chờ Tom). Đây là những câu mà không đọc thì sẽ làm sai.
+- Kiểm chứng:
+  - Script đối chiếu **từng dòng** của `git show HEAD:CLAUDE.md` với
+    `CLAUDE.md` mới + 9 file doctrine → **0 dòng biến mất**.
+  - Script quét `§NN.M` trong mọi `.py/.ts/.tsx/.md` của repo → **58 mục con,
+    0 mục tra không ra**.
+  - 370 test pass, ruff 65 (cả hai không đổi), `scripts/_doc_audit.py` không
+    phát sinh mục mới — mục `/api/flow/ingest` chỉ đi theo đoạn văn từ
+    `CLAUDE.md` sang `docs/doctrine/20-code-review.md`.
+- **Hai defect do chính script kiểm chứng bắt được** (không phải do đọc lại):
+  1. **§20.3 mất 9 dòng.** Tôi viết lại mục đó bằng tiếng Việt, giữ 3 mục còn mở
+     và nén 4 mục đã đóng thành một dòng — nhưng dải trích cho file doctrine
+     dừng ở §20.2, nên chi tiết 4 mục đã đóng (số đo P0-5, lý lẽ P1-1, P1-4,
+     P3-2) **không được chuyển đi đâu cả**. Đây đúng là thứ "tách file" dễ làm
+     hỏng nhất, và nó lọt qua mắt tôi. Nay nối nguyên văn vào cuối
+     `20-code-review.md`.
+  2. **§24.3 tra không ra.** Nội dung (`POST /api/state/report/send` chạy
+     subprocess, guard double-click ở backend) vẫn còn, nhưng nhãn số thì không
+     — một mục con có nội dung mà không có nhãn thì tham chiếu `§24.3` chết.
+     Nay các gạch đầu dòng của §24 mang nhãn §24.1/§24.2/§24.3.
+  > Bài học chung hơn cả hai: **một phép tách chỉ an toàn khi có script đối chiếu
+  > từng dòng.** Đọc lại bằng mắt sẽ không bắt được một mục bị viết lại mà bản
+  > gốc không được chuyển đi — vì đoạn viết lại *trông đúng*.
+- Nhân tiện sửa 2 con trỏ hỏng **có sẵn** trong `ARCHITECTURE.md`, cả hai lộ ra
+  khi kiểm tính toàn vẹn tham chiếu: dòng 27 trỏ `§22.10` (operator state) cho
+  đoạn nói về calibrator → `§25.2`; dòng 214 trỏ `§17`, mà **§17 chưa từng tồn
+  tại** trong bất kỳ commit nào (`CLAUDE.md` nhảy từ §16 sang §18) → đánh dấu
+  tại chỗ, **không đoán** ý định, vì đó là một entry changelog có ngày (§21).
+- Follow-ups:
+  - Luật mới, ghi ở §27: phép đo mới vào `docs/doctrine/`; `CLAUDE.md` chỉ nhận
+    **kết luận**, và chỉ khi kết luận đó đổi một luật. Mục nào ở `CLAUDE.md` dài
+    quá ~15 dòng thì phần thừa thuộc về `docs/doctrine/`.
+  - Chưa làm: `README.md` §118 vẫn trỏ "`CLAUDE.md` §19 cho module coverage" —
+    §19 giờ chỉ còn bảng đếm, coverage nằm ở `docs/doctrine/19-testing-history.md`.
+
+---
+
 ## 2026-09-16 (4) — a learned ranker wins pooled and loses 2026; the ensemble does not
 - Author: Claude Code on behalf of Tom
 - Files: `scripts/ticker_ranker_experiment.py` (new), `scripts/ticker_alpha_bench.py`

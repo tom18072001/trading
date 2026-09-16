@@ -24,8 +24,8 @@
   H=13, but that win comes entirely from the middle stretch and every horizon
   above 5 goes negative on the last third. 5 is the longest horizon that stays
   positive throughout. The same script rejects calibration: isotonic and Platt
-  both lose to raw out of sample, so no calibrator ships. See `CLAUDE.md` §22.10
-  and §25.
+  both lose to raw out of sample, so no calibrator ships. See `CLAUDE.md` §25.2
+  and §25.7.
 - **2026-08-24 (2) — Regime confidence: a collapsed model reporting certainty.**
   Behaviour change, no schema change, no contract change (`GET
   /api/sectors/regime` keeps its shape; the `confidence` *value* now spans
@@ -211,7 +211,7 @@
   contracts: interval toggle `1D/1W/2W/1M/1Q` (server-side resample), configurable
   thresholds via `ThresholdInput` + localStorage, feature-sliced frontend folder
   rename. Blocker in scope: real `close_idx` backfill removes `STEALTH_SYNTHETIC_CLOSE`
-  escape hatch. See `CLAUDE.md` §17 and `specs/REDESIGN_PHASE15.md` + 6 feature specs.
+  escape hatch. See `CLAUDE.md` §17 *(mục này chưa từng tồn tại — CLAUDE.md nhảy từ §16 sang §18)* and `specs/REDESIGN_PHASE15.md` + 6 feature specs.
   No code landed yet — this changelog entry is intent. Legacy `pages/*.tsx`, the
   Backtest/Regime/Ranking pages, and their matching services/routers are scheduled
   for deletion as each replacement feature ships.
@@ -277,6 +277,7 @@ Python 3.11, FastAPI, SQLAlchemy 2.0 + SQLite (WAL), vnstock ≥3.2, LightGBM, h
 ```
 Trading/
 ├── CLAUDE.md                         # Approved redesign spec (source of truth)
+├── docs/doctrine/                    # Chứng cứ tách khỏi CLAUDE.md (§27), một file một mục §
 ├── ARCHITECTURE.md                   # This file
 ├── MODIFICATION_LOG.md               # Append-only change log
 ├── README.md                         # Quickstart
@@ -358,6 +359,7 @@ Trading/
 │       ├── job_sector_eod_rollup.bat  job_regime_classify.bat
 │       ├── job_rotation_train.bat  job_rotation_predict.bat
 │       ├── job_sector_signal_publish.bat  job_sector_risk_sentinel.bat
+│       ├── job_daily_watch.bat       # 2026-09-16: so + canh bao stop + shortlist
 │       └── job_freshness_check.bat   # ORPHAN — written, never registered (§8)
 │
 ├── specs/                            # one .md per feature + cross-cutting
@@ -644,9 +646,18 @@ is the single source of truth for registration.
 | 6 | `sector_signal_publish` | `0 17 * * 1-5` | `main.py --publish` → `generate_report.py` | `SectorSignalService.publish()` + unified-picks email |
 | 7 | `sector_risk_sentinel` | `*/30 9-15 * * 1-5` | `main.py --risk-sentinel` | `SectorRiskService.stoploss_breaches()` |
 | 8 | `rotation_train` | `0 2 * * *` | `main.py --train` | `RotationModelService.train_ranker()` |
+| 9 | `daily_watch` | `30 17 * * 1-5` | `main.py --daily-watch` | `daily_watch_service.run()` -> `report/watch_<date>.md` |
 
-Verified 2026-08-25 against `Get-ScheduledTask -TaskPath '\SectorFlow\'`:
-exactly these 8 are registered, no more and no fewer.
+Verified 2026-09-16 against `Get-ScheduledTask -TaskPath '\SectorFlow\'`:
+exactly these 9 are registered, no more and no fewer.
+
+Two things about job 9 that do not generalise from the other eight. Its trigger
+is `-Weekly Mon..Fri`, genuinely -- jobs 1-8 print `1-5` in the Cron column but
+register a `-Daily` trigger, so they *do* fire at weekends (harmlessly: there is
+no new session). And it registers at `RunLevel = Limited` rather than `Highest`,
+because it only runs python and writes files -- which is also why it could be
+registered **without an elevated shell**. `cleanup_scheduled_tasks.ps1` now
+takes an optional per-job `RunLevel`, defaulting to `Highest`.
 
 Each wrapper **self-detaches through `run_hidden.vbs`** so the console lives
 ~0.2 s instead of the whole run. That deliberately gives up Task Scheduler's
