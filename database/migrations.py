@@ -99,6 +99,28 @@ MIGRATIONS: list[tuple[int, str, list[str]]] = [
             "ALTER TABLE sector_flow_ts ADD COLUMN basket_return REAL",
         ],
     ),
+    (
+        12,
+        "drop two tables that never had a writer (CLAUDE.md §22.11)",
+        # `sector_accumulation_events` (migration 9) and `sector_flow_handoff`
+        # (migration 10) were created for features that shipped without them:
+        # the stealth journal is derived from `sector_flow_daily.accumulation_age`
+        # and the handoff matrix is computed on the fly by
+        # `analysis/flow_handoff.compute_handoff`. Both were empty in every
+        # database, and both cost something real -- reading
+        # `sector_accumulation_events` is what made `/api/sectors/stealth` report
+        # 0 events from a panel holding 21, for months, indistinguishably from
+        # the truth.
+        #
+        # The ORM classes are deleted in the same commit, and that is not
+        # optional: `init_db()` runs `Base.metadata.create_all` BEFORE
+        # `run_migrations()`, so a model left behind recreates the table on the
+        # next start and this migration would quietly undo itself.
+        [
+            "DROP TABLE IF EXISTS sector_accumulation_events",
+            "DROP TABLE IF EXISTS sector_flow_handoff",
+        ],
+    ),
 ]
 
 

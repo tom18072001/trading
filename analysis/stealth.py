@@ -233,6 +233,25 @@ def breakout_bar_scaled(atr: np.ndarray, i: int) -> float:
 _ACCUM_MAX_AGE = int(__import__("os").environ.get("ACCUMULATE_MAX_AGE_SESSIONS", "30"))
 
 
+#: The six `sector_flow_daily` columns `stealth_events()` reads. Named here so
+#: the two endpoints that feed it cannot select different subsets: a caller that
+#: forgets `atr_pct` gets a 0.0 default and silently scores against the fallback
+#: bar rather than the sector's own.
+_PANEL_FIELDS = ("sector_code", "date", "accumulation_age",
+                 "close_idx", "atr_pct", "stealth_score")
+
+def panel_from_rows(rows) -> list[dict]:
+    """`SectorFlowDaily` ORM rows -> the plain-dict panel `stealth_events` takes.
+
+    Takes anything with the six attributes, so `analysis/` still imports no DB
+    model and stays testable without a session.
+    """
+    return [
+        {f: (getattr(r, f) if f in ("sector_code", "date") else (getattr(r, f) or 0))
+         for f in _PANEL_FIELDS}
+        for r in rows
+    ]
+
 def stealth_events(rows: list[dict], bar=breakout_bar_scaled) -> list[dict]:
     """Turn stored `accumulation_age` into one record per stealth run.
 

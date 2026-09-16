@@ -4,8 +4,9 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from analysis.stealth import panel_from_rows, stealth_events
 from database.connection import get_session_dependency
-from database.models import SectorAccumulationEvent, SectorFlowDaily, SectorFlowTS
+from database.models import SectorFlowDaily, SectorFlowTS
 
 router = APIRouter(prefix="/api/sectors", tags=["sectors-flow"])
 
@@ -75,20 +76,24 @@ def stealth_now(db: Session = Depends(get_session_dependency)):
             "flow_z20": row.flow_z20, "stealth_score": row.stealth_score,
         })
     warming.sort(key=lambda r: -(r["flow_z20"] or 0))
-    # Recent closed events for attribution
-    events = (
-        db.query(SectorAccumulationEvent)
-          .order_by(SectorAccumulationEvent.start_date.desc())
-          .limit(20).all()
-    )
+    # Recent events for attribution, derived from `accumulation_age` — the same
+    # source `/api/stealth/history` uses (CLAUDE.md §22.11). This used to read
+    # `SectorAccumulationEvent`, which has had no writer since migration 9
+    # created it, so `history` was permanently `[]` and looked like a sector
+    # that had never accumulated rather than a table nobody fills.
+    events = stealth_events(panel_from_rows(
+        db.query(SectorFlowDaily)
+          .order_by(SectorFlowDaily.sector_code, SectorFlowDaily.date)
+          .all()
+    ))
     history = [
         {
-            "sector_code": e.sector_code, "start_date": e.start_date,
-            "end_date": e.end_date, "resolved": bool(e.resolved),
-            "peak_return_pct": e.peak_return_pct,
-            "lead_days_to_price": e.lead_days_to_price,
+            "sector_code": e["sector_code"], "start_date": e["start_date"],
+            "end_date": e["end_date"], "resolved": e["resolved"],
+            "peak_return_pct": e["peak_return_pct"],
+            "lead_days_to_price": e["lead_days_to_price"],
         }
-        for e in events
+        for e in events[:20]
     ]
     return {"active": active, "warming": warming, "history": history}
 

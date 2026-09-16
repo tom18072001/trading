@@ -10,9 +10,26 @@
 
 ## 1. Khung thị trường & Chế độ (Regime)
 
-**HMM Regime = CHOP**: HMM (Hidden Markov Model) là mô hình thống kê dùng để phân loại trạng thái thị trường. **CHOP** = thị trường đi ngang/giật cục, không có xu hướng rõ. Trong CHOP: tương quan giữa các mã/ngành tăng cao, không có "edge" bền vững → khuyến nghị giảm size, chỉ vào lệnh khi có tín hiệu chất lượng cao.
+**HMM Regime**: HMM (Hidden Markov Model) là mô hình thống kê phân loại trạng
+thái thị trường. Hệ thống có **đúng bốn nhãn, không hơn** — nguồn:
+`analysis/regime.py`, hằng số `_LABELS_BY_RETURN`, xếp theo lợi suất 1 ngày
+trung bình từ thấp lên cao:
 
-Các regime khác thường thấy: `TREND_UP`, `TREND_DOWN`, `RISK_OFF`.
+| nhãn | nghĩa |
+|---|---|
+| `risk_off` | thị trường né rủi ro — tiền rút khỏi cổ phiếu |
+| `chop` | đi ngang / giật cục, không xu hướng rõ |
+| `rotation` | tiền không rút, chỉ **đổi ngành** — đúng chế độ hệ thống này săn |
+| `risk_on` | thị trường ưa rủi ro — tiền vào cổ phiếu |
+
+> Trước 2026-08-25 mục này còn ghi thêm `TREND_UP`, `TREND_DOWN`, `RISK_OFF`.
+> **Ba nhãn đó chưa từng tồn tại trong code.** Ghi lại đây để ai đọc bản cũ
+> nhận ra, thay vì im lặng xoá.
+
+Trong `chop`: tương quan giữa các mã/ngành tăng cao, không có "edge" bền vững →
+**bạn** nên giảm size và chỉ vào khi tín hiệu chất lượng cao. Lưu ý đây là lời
+khuyên cho người đọc, **không phải hành vi của máy**: không có dòng code nào
+siết lệnh khi gặp `chop` — nhãn được publish và in ra báo cáo, chỉ vậy.
 
 **Confidence 0.50**: **Không phải** "model chắc bao nhiêu %". Từ 2026-08-24
 (`CLAUDE.md` §25.2) nó là **xác suất nhãn regime này còn giữ trong 5 phiên tới**
@@ -200,8 +217,8 @@ càng "trưởng thành". Trước 2026-08-23 cột này bằng 0 ở mọi dòn
 
 ## Tóm gọn triết lý báo cáo
 
-> Trong **CHOP regime** → không gồng lệnh, giảm size, chỉ vào khi tín hiệu chất
-> lượng cao.
+> Trong regime **`chop`** → không gồng lệnh, giảm size, chỉ vào khi tín hiệu
+> chất lượng cao. Đây là việc **bạn** làm; máy không tự siết (xem §1).
 >
 > Với stealth, tính đến 2026-08-24: gate §16.1 **chưa thắng được base rate**
 > (§16.14), nên `ACCUMULATE` đọc như danh sách theo dõi. Điều kiện duy nhất từng
