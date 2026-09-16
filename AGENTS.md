@@ -11,7 +11,11 @@ a discipline that cannot hold with two competing sources of truth
 
 Any agent working in this repository should read, in order:
 
-1. `CLAUDE.md` — the approved plan, doctrine and defaults.
+1. `CLAUDE.md` — the approved plan, doctrine and defaults. **Read this in full.**
+   Since 2026-09-16 it holds only the rules in force (48 KB); the evidence behind
+   them — dated measurements, post-mortems, test history — moved to
+   `docs/doctrine/`, one file per § (see `CLAUDE.md` §27 for the map). Read a
+   doctrine file when you need to know *why* a rule exists, not every session.
 2. `docs/reviews/CODE_REVIEW_2026-08-22.md` — known defects and their status.
 3. `ARCHITECTURE.md` — layers, contracts, schema.
 4. `MODIFICATION_LOG.md` — what changed, when and why.

@@ -115,7 +115,7 @@ uv run pytest tests/ -q       # 342 tests — backend
 cd frontend && npm test
 ```
 
-Xem `CLAUDE.md` §19 cho module coverage. Live integration (`POST /api/insight/refresh` — gọi vnstock KBS + LLM provider thật) **không nằm trong pytest**, chạy tay sau khi đụng chạm các path đó.
+Module coverage và *vì sao từng bài test tồn tại*: `docs/doctrine/19-testing-history.md` (`CLAUDE.md` §19 giờ chỉ giữ bảng đếm + 2 lệnh chạy). Live integration (`POST /api/insight/refresh` — gọi vnstock KBS + LLM provider thật) **không nằm trong pytest**, chạy tay sau khi đụng chạm các path đó.
 
 ### Smoketest — máy này có chạy được không
 
