@@ -14,6 +14,49 @@
 
 ---
 
+## 2026-09-16 (3) — PNJ and PLX: the question the interrupted session never answered
+- Author: Claude Code on behalf of Tom
+- Files: none (measurement only, recorded here rather than in `CLAUDE.md`
+  because that file is already 134 KB and is re-sent every turn — see below).
+- Reason: recovered from the transcript of session `6f63d327`
+  (2026-09-15, interrupted). Its only instruction was *"Đánh giá con PNJ và PLX
+  dựa vào cả thuật toán đã có / hay cải tiến — tôi thấy thuật toán nhiều cái
+  chưa chính xác"* and it was never answered.
+- Summary:
+  - **The old system recommended both, repeatedly, and both lost.** PNJ went out
+    three times (2026-08-25/28/31) at old scores +5/+4/+4: T+3 −6.90% / −7.47% /
+    −7.47%, average **−7.28%** against a −0.90% base rate, **3 of 3 hit the
+    stop, 0 of 3 reached target**; the first is −16.02% by T+10. PLX went out
+    three times at +1/+8/+4 for a T+3 average of −2.44% against −1.22%.
+  - **All six would be rejected by the rewritten score**, each for a stated
+    reason. The clearest is PNJ on 2026-08-25: old score **+5**, RSI(2) at
+    **98.2** — maximally overbought — below its SMA200 and carrying a 5.5% ATR.
+    The old rule paid +2 for RSI(14) in 50-70 and +2 more for a volume surge,
+    so it rewarded precisely the profile that was about to fall 16%. This is
+    §26.2's failure mode in a case Tom named himself before any of it was
+    measured.
+  - PLX on 2026-08-27 scored **+8**, near the old ceiling, on RSI(2) of 3.2 —
+    genuinely oversold, but below SMA200, which is the falling-knife shape the
+    new trend gate exists to block.
+  - Live on 2026-09-15 both are still blocked: PNJ ranks 51/93 and PLX 53/93,
+    both floored at −20 for the same reason (no confirmed uptrend).
+- Follow-ups:
+  - **The crashes are context exhaustion, confirmed from the transcripts.**
+    Session `4b2f418e` carries the marker *"continued from a previous
+    conversation that ran out of context"* **five times in one day** (8,650
+    records, 17.8 MB); `9245140a` three times. Not a software fault.
+    `Trading/CLAUDE.md` is **133,622 bytes ≈ 33,400 tokens, re-sent every
+    turn**, against the 10 KB budget the parent `claude/CLAUDE.md` sets — and
+    **72% of it (96 KB) is dated post-mortems**, not standing doctrine. Worse,
+    that file is declared CACHED and "DO NOT modify mid-session"; the three
+    §26 appends made today each invalidated the cache. Proposed split (NOT
+    done, it needs Tom's approval since it restructures the governing
+    document): keep §1-15 and §21 resident (~14 KB), move §16.11-16.15, §19,
+    §20 and §22-26 to `docs/doctrine/` behind one-line pointers. Est. 134 KB →
+    ~20 KB, about 28,000 tokens off every turn.
+
+---
+
 ## 2026-09-16 (2) — the horizon is worth ten times the algorithm
 - Author: Claude Code on behalf of Tom
 - Files:
