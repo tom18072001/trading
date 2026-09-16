@@ -54,8 +54,11 @@ from config import (
 from database.connection import SessionLocal
 from database.models import SectorConstituent, SectorSignal
 from services.picks_scoring import (
+    MIN_BUY_SCORE,
     PickProfile,
+    blended_rank_scores,
     compute_stop_target_rr,
+    horizon_note,
     is_valid_long_pick,
     score_ticker,
 )
@@ -76,18 +79,23 @@ class TickerRow:
     ret_20d: float | None = None
     atr_pct: float | None = None      # percent units (2.5 == 2.5%)
     rsi_14: float | None = None
+    rsi_2: float | None = None            # Connors oscillator -- primary score term
+    ret_1d: float | None = None           # percent units, e.g. -1.8 for -1.8%
     macd_hist: float | None = None
     bb_upper: float | None = None
     bb_lower: float | None = None
     price_to_sma_20: float | None = None
     price_to_sma_50: float | None = None
+    price_to_sma_200: float | None = None  # trend gate; None -> score floored
     volume_ratio_20: float | None = None
     adx_14: float | None = None
     bb_position: float | None = None
     volatility_20d: float | None = None
+    obv_chg20: float | None = None        # OBV 20d change / 20d avg volume
+    rank_score: float | None = None       # cross-sectional ordering key
     dv_20d: float = 0.0
     foreign_room_pct: float | None = None
-    score: int = 0
+    score: float = 0.0
     stop: float | None = None
     target: float | None = None
     rr: float | None = None
@@ -171,7 +179,7 @@ class PickEntry:
     stop: float | None
     target: float | None
     rr: float | None
-    score: int
+    score: float
     atr_pct: float | None
     upside_pct: float | None
     downside_pct: float | None
@@ -322,16 +330,44 @@ def _technical_bits(r: "TickerRow") -> list[str]:
     return bits
 
 
+def _rank_key(r: "TickerRow") -> tuple[float, str]:
+    """Sort key for a long shortlist -- ASCENDING, best first: score, then symbol.
+
+    The score is negated so one `sort(key=_rank_key)` puts the highest score
+    first while leaving the symbol tie-break in normal A-Z order. Sorting the
+    un-negated tuple with `reverse=True` would flip BOTH halves and hand back
+    Z-A inside every tie.
+
+    The tie-break used to be 20d dollar volume, descending -- so inside every
+    score bucket the ranking handed back the largest, most-traded, slowest name
+    on the board. Measured over 143 names x 1,168 sessions
+    (`scripts/ticker_alpha_bench.py`, exit +3 sessions), that tie-break took the
+    ranking's excess over the base rate from -0.06% to -0.15%: it was not
+    neutral, it actively made the shortlist worse, in four of five years.
+
+    The replacement is the symbol, i.e. an arbitrary but STABLE order. That is
+    deliberate: a tie-break should not smuggle in a second, unmeasured factor,
+    and a stable one keeps the daily email from reshuffling equal-scored names
+    for no reason. Liquidity is already enforced upstream as a hard filter
+    (`MIN_DV_20D`), which is where a liquidity requirement belongs.
+    """
+    return (-(r.rank_score if r.rank_score is not None else 0.0), -r.score, r.symbol)
+
+
 def _compose_thesis(r: "TickerRow", action: str) -> str:
     """One-line VN rationale. Caller enriches with news bullets separately."""
     bits = _technical_bits(r)
     tag = ", ".join(bits[:4]) if bits else "clean technicals"
     if action == "BUY":
         rr_txt = f", R:R {r.rr:.1f}" if r.rr else ""
-        return (f"Composite score {r.score}. {tag}{rr_txt}. "
-                f"T+ swing: mua {r.close:.1f}, stop {r.stop:.1f}, target {r.target:.1f}.")
+        # The horizon is part of the instruction, not decoration. Without it the
+        # card reads as a three-day trade and gets closed as one -- see
+        # PROFILE_HORIZON_SESSIONS for what that costs.
+        return (f"Điểm xếp hạng {r.score:+.1f}. {tag}{rr_txt}. "
+                f"Mua {r.close:.1f}, stop {r.stop:.1f}, target {r.target:.1f}. "
+                f"{horizon_note(PickProfile.SWING)}")
     # SELL
-    return (f"Composite score {r.score}. {tag}. "
+    return (f"Điểm xếp hạng {r.score:+.1f}. {tag}. "
             f"Đề xuất thoát / tránh: giá {r.close:.1f}, stop-out nếu thủng {r.stop:.1f}.")
 
 
@@ -518,6 +554,37 @@ def _build_ticker_row(symbol: str, sector_code: str, ohlcv: pd.DataFrame,
     if not close or close <= 0:
         return None
 
+    # --- inputs the 2026-09-16 scoring rewrite needs, computed here rather than
+    # in analysis.feature_engineering: SMA200 and RSI(2) are a picks concern,
+    # and widening the shared indicator set would change the column shape every
+    # other consumer of that module sees.
+    rsi_2 = ret_1d = price_to_sma_200 = obv_chg20 = None
+    try:
+        cl = df["close"].astype(float)
+        if len(cl) >= 3:
+            d = cl.diff()
+            up = d.clip(lower=0).ewm(alpha=0.5, adjust=False).mean()
+            dn = (-d.clip(upper=0)).ewm(alpha=0.5, adjust=False).mean()
+            last_up, last_dn = float(up.iloc[-1]), float(dn.iloc[-1])
+            # All-up and all-down windows are the normal extremes of a 2-period
+            # RSI, not errors: pin them to 100 / 0 instead of dividing by zero.
+            rsi_2 = 100.0 if last_dn == 0 else (0.0 if last_up == 0
+                                               else 100.0 - 100.0 / (1 + last_up / last_dn))
+            ret_1d = float(cl.pct_change().iloc[-1]) * 100.0
+        vol = df["volume"].astype(float) if "volume" in df.columns else None
+        if vol is not None and len(cl) >= 21:
+            import numpy as _np
+            obv = (_np.sign(cl.diff()).fillna(0) * vol).cumsum()
+            avgv = float(vol.rolling(20).mean().iloc[-1] or 0)
+            if avgv > 0:
+                obv_chg20 = float(obv.iloc[-1] - obv.iloc[-21]) / avgv
+        if len(cl) >= 200:
+            sma200 = float(cl.rolling(200).mean().iloc[-1])
+            if sma200 > 0:
+                price_to_sma_200 = close / sma200 - 1.0
+    except Exception as e:
+        log.debug("[picks-universe] score inputs fail %s: %s", symbol, e)
+
     row = TickerRow(
         symbol=symbol,
         sector_code=sector_code,
@@ -526,11 +593,15 @@ def _build_ticker_row(symbol: str, sector_code: str, ohlcv: pd.DataFrame,
         ret_20d=_last(df.get("return_20d", pd.Series(dtype=float))),
         atr_pct=(_last(df.get("ATR_14_pct", pd.Series(dtype=float))) or 0) * 100,
         rsi_14=_last(df.get("RSI_14", pd.Series(dtype=float))),
+        rsi_2=rsi_2,
+        ret_1d=ret_1d,
         macd_hist=_last(df.get("MACD_hist", pd.Series(dtype=float))),
         bb_upper=_last(df.get("BB_upper", pd.Series(dtype=float))),
         bb_lower=_last(df.get("BB_lower", pd.Series(dtype=float))),
         price_to_sma_20=_last(df.get("price_to_SMA_20", pd.Series(dtype=float))),
         price_to_sma_50=_last(df.get("price_to_SMA_50", pd.Series(dtype=float))),
+        price_to_sma_200=price_to_sma_200,
+        obv_chg20=obv_chg20,
         volume_ratio_20=_last(df.get("volume_ratio_20", pd.Series(dtype=float))),
         adx_14=_last(df.get("ADX_14", pd.Series(dtype=float))),
         bb_position=_last(df.get("BB_position", pd.Series(dtype=float))),
@@ -546,14 +617,15 @@ def _build_ticker_row(symbol: str, sector_code: str, ohlcv: pd.DataFrame,
     if row.ret_20d is not None:
         row.ret_20d *= 100
 
-    # Composite score
+    # Composite score -- see services/picks_scoring.py for what each term is
+    # and the measurement that chose it.
     row.score = score_ticker({
-        "rsi_14": row.rsi_14,
-        "macd_hist": row.macd_hist,
-        "price_to_sma_20": row.price_to_sma_20,
+        "close": row.close,
+        "rsi_2": row.rsi_2,
+        "ret_1d": row.ret_1d,
+        "atr_pct": row.atr_pct,
         "price_to_sma_50": row.price_to_sma_50,
-        "adx_14": row.adx_14,
-        "volume_ratio_20": row.volume_ratio_20,
+        "price_to_sma_200": row.price_to_sma_200,
     })
 
     # Stop / target / RR — default to SWING profile; callers needing TPLUS
@@ -785,7 +857,11 @@ class PicksUniverseService:
 
         # --- Stage D: capability filter pass 2 + OHLCV (parallel) ---
         end = datetime.now().strftime("%Y-%m-%d")
-        start = (datetime.now() - timedelta(days=110)).strftime("%Y-%m-%d")  # ~70 bd
+        # 400 calendar days ~ 270 sessions. Was 110 (~70 sessions), which
+        # could not produce an SMA200 -- and the 2026-09-16 scoring rewrite
+        # gates every pick on one. Same ONE call per symbol, longer range,
+        # so this costs no extra budget against the 18 req/min KBS gate.
+        start = (datetime.now() - timedelta(days=400)).strftime("%Y-%m-%d")  # ~270 bd
         tickers: dict[str, TickerRow] = {}
         fetch_failed = 0     # true source/fetch failures (empty df / exception)
         quality_reject = 0   # legitimate filters (short history, thin liquidity)
@@ -852,12 +928,24 @@ class PicksUniverseService:
                  "(ohlcv_fail_pct=%.2f)",
                  len(tickers), fetch_failed, quality_reject, fr.ohlcv_fail_pct)
 
-        # --- Stage E-H: already done inline in _build_ticker_row. Group by sector. ---
+        # --- Stage E: cross-sectional ordering -------------------------------
+        # The per-row score says whether a name is worth owning; this says which
+        # of the worthy ones comes first. It must run over the WHOLE universe,
+        # not per sector, because a rank is only meaningful against the same
+        # cross-section the bench measured it on. See picks_scoring 2026-09-16.
+        _rows = list(tickers.values())
+        if len(_rows) >= 2:
+            _blend = blended_rank_scores([r.score for r in _rows],
+                                         [r.obv_chg20 for r in _rows])
+            for _r, _b in zip(_rows, _blend, strict=True):
+                _r.rank_score = round(_b, 4)
+
+        # --- Stage F-H: already done inline in _build_ticker_row. Group by sector. ---
         by_sector: dict[str, list[TickerRow]] = {c: [] for c in SECTORS}
         for row in tickers.values():
             by_sector.setdefault(row.sector_code, []).append(row)
         for code in by_sector:
-            by_sector[code].sort(key=lambda r: (r.score, r.dv_20d), reverse=True)
+            by_sector[code].sort(key=_rank_key)
 
         # --- Freshness evaluation ---
         if fr.ohlcv_fail_pct >= UNIVERSE_OHLCV_FAIL_PCT_MAX:
@@ -927,29 +1015,51 @@ class PicksUniverseService:
         if not candidates and action_up == "SELL":
             candidates = list(tickers.values())
 
-        # BUY path: require is_valid_buy; sort by (score, dv_20d) desc.
+        # BUY path: require is_valid_buy AND a score that clears MIN_BUY_SCORE;
+        # best score first (_rank_key).
         # SELL path: pick weakest (score asc); is_valid_buy irrelevant.
+        #
+        # The score gate is not decoration. `is_valid_buy` only says the stop
+        # and target are geometrically sane -- it knows nothing about whether
+        # the name is worth owning. Under the old 0..7 integer score that was
+        # harmless because nothing scored below 0; under the 2026-09-16 score a
+        # negative number means "overbought inside an uptrend", which is exactly
+        # the name this ranking exists to avoid. Without this line the page
+        # would hand back a full five every day by padding with the very rows
+        # the rewrite is meant to demote. A short list is the honest answer on a
+        # day when nothing qualifies, and the empty state already exists.
         if action_up == "BUY":
-            filtered = [r for r in candidates if r.is_valid_buy]
-            filtered.sort(key=lambda r: (r.score, r.dv_20d), reverse=True)
+            filtered = [r for r in candidates
+                        if r.is_valid_buy and r.score >= MIN_BUY_SCORE]
+            filtered.sort(key=_rank_key)
             # Top-up (2026-06-18): when the ranker flags few BUY/ACCUMULATE
             # sectors, the BUY list starves (e.g. only 1 sector → 1-3 picks).
-            # Back-fill with the best-scored is_valid_buy tickers from the WHOLE
-            # universe so the user still sees a full shortlist. These passed all
-            # capability + validity gates; they're "next-best" ideas, not BUY-
-            # flagged sectors — the thesis text carries the metrics.
+            # Back-fill with the best-scored qualifying tickers from the WHOLE
+            # universe. These passed capability, validity AND the score gate;
+            # they are "next-best" ideas, not BUY-flagged sectors — the thesis
+            # text carries the metrics.
+            #
+            # 2026-09-16: this no longer guarantees a list of `n`. It widens the
+            # POOL, it does not lower the BAR, so a day on which nothing scores
+            # above MIN_BUY_SCORE returns fewer than n — or none. That is the
+            # intended behaviour; padding to a fixed length with names the
+            # ranking demotes is what §26.4 removed.
             if len(filtered) < n:
                 seen = {r.symbol for r in filtered}
                 extra = [
                     r for r in tickers.values()
-                    if r.is_valid_buy and r.symbol not in seen
+                    if r.is_valid_buy and r.score >= MIN_BUY_SCORE
+                    and r.symbol not in seen
                 ]
-                extra.sort(key=lambda r: (r.score, r.dv_20d), reverse=True)
+                extra.sort(key=_rank_key)
                 filtered.extend(extra)
         else:
             filtered = list(candidates)
-            # Prefer: negative MACD, RSI < 50, score low
-            filtered.sort(key=lambda r: (r.score, -(r.dv_20d or 0)))
+            # Weakest score first, symbol as the stable tie-break. No score
+            # floor here on purpose: a SELL list exists to surface the weakest
+            # names, so a minimum score would empty exactly the list that
+            # should be full.
+            filtered.sort(key=lambda r: (r.score, r.symbol))
         chosen = filtered[:n]
 
         from services.picks_news import fetch_news
@@ -1079,9 +1189,31 @@ class PicksUniverseService:
                 for s in chunk:
                     out[s] = None
                 continue
+            # A board whose ENTIRE foreign block reads zero is not telling you
+            # that every blue chip on HOSE is foreign-full -- it is telling you
+            # it has no foreign data right now. Observed live 2026-09-16: VCB,
+            # FPT, HPG, SSI and DCM all came back with foreign_room,
+            # foreign_buy_volume and foreign_sell_volume at 0, and because the
+            # filter below is `room > 0`, that wiped the entire universe and the
+            # build finished with 0 tickers.
+            #
+            # The asymmetry is the same one 25.5 logged for the VNINDEX
+            # carry-forward: a zero that means "missing" and a zero that means
+            # "none left" are the same number, so the only defence is to judge
+            # the column, not the cell. One full name among normal ones is
+            # ordinary; every name full at once is a dead feed.
+            room_all_zero = False
+            if room_col is not None:
+                vals = pd.to_numeric(df[room_col], errors="coerce").dropna()
+                room_all_zero = len(vals) > 0 and (vals == 0).all()
+                if room_all_zero:
+                    log.warning("[picks-universe] foreign_room is 0 for all %d names in "
+                                "this chunk — treating as UNKNOWN, not as no-room",
+                                len(vals))
+
             for _, r in df.iterrows():
                 s = str(r[sym_col]).upper().strip()
-                if room_col and not pd.isna(r.get(room_col)):
+                if room_col and not room_all_zero and not pd.isna(r.get(room_col)):
                     try:
                         val = float(r[room_col])
                         out[s] = val

@@ -1,0 +1,330 @@
+"""Event-style bench: entry rule + target/stop geometry, exactly as Tom trades it.
+
+`ticker_alpha_bench.py` ranks the cross-section and exits on a fixed clock. That
+is the right shape for measuring a factor and the wrong shape for measuring the
+product: the daily card carries an ENTRY, a TARGET and a STOP, and the trade ends
+at whichever comes first. A fixed-clock exit cannot see that the shipped card's
+stop is three times more likely to be touched inside T+3 than its target.
+
+So this walks each trade forward bar by bar:
+
+    entry  = next session's OPEN (the report is written after the close)
+    exit   = first of  (high >= target) | (low <= stop) | max_hold sessions
+    a session touching both is booked as a STOP  (conservative; no intrabar path)
+
+and every variant is scored against a RANDOM-ENTRY CONTROL drawn from the same
+eligible universe on the same dates with the same geometry. 16.12's rule applies
+here too: a rule that does not beat its own control is not a rule.
+
+Usage:
+    python scripts/tplus_strategy_bench.py
+    python scripts/tplus_strategy_bench.py --max-hold 3 --slippage-bps 15
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+PANEL_DB = ROOT / "data" / "price_panel.db"
+
+from config import BACKTEST_FEE_BPS, BACKTEST_SELL_TAX_BPS  # noqa: E402
+from scripts.ticker_alpha_bench import build_features, load_panel  # noqa: E402
+
+FEE_ROUND_TRIP = (2 * BACKTEST_FEE_BPS + BACKTEST_SELL_TAX_BPS) / 10_000.0
+
+
+# ============================ entry rules ====================================
+# Each returns a boolean frame: True where a long is opened at the next open.
+
+RULES: dict = {}
+
+
+def rule(name):
+    def deco(fn):
+        RULES[name] = fn
+        return fn
+    return deco
+
+
+@rule("shipped_score_ge5")
+def _(f):
+    """What ships today: the 0..7 trend score, taken where it is strong."""
+    from scripts.ticker_alpha_bench import FACTORS
+    return FACTORS["A_shipped_score"](f) >= 5
+
+
+@rule("shipped_score_top5")
+def _(f):
+    """What ships today, ranked: the 5 highest (score, dv) names each day."""
+    from scripts.ticker_alpha_bench import FACTORS
+    s = FACTORS["A_shipped_score_dv"](f)
+    return s.rank(axis=1, ascending=False) <= 5
+
+
+@rule("rsi2_oversold")
+def _(f):
+    """Connors RSI(2) < 10 -- the canonical short-horizon entry."""
+    return f["rsi2"] < 10
+
+
+@rule("rsi2_oversold_uptrend")
+def _(f):
+    """Connors' full published rule: RSI(2) < 10 AND price above its SMA200."""
+    return (f["rsi2"] < 10) & (f["close"] > f["sma200"])
+
+
+@rule("rsi2_uptrend_quiet")
+def _(f):
+    """The same, restricted to names whose 20d vol is in the calmer half.
+
+    ATR sets the target and stop distance, so a wild name gets a wide target it
+    cannot reach inside the hold. Quiet names make the geometry reachable."""
+    quiet = f["std20"].rank(axis=1, pct=True) < 0.5
+    return (f["rsi2"] < 10) & (f["close"] > f["sma200"]) & quiet
+
+
+@rule("comp_top5")
+def _(f):
+    """Top 5 of the composite the ranking bench picked: RSI(2) + 1d reversal +
+    low vol + weak close, blended by rank."""
+    from scripts.ticker_alpha_bench import FACTORS
+    s = FACTORS["I_comp_rev_qual"](f)
+    return s.rank(axis=1, ascending=False) <= 5
+
+
+@rule("comp_top5_uptrend")
+def _(f):
+    from scripts.ticker_alpha_bench import FACTORS
+    s = FACTORS["I_comp_rev_qual"](f).where(f["close"] > f["sma200"])
+    return s.rank(axis=1, ascending=False) <= 5
+
+
+@rule("comp_top3_uptrend")
+def _(f):
+    from scripts.ticker_alpha_bench import FACTORS
+    s = FACTORS["I_comp_rev_qual"](f).where(f["close"] > f["sma200"])
+    return s.rank(axis=1, ascending=False) <= 3
+
+
+@rule("proposed_top5")
+def _(f):
+    """The candidate for `picks_scoring.score_ticker`: oversold RSI(2) plus a
+    one-day drop measured in the stock's own ATRs, above SMA50, penalised for a
+    wide ATR, gated on SMA200. Top 5 each session."""
+    from scripts.ticker_alpha_bench import FACTORS
+    s = FACTORS["P2_proposed_gated_quiet"](f)
+    return s.rank(axis=1, ascending=False) <= 5
+
+
+@rule("proposed_top3")
+def _(f):
+    from scripts.ticker_alpha_bench import FACTORS
+    s = FACTORS["P2_proposed_gated_quiet"](f)
+    return s.rank(axis=1, ascending=False) <= 3
+
+
+@rule("swing_prop_obv_top5")
+def _(f):
+    """2-4 week candidate: the shipped score blended with on-balance-volume
+    trend. Best information coefficient of anything measured (t = 4.3 at +20)
+    and positive in every year it can be evaluated."""
+    from scripts.ticker_alpha_bench import FACTORS
+    return FACTORS["X_prop_obv"](f).rank(axis=1, ascending=False) <= 5
+
+
+@rule("swing_prop_small_obv_top5")
+def _(f):
+    """The same plus a size tilt. Higher pooled return, but 2025 is negative --
+    which is the whole reason 16.12 asks for the within-year split."""
+    from scripts.ticker_alpha_bench import FACTORS
+    return FACTORS["X_prop_small_obv"](f).rank(axis=1, ascending=False) <= 5
+
+
+@rule("swing_obv_only_top5")
+def _(f):
+    from scripts.ticker_alpha_bench import FACTORS
+    return FACTORS["V_obv_trend"](f).rank(axis=1, ascending=False) <= 5
+
+
+@rule("pullback_in_uptrend")
+def _(f):
+    """A plain, well-worn swing entry: uptrend intact (above SMA50 and SMA200),
+    price pulled back below its SMA20, and the tape is not in free fall."""
+    return ((f["close"] > f["sma50"]) & (f["close"] > f["sma200"])
+            & (f["close"] < f["sma20"]) & (f["ret5"] > -0.10))
+
+
+# ============================ geometry =======================================
+
+GEOMETRIES = {
+    # name:            (target_atr, stop_atr)   -- ATR multiples, as picks_scoring does
+    "SWING 2.5/1.8 (shipped)": (2.5, 1.8),
+    "TPLUS 2.0/1.0": (2.0, 1.0),
+    "tight 1.0/1.0": (1.0, 1.0),
+    "tight 1.2/0.8": (1.2, 0.8),
+    "wide-stop 1.5/2.5": (1.5, 2.5),
+    "wide-stop 2.0/3.0": (2.0, 3.0),
+    "no stop, time exit": (99.0, 99.0),
+}
+
+
+def run(entries: pd.DataFrame, f: dict, p: dict, *, target_atr: float,
+        stop_atr: float, max_hold: int, min_dv: float,
+        cost: float) -> pd.DataFrame:
+    op, hi, lo, cl = p["open"], p["high"], p["low"], p["close"]
+    atr = f["atr_pct"] / 100.0
+    elig = (f["dv20"] > min_dv) & entries.fillna(False) & atr.notna()
+
+    OP, HI, LO, CL = op.values, hi.values, lo.values, cl.values
+    A = atr.values
+    E = elig.values
+    dates = op.index
+    syms = list(op.columns)
+
+    out = []
+    n_t = len(dates)
+    for i in range(n_t - max_hold - 2):
+        row = np.flatnonzero(E[i])
+        if row.size == 0:
+            continue
+        for j in row:
+            entry = OP[i + 1, j]
+            a = A[i, j]
+            if not np.isfinite(entry) or entry <= 0 or not np.isfinite(a) or a <= 0:
+                continue
+            tgt = entry * (1 + target_atr * a)
+            stp = entry * (1 - stop_atr * a)
+            held, px, why = max_hold, CL[i + max_hold, j], "time"
+            for k in range(1, max_hold + 1):
+                bar_hi, bar_lo = HI[i + k, j], LO[i + k, j]
+                if np.isfinite(bar_lo) and bar_lo <= stp:  # stop first: no intrabar path
+                    held, px, why = k, stp, "stop"
+                    break
+                if np.isfinite(bar_hi) and bar_hi >= tgt:
+                    held, px, why = k, tgt, "target"
+                    break
+            if not np.isfinite(px):
+                continue
+            out.append((dates[i], syms[j], entry, px / entry - 1 - cost, held, why))
+    return pd.DataFrame(out, columns=["date", "symbol", "entry", "ret", "held", "exit"])
+
+
+def random_control(entries: pd.DataFrame, f: dict, p: dict, seed: int = 7, **kw):
+    """Same number of trades, same days, same geometry -- names drawn at random
+    from the eligible universe. This is the base rate 16.12 demands."""
+    rng = np.random.default_rng(seed)
+    per_day = entries.fillna(False).sum(axis=1)
+    pool = (f["dv20"] > kw["min_dv"]) & f["atr_pct"].notna()
+    fake = pd.DataFrame(False, index=entries.index, columns=entries.columns)
+    for d, k in per_day[per_day > 0].items():
+        cand = pool.columns[pool.loc[d].values]
+        if len(cand) == 0:
+            continue
+        pick = rng.choice(cand, size=min(int(k), len(cand)), replace=False)
+        fake.loc[d, pick] = True
+    return run(fake, f, p, **kw)
+
+
+def summarise(t: pd.DataFrame, label: str, years: float) -> dict:
+    if t.empty:
+        return {"label": label, "n": 0}
+    return {
+        "label": label,
+        "n": len(t),
+        "per_yr": len(t) / years,
+        "mean": t["ret"].mean() * 100,
+        "median": t["ret"].median() * 100,
+        "win": (t["ret"] > 0).mean(),
+        "held": t["held"].mean(),
+        "tgt": (t["exit"] == "target").mean(),
+        "stp": (t["exit"] == "stop").mean(),
+        "total": t["ret"].sum() * 100,
+        "by_year": t.groupby(t["date"].dt.year)["ret"].mean() * 100,
+    }
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--max-hold", type=int, default=3)
+    ap.add_argument("--min-dv", type=float, default=5e6)
+    ap.add_argument("--slippage-bps", type=float, default=15,
+                    help="per side; 15bps is a liquid HOSE name at the open")
+    ap.add_argument("--start", default="2023-01-01")
+    ap.add_argument("--geometry", default="")
+    args = ap.parse_args()
+
+    cost = FEE_ROUND_TRIP + 2 * args.slippage_bps / 10_000.0
+    p = load_panel()
+    f = build_features(p)
+    idx = p["close"].index
+    idx = idx[idx >= pd.Timestamp(args.start)]
+    years = (idx[-1] - idx[0]).days / 365.25
+
+    print(f"panel {p['close'].shape[1]} symbols, window {idx[0].date()} .. {idx[-1].date()} "
+          f"({years:.1f}y)")
+    print(f"cost {cost*100:.2f}% round trip (fees {FEE_ROUND_TRIP*100:.2f}% + "
+          f"slippage {2*args.slippage_bps/100:.2f}%) | max hold {args.max_hold} sessions\n")
+
+    geos = ({args.geometry: GEOMETRIES[args.geometry]} if args.geometry else GEOMETRIES)
+    for gname, (ta, sa) in geos.items():
+        print("=" * 108)
+        print(f"GEOMETRY {gname}   target +{ta}xATR   stop -{sa}xATR   "
+              f"max hold {args.max_hold}")
+        print("=" * 108)
+        print(f"{'entry rule':26s} {'n':>6s} {'/yr':>6s} {'mean%':>7s} {'med%':>7s} "
+              f"{'win':>6s} {'held':>5s} {'tgt%':>6s} {'stop%':>6s} {'sum%':>8s}")
+        rows = []
+        for rname, fn in RULES.items():
+            ent = fn(f).fillna(False).astype(bool)
+            ent.loc[ent.index < pd.Timestamp(args.start)] = False
+            t = run(ent, f, p, target_atr=ta, stop_atr=sa, max_hold=args.max_hold,
+                    min_dv=args.min_dv, cost=cost)
+            s = summarise(t, rname, years)
+            if not s["n"]:
+                continue
+            ctrl = random_control(ent, f, p, target_atr=ta, stop_atr=sa,
+                                  max_hold=args.max_hold, min_dv=args.min_dv,
+                                  cost=cost)
+            s["ctrl"] = summarise(ctrl, rname + " (random)", years)
+            rows.append(s)
+        if not rows:
+            continue
+        ctrl0 = rows[0]["ctrl"]
+        print(f"{'RANDOM CONTROL':26s} {ctrl0['n']:>6d} {ctrl0['per_yr']:>6.0f} "
+              f"{ctrl0['mean']:>7.2f} {ctrl0['median']:>7.2f} {ctrl0['win']:>6.2f} "
+              f"{ctrl0['held']:>5.1f} {ctrl0['tgt']*100:>6.0f} {ctrl0['stp']*100:>6.0f} "
+              f"{ctrl0['total']:>8.0f}")
+        for s in sorted(rows, key=lambda r: -r["mean"]):
+            print(f"{s['label']:26s} {s['n']:>6d} {s['per_yr']:>6.0f} {s['mean']:>7.2f} "
+                  f"{s['median']:>7.2f} {s['win']:>6.2f} {s['held']:>5.1f} "
+                  f"{s['tgt']*100:>6.0f} {s['stp']*100:>6.0f} {s['total']:>8.0f}")
+        print()
+        print("EXCESS over the rule's OWN random control, per year "
+              "(16.12: pooled is not enough)")
+        yrs = sorted({int(y) for r in rows for y in r["by_year"].index})
+        print(f"{'entry rule':26s} {'pooled':>8s}  " + " ".join(f"{y:>7d}" for y in yrs))
+        for s in sorted(rows, key=lambda r: -(r["mean"] - r["ctrl"]["mean"])):
+            cby = s["ctrl"]["by_year"]
+            cells = []
+            for y in yrs:
+                if y in s["by_year"].index and y in cby.index:
+                    cells.append(f"{s['by_year'][y] - cby[y]:>+7.2f}")
+                else:
+                    cells.append(f"{'':>7s}")
+            n_pos = sum(1 for c in cells if c.strip().startswith("+"))
+            mark = "  ALL YEARS +" if n_pos == len([c for c in cells if c.strip()]) else ""
+            print(f"{s['label']:26s} {s['mean'] - s['ctrl']['mean']:>+8.2f}  "
+                  + " ".join(cells) + mark)
+        print()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

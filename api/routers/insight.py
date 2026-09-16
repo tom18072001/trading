@@ -89,7 +89,7 @@ def _build_picks(top_sectors: list[tuple[str, float, str]],
                 "action": action,
                 "horizon": f"T+{TPLUS_HOLD_DAYS}",
                 "score": round(float(score), 3),
-                "ticker_score": int(ticker.score),
+                "ticker_score": float(ticker.score),
                 "upside_pct": upside_pct,
                 "downside_pct": downside_pct,
                 "r_r": rr_t,
@@ -118,7 +118,7 @@ def _build_picks(top_sectors: list[tuple[str, float, str]],
                 f"flow_z {common['flow_z20']:+.2f}" if common['flow_z20'] is not None else None,
                 f"FH {int(common['foreign_hit_20d']*100)}%" if common['foreign_hit_20d'] is not None else None,
                 f"RS20 {rs20:+.1%}" if rs20 is not None else None,
-                f"score {ticker.score}",
+                f"score {ticker.score:+.1f}",
             ]
             thesis = " · ".join([b for b in bits if b])
             picks.append({

@@ -344,15 +344,27 @@ def main(argv: list[str] | None = None) -> None:
     in_secs  = ranker_in if ranker_in else set()
     out_secs = ranker_out if ranker_out else flow_out_secs  # only fall back on SELL side
 
-    buy_cands = [s for s in scored if s["sector"] in in_secs and s["score"] >= 3 and s["ret_5d"] > -1]
-    buy_cands.sort(key=lambda x: (x["score"], x["dv"]), reverse=True)
+    from services.picks_scoring import MAX_5D_DROP_PCT, MIN_BUY_SCORE
+
+    # Thresholds and tie-break: services/picks_scoring.py, 2026-09-16. The old
+    # `score >= 3` was a cut on a 0..7 integer scale that no longer exists, the
+    # old `ret_5d > -1` excluded the pullbacks the new score is built to find,
+    # and the old `(score, dv)` tie-break was measured to make the shortlist
+    # worse, not neutral. Ties break on the symbol: stable, and not a second
+    # unmeasured factor smuggled into the ranking.
+    buy_cands = [s for s in scored
+                 if s["sector"] in in_secs
+                 and s["score"] >= MIN_BUY_SCORE
+                 and s["ret_5d"] > MAX_5D_DROP_PCT]
+    buy_cands.sort(key=lambda x: (-x["score"], x["sym"]))
     buys = buy_cands[:6]
     sell_cands = [s for s in scored if s["sector"] in out_secs]
-    sell_cands.sort(key=lambda x: (x["score"], -x["dv"]))
+    sell_cands.sort(key=lambda x: (x["score"], x["sym"]))
     sells = sell_cands[:6]
     already = {b["sym"] for b in buys} | {s["sym"] for s in sells}
-    watch_cands = [s for s in scored if s["sym"] not in already and s["score"] >= 4]
-    watch_cands.sort(key=lambda x: (x["ret_5d"], x["score"]), reverse=True)
+    watch_cands = [s for s in scored
+                   if s["sym"] not in already and s["score"] >= MIN_BUY_SCORE]
+    watch_cands.sort(key=lambda x: (-x["score"], x["sym"]))
     watches = watch_cands[:5]
     volatile = sorted(scored, key=lambda x: (x.get("atr_pct") or 0), reverse=True)[:12]
 
@@ -642,7 +654,7 @@ def main(argv: list[str] | None = None) -> None:
         return f"Sector outflow + {', '.join(bits) if bits else 'technicals yếu'}. Exit / tránh."
 
     def watch_thesis(p):
-        return f"Strong composite ({p['score']}) — chờ sector confirm trước khi size."
+        return f"Điểm cao ({p['score']:+.1f}) — chờ sector confirm trước khi size."
 
     # Stop/target + validity moved to services.picks_scoring (single source of
     # truth). Local adapters preserve the previous (stop, target, err) signature
@@ -680,7 +692,7 @@ def main(argv: list[str] | None = None) -> None:
                 f"<td class='sym'>{p['sym']}</td><td class='mut'>{p['sector']}</td>"
                 f"<td>{p['close']:,.0f}</td>"
                 f"<td class='{rc}'>{p['ret_5d']:+.2f}%</td>"
-                f"<td>{p['score']}</td><td>{pills}</td><td>{sr}</td>"
+                f"<td>{p['score']:+.1f}</td><td>{pills}</td><td>{sr}</td>"
                 f"<td class='neg'>{stop_s}</td><td class='pos'>{tgt_s}</td>"
                 f"<td class='mut' style='max-width:260px'>{buy_thesis(p)}</td></tr>")
 
@@ -698,7 +710,7 @@ def main(argv: list[str] | None = None) -> None:
                 f"<td class='sym'>{p['sym']}</td><td class='mut'>{p['sector']}</td>"
                 f"<td>{p['close']:,.0f}</td>"
                 f"<td class='{rc}'>{p['ret_5d']:+.2f}%</td>"
-                f"<td>{p['score']}</td><td>{pills}</td><td>{sr}</td>"
+                f"<td>{p['score']:+.1f}</td><td>{pills}</td><td>{sr}</td>"
                 f"<td class='mut' style='max-width:260px'>{thesis}</td></tr>")
 
     # Validity gate — drop picks whose stop/target are degenerate (fixes NVL-style target<close bug)
@@ -952,7 +964,7 @@ def main(argv: list[str] | None = None) -> None:
                 f"<span class='sym'>{_esc(r.symbol)}</span>"
                 f"<span class='mut'>{_esc(r.sector_code)}</span>"
                 f"<span class='tag {action_cls}'>{kind}</span>"
-                f"<span class='mut'>score {r.score:+d}</span>"
+                f"<span class='mut'>điểm {r.score:+.1f}</span>"
                 f"</div>"
                 f"<div class='snap-nums mono'>{nums}</div>"
                 f"<div class='snap-bits'>{bits}</div>"
@@ -1011,14 +1023,14 @@ def main(argv: list[str] | None = None) -> None:
             "stop": stop_,
             "target": target_,
             "rr": rr_,
-            "score": int(tr.score or 0),
+            "score": float(tr.score or 0),
             "atr_pct": tr.atr_pct,
             "upside_pct": upside,
             "downside_pct": downside,
             "foreign_room_pct": tr.foreign_room_pct,
             "dv_20d": tr.dv_20d,
             "technical_bits": bits,
-            "thesis": f"Ranker {action} trong ngành {sector_vn}; score composite {tr.score}.",
+            "thesis": (f"Ranker {action} trong ngành {sector_vn}; điểm xếp hạng {tr.score:+.1f}."),
             "news": [],   # no cached news for ranker-only picks
             "source": source,
         }
@@ -1164,7 +1176,7 @@ def main(argv: list[str] | None = None) -> None:
             f"<span class='mut'>{_esc(p['sector_name'])}</span>"
             f"<span class='tag {action_cls}'>{kind}</span>"
             f"<span class='src-tag {src_cls}'>{src_label}</span>"
-            f"<span class='mut'>score {p.get('score', 0):+d}</span>"
+            f"<span class='mut'>điểm {float(p.get('score') or 0):+.1f}</span>"
             f"</div>"
             f"<div class='snap-nums mono'>{nums_html}</div>"
             f"<div class='snap-bits'>{bits_html}</div>"

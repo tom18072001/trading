@@ -31,6 +31,43 @@ _PROFILE_PARAMS: dict[PickProfile, dict[str, float]] = {
     PickProfile.TPLUS: {"target_atr": 2.0, "stop_atr": 1.0},
 }
 
+# --- How long the geometry above actually needs, measured ---------------------
+# 2026-09-16, `scripts/audit_past_picks.py` over the 174 picks this system
+# emailed between 2026-07-23 and 2026-09-14:
+#
+#   reached the printed SWING target at all ....... 15%   median 7 sessions
+#   reached it inside T+3 .......................... 4%
+#   touched the printed stop ...................... 50%   median 4 sessions
+#   touched it inside T+3 ......................... 24%
+#
+# So the SWING card is a three-to-four-week trade, and closing it on a T+3 clock
+# turns a 15%/50% target-vs-stop race into a 4%/24% one. The card never said
+# that, which is the whole of Tom's "kết quả chậm hơn nhiều so với T+3": the
+# picks were not slow, the horizon printed on them was never three days.
+#
+# TPLUS is NOT the fix and is not the default. Measured across the panel
+# (`scripts/tplus_strategy_bench.py`), its 1.0xATR stop is touched by noise on
+# 31-42% of three-session holds against 11-12% for SWING's 1.8xATR -- a tighter
+# stop on a short clock is a worse lottery, not a shorter one.
+PROFILE_HORIZON_SESSIONS: dict[PickProfile, int] = {
+    PickProfile.SWING: 20,
+    PickProfile.TPLUS: 5,
+}
+
+
+def horizon_note(profile: PickProfile = PickProfile.SWING) -> str:
+    """One VN sentence naming the holding period the geometry implies.
+
+    It lives beside the multipliers, not in a renderer, so whoever changes the
+    target distance owns the sentence describing it -- the same placement
+    argument 25.6 made for `confidence_phrase`.
+    """
+    n = PROFILE_HORIZON_SESSIONS[profile]
+    if profile is PickProfile.SWING:
+        return (f"Khung ~{n} phiên (3-4 tuần). Đo trên picks thật: chỉ 4% chạm "
+                f"target trong T+3, trung vị 7 phiên mới tới.")
+    return f"Khung ~{n} phiên."
+
 # --- Validity invariants ---
 MIN_STOP_PCT    = 0.015   # stop must be at least 1.5% below entry
 MIN_UPSIDE_PCT  = 0.02    # target must be at least 2% above entry
@@ -38,44 +75,188 @@ MIN_TGT_PCT     = 0.03    # BB-anchored target must clear this or fall back to A
 MIN_RR          = 1.5     # reward/risk floor for a BUY
 
 
-def score_ticker(row: dict[str, Any]) -> int:
-    """Composite technical score (lifted from the report generator's score_symbol).
+# --- Ranking coefficients (measured, see below) -------------------------------
+# These live here, in one place, and `scripts/ticker_alpha_bench.py` imports
+# them to build its vectorised twin. A formula defined in two files is two
+# formulas, and they drift silently -- the same reasoning that moved the stealth
+# breakout bar into `analysis/stealth.py` (CLAUDE.md 22.11).
+W_OVERSOLD_DIV  = 10.0   # (50 - RSI2) / this  ->  roughly +5 .. -5
+W_PULLBACK_CLIP = 2.0    # today's move measured in the stock's own ATRs, clipped
+W_ABOVE_SMA50   = 2.0    # medium-term trend still intact
+W_WIDE_ATR_PEN  = 1.5    # penalty for a name too wild for its own target
+WIDE_ATR_PCT    = 3.5    # "too wild" threshold, in percent
+SCORE_CONST     = -1.0   # rank-irrelevant; kept so the shipped score and the
+                         # bench factor are the same number, not just the same order
+# No confirmed uptrend -> must sort below EVERY gated name. The worst score a
+# gated name can reach is -9.5 (-1 const, -5 oversold, -2 pullback, -1.5 ATR),
+# so the floor sits clear of it; -9.0 would have let a badly-scored gated name
+# rank below an ungated one, which is the opposite of the gate's intent.
+UNTRENDED_FLOOR = -20.0
 
-    Reads from a dict shaped like a TickerRow (price_to_sma_20, price_to_sma_50,
-    macd_hist, adx_14, rsi_14, volume_ratio_20). Missing fields are treated as
-    neutral (no score contribution).
+# --- Shortlist thresholds, both measured on the same panel ---------------------
+# MIN_BUY_SCORE: the 78th percentile of gated scores over 143 names x 1,168
+# sessions (p80 = +2.91, p90 = +4.12), and the 5th-best name on a median day
+# scores +3.64 -- so this admits a full shortlist on a normal day and thins it
+# on a bad one, which is the behaviour wanted. It replaces a literal `>= 3` on
+# the old 0..7 integer scale, which means nothing on this one.
+MIN_BUY_SCORE = 2.5
 
-    Max realistic range: roughly -4 .. +7.
+# MAX_5D_DROP_PCT: a free-fall guard, NOT a momentum filter. The rule it
+# replaces was `ret_5d > -1`, which excluded every name that had pulled back --
+# i.e. exactly the names the scoring rewrite is built to find. But the extreme
+# tail is genuinely toxic: `B_rev5_trimmed` in the bench shows the worst weekly
+# losers keep falling (they are down on news, not on liquidity demand), so the
+# floor stays, an order of magnitude lower.
+MAX_5D_DROP_PCT = -12.0
+
+# --- Cross-sectional ordering (2026-09-16, second pass) -----------------------
+# `score_ticker` answers "is this name worth owning" from one row. It cannot
+# answer "which of the worthy ones first" as well, because the term that most
+# improves the ORDER -- on-balance-volume trend -- only works once it is ranked
+# against the rest of the day's cross-section.
+#
+# Measured at exit +20 sessions over 143 names x 1,168 sessions:
+#
+#   ordering                       excess   IC (t)   quintiles      by year
+#   score alone                    +0.13%   2.6      NOT monotone   3 of 4 +
+#   score + OBV, added per row     +0.23%   3.0      NOT monotone   3 of 4 +
+#   score + OBV, blended by RANK   +0.49%   4.4      monotone       4 of 4 +
+#
+# and at exit +40 the same ordering gives +0.77% excess, IC t = 3.6, monotone
+# (+1.60 / +1.78 / +2.17 / +2.34 / +2.56), again positive in all four years.
+#
+# The rank form is the only one monotone Q1->Q5 and the only one positive in
+# every year it can be evaluated. Adding the raw value instead lets one day's
+# dispersion decide whether the term dominates or vanishes; ranking removes
+# that. The gap between the per-row and rank rows is also why `_pct_rank` puts
+# a missing value mid-pack: with ranks, "unknown" has a natural neutral.
+#
+# Weights are 50/50 on purpose. A fitted weight vector over ~48 independent
+# 20-session windows is a curve fit nobody could defend -- the same argument
+# 16.1 makes about leaving the five stealth conditions unweighted.
+W_RANK_SCORE = 0.5
+W_RANK_OBV = 0.5
+
+
+def _pct_rank(values: list[float | None]) -> list[float]:
+    """Percentile rank in 0..1, ties averaged. A missing value ranks mid-pack
+    (0.5) rather than last: absent data is not evidence against a name, and
+    sending it to the bottom would quietly re-create the gate asymmetry
+    16.1 had to fix in the stealth conditions."""
+    present = [(v, i) for i, v in enumerate(values) if v is not None and v == v]
+    out = [0.5] * len(values)
+    if len(present) < 2:
+        return out
+    present.sort(key=lambda t: t[0])
+    n = len(present)
+    i = 0
+    while i < n:
+        j = i
+        while j + 1 < n and present[j + 1][0] == present[i][0]:
+            j += 1
+        avg = (i + j) / 2.0 / (n - 1)          # 0..1
+        for k in range(i, j + 1):
+            out[present[k][1]] = avg
+        i = j + 1
+    return out
+
+
+def blended_rank_scores(
+    scores: list[float | None], obv_trends: list[float | None]
+) -> list[float]:
+    """Final ordering key for a day's shortlist. Higher = buy first.
+
+    Takes two parallel lists rather than objects so it stays pure and the
+    measurement bench can call it on panel columns without constructing rows.
+
+    CALLERS MUST GATE FIRST. With equal weights the best score paired with the
+    worst flow ties the worst score paired with the best flow (0.5 + 0 either
+    way), so this is an ordering for names already judged worth owning, not a
+    filter. `_select_top` applies MIN_BUY_SCORE before consulting it, and
+    `test_flow_cannot_rescue_a_name_the_score_gate_rejects` pins that.
     """
-    score = 0
-    rsi = row.get("rsi_14")
-    macd_h = row.get("macd_hist")
-    p_sma20 = row.get("price_to_sma_20")
-    p_sma50 = row.get("price_to_sma_50")
-    adx = row.get("adx_14")
-    vr20 = row.get("volume_ratio_20")
+    rs = _pct_rank(list(scores))
+    ro = _pct_rank(list(obv_trends))
+    # strict: the two lists describe the same names in the same order, so a
+    # length mismatch is a caller bug and must not be silently truncated
+    # into a shortlist that quietly drops its tail.
+    return [W_RANK_SCORE * a + W_RANK_OBV * b
+            for a, b in zip(rs, ro, strict=True)]
 
-    if p_sma20 is not None and p_sma20 > 0:
-        score += 1
+
+def score_ticker(row: dict[str, Any]) -> float:
+    """Composite ranking score for a long candidate. Higher = better. Range ~ -9 .. +7.
+
+    MEASURED, 2026-09-16. The rule this replaced was a 0..7 count of
+    trend-continuation conditions (above SMA20, above SMA50, MACD>0, ADX>20,
+    RSI 50-70, volume surge), tie-broken by 20d dollar volume. Scored over
+    143 HOSE names x 1,168 sessions by `scripts/ticker_alpha_bench.py`:
+
+        rule                    excess vs base rate, exit +3 sessions
+        old score               -0.06%   quintiles NOT monotone (Q5 < Q4)
+        old score + dv tiebreak -0.15%   the worst variant measured
+        this score              +0.21%   monotone, IC t = +7.9
+
+    and by calendar year the old score was NEGATIVE in four of five
+    (2023 -0.16, 2024 -0.15, 2025 -0.02, 2026 -0.48) while this one is
+    positive in every year it can be evaluated (+0.21, +0.22, +0.15, +0.29).
+    2022 is blank for both gated variants: SMA200 needs 200 sessions and the
+    panel starts in 2022-01.
+
+    Why these terms, and not the old ones: the product is a 1-4 week trade, and
+    at that horizon Vietnamese cross-sectional returns are dominated by
+    short-horizon MEAN REVERSION, not continuation. The old score bought names
+    that had already run -- above both averages, MACD positive, RSI 50-70, on a
+    volume spike -- which is the canopy 16 explicitly tells this system not to
+    buy. Three terms survived measurement:
+
+      * `oversold`  -- RSI(2), the Connors oscillator. Single strongest factor
+        in the bench (IC +0.037, t = 7.3 at +3 sessions).
+      * `pullback`  -- today's move divided by the stock's own ATR. Self-
+        normalising, so a 2% drop in a quiet bank and a 2% drop in a wild
+        broker are not treated as the same event. No cross-section needed.
+      * `above SMA50` / `above SMA200` -- direction. Un-gated mean reversion
+        buys falling knives; it was measurably worse in every table.
+
+    The ATR penalty is the term that carries 2026: without it the score is
+    -0.11% in that year and +0.29% with it, which matches 25.9's finding that
+    high volatility is where these models degrade.
+
+    Missing inputs are treated as neutral, EXCEPT a missing SMA200, which cannot
+    confirm an uptrend and therefore sorts the name to the floor rather than
+    silently passing the gate.
+    """
+    close = row.get("close") or 0.0
+    rsi2 = row.get("rsi_2")
+    ret_1d = row.get("ret_1d")          # percent units, e.g. -1.8 for -1.8%
+    atr_pct = row.get("atr_pct")        # percent units, e.g. 2.5 for 2.5%
+    p_sma50 = row.get("price_to_sma_50")
+    p_sma200 = row.get("price_to_sma_200")
+
+    score = SCORE_CONST
+
+    if rsi2 is not None:
+        score += (50.0 - float(rsi2)) / W_OVERSOLD_DIV
+
+    if ret_1d is not None and atr_pct:
+        atr_frac = float(atr_pct) / 100.0
+        if atr_frac > 0:
+            drop_in_atrs = -(float(ret_1d) / 100.0) / atr_frac
+            score += max(-W_PULLBACK_CLIP, min(W_PULLBACK_CLIP, drop_in_atrs))
+
     if p_sma50 is not None and p_sma50 > 0:
-        score += 1
-    if macd_h is not None and macd_h > 0:
-        score += 1
-    if adx is not None and adx > 20:
-        score += 1
-    if rsi is not None:
-        if 50 <= rsi <= 70:
-            score += 2
-        elif rsi > 70:
-            score -= 1
-        elif rsi < 30:
-            score += 1
-    if vr20 is not None:
-        if vr20 > 1.3:
-            score += 2
-        elif vr20 < 0.7:
-            score -= 1
-    return score
+        score += W_ABOVE_SMA50
+
+    if atr_pct is not None and float(atr_pct) > WIDE_ATR_PCT:
+        score -= W_WIDE_ATR_PEN
+
+    # Trend gate. Not a multiplier and not an exclusion: an ungated name still
+    # gets a number, so nothing downstream has to handle a missing score, but
+    # it sorts below every name whose uptrend is confirmed.
+    if not (p_sma200 is not None and p_sma200 > 0 and close > 0):
+        score = min(score, UNTRENDED_FLOOR)
+
+    return round(score, 2)
 
 
 def compute_stop_target_rr(
@@ -168,6 +349,11 @@ def is_valid_long_pick(
 
 __all__ = [
     "PickProfile",
+    "PROFILE_HORIZON_SESSIONS",
+    "horizon_note",
+    "MIN_BUY_SCORE",
+    "MAX_5D_DROP_PCT",
+    "UNTRENDED_FLOOR",
     "score_ticker",
     "compute_stop_target_rr",
     "is_valid_long_pick",

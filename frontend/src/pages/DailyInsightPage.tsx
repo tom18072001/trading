@@ -478,7 +478,7 @@ function PickCard({ p, kind, alloc }: { p: any; kind: 'BUY' | 'SELL'; alloc: num
         <div className="rounded-xl bg-sell/[0.08] border border-sell/30 p-3 text-[12px] text-sell/90 leading-snug">
           ⚠ Cắt/tránh — stop-out <span className="font-mono font-semibold">{fmtNum(p.stop)}</span>
           {p.atr_pct != null && <> · ATR {p.atr_pct.toFixed(1)}%</>}
-          {p.score != null && <> · score {p.score >= 0 ? '+' : ''}{p.score}</>}
+          {p.score != null && <> · điểm {p.score >= 0 ? '+' : ''}{p.score.toFixed(1)}</>}
         </div>
       )}
 
@@ -645,7 +645,7 @@ export function PickTable({ title, subtitle, kind, picks }: {
                       </td>
                       <td className="p-2 text-right font-mono text-hi">{p.atr_pct != null ? p.atr_pct.toFixed(1) : '—'}</td>
                       <td className={`p-2 text-right font-mono ${p.score < 0 ? 'text-sell' : 'text-hi'}`}>
-                        {p.score >= 0 ? '+' : ''}{p.score}
+                        {p.score >= 0 ? '+' : ''}{p.score.toFixed(1)}
                       </td>
                     </>
                   )}

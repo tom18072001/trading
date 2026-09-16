@@ -14,6 +14,445 @@
 
 ---
 
+## 2026-09-16 (2) — the horizon is worth ten times the algorithm
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `services/picks_scoring.py` — `blended_rank_scores()` + `_pct_rank()`,
+    `W_RANK_SCORE` / `W_RANK_OBV`.
+  - `services/picks_universe_service.py` — `TickerRow.obv_chg20` and
+    `.rank_score`, OBV computed in `_build_ticker_row`, a cross-sectional
+    Stage E that fills `rank_score` over the whole universe, `_rank_key` reads
+    it.
+  - `scripts/ticker_alpha_bench.py` — `obv_chg20` feature; literature-lead
+    factors (size, residual momentum, OBV) and four blends; `X_prop_obv` now
+    CALLS the shipped `blended_rank_scores` rather than reimplementing it.
+  - `scripts/tplus_strategy_bench.py` — three swing entry rules.
+  - `tests/test_picks_ranking.py` — +7 (370 total).
+  - `CLAUDE.md` §26.9, `docs/PATCHES.md`.
+- Reason: Tom, after reading §26.6 — *"cho phép thay đổi dự báo mua 2-4 tuần nếu
+  benchmark test cho thấy profit lợi hơn … cái tôi cần là profit"* — plus web
+  access to check whether more was available.
+- Summary:
+  - **Web search and WebFetch do not work in this session** (both route through
+    a model this account cannot reach). The built-in browser does, so the
+    reading was done there. Two facts were checked because either could have
+    overturned §26.6: settlement and fees. **Settlement confirmed at T+2** from
+    VNDIRECT's own HSX/HNX pages ("cổ phiếu về tài khoản trước 13h00 ngày T+2",
+    and the afternoon session opens at 13:00) — so `BACKTEST_SETTLEMENT_LAG = 2`
+    and §22.10's T+3→T+2 correction were both right, and a widely-syndicated
+    advisory page claiming "sellable only from T+3 morning" is citing a circular
+    that predates the 2022 change. **Fees are 0.2%/side online** at retail order
+    sizes, not the 0.15% config assumes, so §26.6's cost stack is at the cheap
+    end and its conclusion is conservative.
+  - **The measurement that answers the question.** Base rate with NO ranking,
+    by holding period, annualised: T+3 **−40.6%**, T+10 −4.9%, T+15 **+1.3%**
+    (costs break even), T+20 +4.7%, T+40 +10.2%, T+120 +15.6%. Trading frequency
+    is a pure tax and it is the largest term in the system: T+3 → four weeks is
+    worth ~**+45pp/yr** before any skill. The best ranking rule measured is worth
+    +0.5 to +0.8pp per trade. The horizon is an order of magnitude bigger than
+    the algorithm, and nobody had measured it.
+  - **The literature lead was tested, not adopted.** *Factors and anomalies in
+    the Vietnamese stock market* (Pacific-Basin Finance Journal 82, 2023) puts
+    ln(ME) at −0.11, p<0.01 — a strong size effect. Tested here it helps pooled
+    (+0.40% excess at +20) and **fails 2025 (−0.64)**, so it does not clear
+    §16.12's within-year bar and is **not shipped**. What did survive was a term
+    the paper did not name: on-balance-volume trend.
+  - **What shipped: a cross-sectional ordering pass.** The per-row score decides
+    admission; a 50/50 rank blend of (score, OBV trend) decides order. At +20 it
+    lifts excess from +0.13% to **+0.49%**, IC t 2.6 → **4.4**, quintiles from
+    non-monotone to **monotone**, and by year from 3-of-4 to **4-of-4 positive**;
+    at +40, +0.77% excess with the same properties. The per-row form was tried
+    first and is measurably worse (+0.23%, still non-monotone) — adding a raw
+    value lets one day's dispersion decide whether the term dominates.
+  - **A surprising property found by a failing test.** With 50/50 weights the
+    best score on the worst flow **ties** the worst score on the best flow. The
+    first draft asserted the opposite and went red, which is how it was found.
+    It is safe only because admission runs first, and that dependency now has
+    its own test — reading either alone would mislead.
+  - **The book simulation was noise, and that is a finding.** It made a
+    40-session hold look spectacular (+170% total, CAGR 30.9%). Sweeping the
+    hold on the SAME rule: +25.9 / **−17.1** / +78.8 / +127.2 / +170.2 /
+    **−30.7** at 15/20/25/30/40/60 sessions. The sign flips twice and
+    neighbouring holds differ by 96pp. ~100 trades over 3.7 years is dominated
+    by which names happened to be held. §26.8 had already logged this; every
+    number in §26.9 comes from the cross-sectional bench instead.
+  - **Honest bottom line, in the doctrine so it is not lost.** The best
+    configuration measured returns ~+14.4%/yr at an eight-week hold and
+    ~+10.1%/yr at four weeks, against **VNINDEX buy-and-hold at 15.7% CAGR,
+    Sharpe 0.91, MaxDD −18.1%**. Nothing beats the index. What the change IS
+    worth is +1.05pp per trade over yesterday's ordering — about **+13pp/yr** at
+    a four-week cadence — which is a large fix to a losing ranking, not a case
+    for picking stocks over an index position.
+  - **Negative controls:** setting `W_RANK_OBV = 0` fails exactly 3 of the new
+    tests; ignoring `rank_score` in the sort key fails exactly 1. 370 pass,
+    ruff back to 65 after making both new `zip()` calls strict.
+  - **§26.10 — the stop is costing more than it protects.** Measured while
+    checking whether the SWING geometry survives the longer horizon. It does,
+    but the stop does not: over 3,542 trades at a four-week hold, every stopped
+    geometry loses money (shipped SWING −0.14%/trade) and only the unstopped one
+    earns (+0.72%). At 2.5/1.8 over twenty sessions, 40% of trades reach the
+    target and **44% touch the stop** — a stop firing as often as the target is
+    ending the thesis, not protecting it. Per trade the tail is three times
+    worse without it (worst −47% vs −15%), but at a five-name book the unstopped
+    version earns more AND draws down less (+36.2% / −18.8% vs −5.2% / −21.5%):
+    position count is already doing the tail's job, and doing it twice costs
+    ~0.86pp per trade — more than the whole §26.9 ranking gain.
+    **Deliberately NOT shipped.** `is_valid_long_pick` requires `stop < entry`,
+    the R:R floor is built on it, the card draws a stop→target ladder and the
+    book tracks `hit_stop`; and a backtest cannot see margin, gap-downs, or not
+    watching the screen. It is Tom's call, now with a number attached.
+- Follow-ups:
+  - The size effect is **unresolved, not rejected** — significant in the
+    literature and pooled here, failing one year in four. 3.7 years cannot
+    settle it.
+  - `MIN_BUY_SCORE` and the 2.5×ATR target distance were **not** re-derived for
+    the longer horizon. Whether a different target pays more over 20-40 sessions
+    is its own measurement and is not assumed.
+  - Tom has authorised 2-4 weeks. The table says 8 weeks is better still
+    (+14.4% vs +10.1%); that is beyond what he authorised and is his call.
+
+---
+
+## 2026-09-16 — the per-ticker score ranked backwards; the card never said its horizon
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `services/picks_scoring.py` — `score_ticker` rewritten (int → float, new
+    terms), `PROFILE_HORIZON_SESSIONS` + `horizon_note()`, `MIN_BUY_SCORE`,
+    `MAX_5D_DROP_PCT`, `UNTRENDED_FLOOR`, and the ranking coefficients the bench
+    imports.
+  - `services/picks_universe_service.py` — `_rank_key` (dollar-volume tie-break
+    removed), `rsi_2` / `ret_1d` / `price_to_sma_200` on `TickerRow`, OHLCV
+    lookback 110 → 400 calendar days, `score: int → float`, thesis carries the
+    horizon, and the all-zero `foreign_room` guard.
+  - `generate_report.py` — shortlist thresholds onto the shared constants;
+    `:+d` score formatting → `:+.1f` (it would have raised on a float).
+  - `api/routers/insight.py`, `frontend/src/pages/DailyInsightPage.tsx` —
+    continuous score rendered at one decimal.
+  - New: `scripts/extract_past_picks.py`, `scripts/build_price_panel.py`,
+    `scripts/ticker_alpha_bench.py`, `scripts/audit_past_picks.py`,
+    `scripts/tplus_strategy_bench.py`, `scripts/picks_portfolio_sim.py`.
+  - Tests: `tests/test_picks_scoring.py` rewritten for the new rule (+4),
+    `tests/test_picks_ranking.py` new (+7), `tests/test_picks_universe_service.py`
+    (+2). **370 total.**
+  - `CLAUDE.md` §26, `docs/PATCHES.md`, `ARCHITECTURE.md`.
+- Reason: Tom reported the suggested tickers moving far slower than a T+3 hold
+  needs. Nothing in the repo could check that — no table records a pick and
+  there is no per-ticker price panel — so the first half of this change is the
+  two instruments that make the claim testable.
+- Summary:
+  - **The claim was right, and the cause was not what it looked like.** Read
+    back from the HTML archive, the 174 picks emailed between 2026-07-23 and
+    2026-09-14 reached their printed target in **4%** of cases inside T+3
+    (median 7 sessions when reached) while touching the stop **24%** of the
+    time. `PickProfile.SWING` is a 2.5×ATR target — a three-to-four-week trade
+    at VN's ~2% ATR. The picks were not slow; the card never said how long.
+  - **And the ranking was separately, measurably worse than random.** Over 143
+    names × 1,168 sessions the shipped 0..7 trend score scored **−0.06%**
+    against the base rate at +3 sessions with **non-monotone** quintiles (Q5
+    below Q4), negative in four of five calendar years. As actually ranked —
+    `(score, dv_20d)` — **−0.15%**: the tie-break was not neutral, it handed
+    back the largest and slowest name in every score bucket. Replacement scores
+    **+0.21%**, monotone, IC t = +7.9, positive in every year it can be
+    evaluated.
+  - **Panel breadth nearly invalidated the whole first pass.** Seeded from
+    `_legacy_stock_prices` the panel was 21 names wide before 2025 because the
+    fetcher chased each symbol's missing tail and never its missing head. Every
+    2023-24 figure was "top 5 of 21". Fixed, and the bench now refuses a
+    cross-section under 30 names rather than quietly ranking inside one.
+  - **A live production defect fell out of the verification.** The KBS price
+    board returned `foreign_room = 0` for every name; the filter is `room > 0`;
+    stage C1 passed 0 of 75 and the build finished with 0 tickers. Same
+    asymmetry as §25.5 — a zero meaning "missing" and a zero meaning "none
+    left" are the same number — so the guard judges the column, not the cell.
+    The empty build was correctly not persisted, so the homepage never blanked.
+  - **What did NOT get fixed, and cannot be.** At 0.70% round trip, a T+3
+    rotation costs **58.8%/yr** against a universe returning 12.5%/yr. The best
+    ranking rule measured is worth +0.21% per trade. T+3 rotation is not a
+    tuning problem. §26.6 says so in the doctrine so no later reader re-derives
+    it, and no rule tested beat VNINDEX buy-and-hold risk-adjusted.
+  - **Negative controls, all four:** restoring the dollar-volume tie-break fails
+    exactly 2 of the new tests; diverging the bench's assembly from the service
+    fails the equivalence test; removing the `foreign_room` guard fails exactly
+    1. The fourth caught a test of mine that proved nothing — the equivalence
+    fixture had no name with ATR above the penalty threshold, so deleting the
+    penalty from the bench left all 7 tests green. Fixed by adding a third,
+    deliberately wild name, plus a guard asserting the fixture still reaches
+    both sides of every branch.
+- Follow-ups:
+  - Nothing beats the index. Until something does, the daily list is a
+    shortlist for a reader, not a system to follow (§26.8).
+  - The book simulation is too noisy at 5 positions to choose between rules;
+    the cross-sectional bench is the deciding instrument. Recorded in §26.8 so
+    it is not used as one.
+  - Entering at the next open costs a measured 0.145pp per trade (§26.7).
+    Larger than the ranking edge and not acted on — capturing it means scoring
+    before the 14:45 ATC auction, which is a different pipeline.
+
+---
+
+## 2026-08-26 — migration 12: two tables that never had a writer
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `database/migrations.py` — migration 12, two `DROP TABLE IF EXISTS`.
+  - `database/models.py` — `SectorAccumulationEvent` + `SectorFlowHandoff` deleted.
+  - `tests/test_database_schema.py` — +3 (7 in the file, 348 total).
+- Reason: the follow-up left by yesterday's entry. `sector_accumulation_events`
+  is what made `/api/sectors/stealth` answer 0 from a panel holding 21 events,
+  for months, indistinguishably from the truth. A table nobody writes is not
+  inert — it is a plausible-looking source of a wrong answer.
+- Summary:
+  - **Measured before touching anything.** Both tables hold 0 rows in the live
+    DB and have held 0 since creation (migrations 9 and 10). Neither has a
+    writer anywhere in the tree; the facts they were meant to store are derived
+    instead — stealth runs from `sector_flow_daily.accumulation_age` (§22.11),
+    handoffs by `analysis/flow_handoff.compute_handoff` on request
+    (`/api/sectors/handoff`). After yesterday's fix neither had a reader either.
+  - **The ORM classes had to go with the tables, and that is the whole trap.**
+    `init_db()` calls `Base.metadata.create_all` **before** `run_migrations()`.
+    Leave a model behind and the next start recreates the table while the
+    migration records itself as applied — a schema change that silently reverts
+    and, being versioned, never runs again.
+  - **That trap fired during this change, live.** The negative control
+    reinstated the two model classes for a moment; the running
+    `uvicorn --reload --reload-dir database` picked the edit up, called
+    `init_db()`, and both tables came back — with the *stub* schema from the
+    control, which is how they were identified. Migration 12 had already
+    recorded itself, so it would never have re-run. Dropped again with the
+    models gone; verified they stay gone across a reload window. 25 → 23 tables.
+  - Live DB backed up to `vnstock_market.db.bak-mig12` before applying. A drop
+    is not reversible and 0 rows is a measurement, not a guarantee.
+  - 348 tests (+3), ruff 65 (unchanged), smoketest 6/6.
+  - **Negative control**: reinstating the two model classes fails exactly
+    `test_a_dropped_table_has_no_orm_model_left_to_recreate_it` and
+    `test_the_drop_survives_a_restart`, and the second fails through the real
+    startup sequence (create_all → migrate, twice) rather than by inspecting
+    metadata — so it would have caught the live recurrence above.
+- Follow-ups:
+  - The §16.14 caveat (38% hit vs a 43% base rate) is on the Stealth Watch page
+    but not wherever `/api/sectors/stealth` is read. Currently nowhere — that
+    endpoint has **zero** consumers in `frontend/src`; the UI uses
+    `/api/stealth/*`. Worth deciding whether it should exist at all.
+  - `init_db()` running `create_all` before migrations is the general hazard
+    here, not a property of these two tables. Any future drop hits it.
+
+---
+
+## 2026-08-25 — two endpoints, one question, opposite answers
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `api/routers/sectors_flow.py` — `history` derives from `accumulation_age`.
+  - `api/routers/stealth.py` — both routes take `get_session_dependency`.
+  - `analysis/stealth.py` — `panel_from_rows()` + `_PANEL_FIELDS`.
+  - `tests/test_stealth_history.py` — +3 (17 in the file, 345 total).
+  - `CLAUDE.md` §22.11, `ARCHITECTURE.md` §5 + §9 — the open item, closed.
+- Reason: the last item flagged open by yesterday's doc audit, and the same
+  defect family §22.11 fixed — a stealth history sourced from a table nothing
+  writes.
+- Summary:
+  - **`/api/sectors/stealth` reported 0 events; `/api/stealth/history` reported
+    21 — from the same panel.** The first built its `history` key from
+    `SectorAccumulationEvent`, which migration 9 created and nothing has
+    written since. Not a stub this time, but the same outcome: a permanent
+    empty list that reads as "this sector has never accumulated" rather than
+    "nobody fills that table". Both now call
+    `stealth_events(panel_from_rows(...))`; live they agree on the first 20 of
+    21 (`/api/sectors/stealth` caps at 20 by design).
+  - **The reason it outlived the §22.11 fix is the more useful finding.** Both
+    `/api/stealth/*` routes opened `SessionLocal()` inside the handler instead
+    of taking `get_session_dependency`, so no test could hand them a panel —
+    the routes were **structurally untestable**, and the only assertions
+    anyone could write against them were on Query defaults and helper
+    functions (`test_router_defaults_come_from_the_scanner`,
+    `test_router_cond4_ranks_atr...`). That is exactly the shape of coverage
+    that looks like coverage. A route you cannot give data to is a route you
+    cannot show to be wrong. They take the dependency now, which is what makes
+    `test_both_stealth_endpoints_derive_the_same_events` possible at all.
+  - **`panel_from_rows()` is one function rather than two dict literals**
+    because the six columns are the contract. A caller that omits `atr_pct`
+    gets a `0.0` default and silently scores against `breakout_bar_baseline`'s
+    fallback instead of the sector's own ATR — the wrong number, no error, no
+    way to notice. It takes anything with the six attributes, so `analysis/`
+    still imports no DB model.
+  - The equality test compares the **event list**, not the count: a route that
+    finds the right *number* of the wrong runs is the failure worth guarding.
+  - `sector_accumulation_events` now has **no reader either**. Recorded in
+    `ARCHITECTURE.md` §5: dropping it is a one-line migration 12, and until
+    someone does, its only function is to mislead the next person who greps.
+- Verification: 345 pass (+3), ruff 65 (unchanged). **Negative control** —
+  reverting `history` to `[]` fails exactly the 3 new tests and nothing else.
+  Live: `/api/sectors/stealth` 20 events, `/api/stealth/history` 21 / 21 scored
+  / hit 0.381 / median lead 21 / 75% at ≥10d, first 20 keys identical.
+- Follow-ups:
+  - Migration 12 to drop `sector_accumulation_events` (and `sector_flow_handoff`
+    if the on-the-fly handoff stays).
+  - The §16.14 caveat is on the Stealth Watch page but **not** on whatever
+    reads `/api/sectors/stealth` — a 38% hit rate against a 43% base rate still
+    needs the warning wherever it is shown.
+
+---
+
+## 2026-08-25 — the reference docs were teaching a system that does not exist
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `docs/reference/ALGORITHM.md` — §0, §4, §5, §12, §13 rewritten against the
+    code; header stamp updated.
+  - `docs/reference/GLOSSARY_VI.md` — §1 regime labels.
+  - `ARCHITECTURE.md` — §3, §5, §8, §9 rewritten from measurement; §7 stealth
+    block and §11 migration status corrected for consistency.
+  - `scripts/_doc_audit.py` — brace-shorthand expansion, so the tool stops
+    reporting the docs' own compact notation as ghost routes.
+- Reason: Tom picked two of the four fixes the doc audit proposed, and ranked
+  the reference pair highest — *"đây là chỗ dạy sai"*. He is right about the
+  ordering: a contract that is stale is wrong, but a **walkthrough** that is
+  stale is wrong *to the person who is not reading the code*, which is the only
+  audience it has.
+- Summary:
+  - **`GLOSSARY_VI.md` named three regimes that never existed in any commit** —
+    `TREND_UP`, `TREND_DOWN`, `RISK_OFF`. The real four come from
+    `analysis/regime.py:_LABELS_BY_RETURN` and are lowercase. Replaced with a
+    table sourced to that constant, plus a line recording **what the old text
+    said and that it was wrong** — someone holding a printout of the old file
+    needs to recognise it, and a silent overwrite denies them that.
+  - **`ALGORITHM.md` §4 taught the retired 5-of-5 conjunction**, four months
+    after §16.1 became a score, and carried three sub-rules that exist in **no
+    source file**: `foreign_net_z20 ≥ +0.5` as the second half of cond2
+    (§18.5/21), a sector-specific 2y quantile for cond4 (§18.3/15 — the code
+    uses a rolling 20d median), and the distribution guard (§18.5/22). All three
+    were *plans*, written in the present tense. They are now listed under "not
+    implemented" and cross-referenced to the §12 open list, which is the only
+    place an unbuilt thing belongs.
+  - **It also invented a job.** §4 credited a `stealth_scanner` for emitting
+    ACCUMULATE and opening rows in `sector_accumulation_events`. Neither
+    happens: `grep` finds no such job, `Get-ScheduledTask -TaskPath
+    '\SectorFlow\'` returns exactly 8 tasks and it is not among them, and the
+    table has had **no writer since migration 9**. The real path is
+    `accumulation_age` → `SectorSignalService.publish()` at 17:00.
+  - §5 regime rewritten around the §25 redefinition (confidence = P(label
+    survives 5 sessions), filtered not smoothed, hedge **below** 0.55), and two
+    absences stated: no regime-conditioned stealth z (§18.1/3), and **no code
+    anywhere throttles entries under `chop`** — the label is published and read,
+    and that is all it does.
+  - **`ARCHITECTURE.md` §9 was the worst section in the repo**: 8 endpoints
+    named that do not exist (`/api/flow/monitor`, `/api/flow/ingest`,
+    `/api/rotation/map`, `/api/stealth/watch`, `/api/stealth/events`,
+    `/api/pulse/tape`, `/api/sectors/ranking/history`,
+    `/api/sectors/backtest/{id}`) and ~15 live ones missing. Rewritten from
+    `/openapi.json`: **12 routers, 46 paths**, with the regeneration command in
+    the section so the next reader re-measures instead of trusting me.
+  - §3, §5, §8 likewise re-derived — `ls`, `sqlite_master`, `Get-ScheduledTask`.
+    Corrections worth naming: **25 tables** (the doc listed a subset), migrations
+    **1–11** not 1–10, **342** pytest cases not 156, `frontend/src` is **flat,
+    not feature-sliced**, and three listed paths were deleted months ago
+    (`analysis/charts/`, `scripts/create_key.py`, `scripts/seed_data.py`).
+  - **The `as of 2026-04-22` stamp is gone, and the reason replaces it in the
+    text.** A fixed date in a living document ages without anyone noticing: that
+    one sat above a tree with three dead paths, six missing services and a test
+    count off by 186, and the stamp made all of it look deliberate.
+  - **Two empty tables, two different meanings, now written down.**
+    `sector_flow_handoff` is empty because it is computed on the fly — harmless.
+    `sector_accumulation_events` is empty because **nothing writes it**, which is
+    what let §22.1 misfile a hardcoded `{"rows": []}` stub as "correct code with
+    no data" for months. Either give it a writer or drop it.
+  - **`job_freshness_check.bat` is an orphan** — has a cron header, is absent
+    from `$CanonicalJobs` and from Task Scheduler, and has never written a log.
+    Recorded in §8, **not** resolved: deciding its fate was one of the two
+    proposals Tom did not select.
+  - **The audit tool was fixed, not the documents.** After the rewrite
+    `_doc_audit.py` flagged 9 routes in `ARCHITECTURE.md`; 8 were its own
+    misreading of `{series,heat,…}` brace shorthand as a path parameter.
+    A document forced to avoid compact notation to please a linter is a worse
+    document, so `expand()` now splits on the comma — which FastAPI path params
+    cannot contain. Post-fix `ARCHITECTURE.md` reports exactly one route,
+    `/api/flow/ingest`, and that one is **deliberate prose** in §9 explaining
+    that the route does not exist.
+- Verification: 342 pass, ruff 65 (unchanged — doc-only, plus one script).
+  Every claim above was measured before it was written: `/openapi.json`,
+  `sqlite_master` + row counts, `ls`, `Get-ScheduledTask`, `schema_migrations`.
+- Follow-ups (both deliberately **not** done — Tom selected two of four fixes):
+  - Decide `job_freshness_check.bat`: register it or delete it.
+  - Promote `scripts/_doc_audit.py` into a permanent drift test. Until then the
+    ghost routes it still finds in `specs/` (`/api/insight/send-gmail`,
+    `/api/pulse/var`, `/api/rotation/pair/{}/{}`, `/api/stealth/timeline`, and
+    four in `SPEC_INTRADAY_VNSTOCK.md`) stay as they are.
+  - `api/routers/sectors_flow.py:80` still builds its `history` from the
+    writer-less `SectorAccumulationEvent`; it should read `stealth_events()`
+    like `/api/stealth/history` does (`CLAUDE.md` §22.11).
+
+---
+
+## 2026-08-25 — credential scan after going public, and a smoketest for what pytest cannot see
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `scripts/smoketest.py` — new, 7 checks.
+  - `.github/workflows/ci.yml` — comment saying why it is *not* run in CI.
+  - `README.md` §Testing — the smoketest section; the pytest count corrected
+    from 156 to 342 and the command from `python -m pytest` to `uv run pytest`
+    (production resolves `.venv` through `uv`; a README telling you otherwise
+    is how §25.4's missing-`hmmlearn` defect stayed invisible for months).
+- Reason: Tom asked to revoke credentials and check the smoketest. Neither
+  premise held as stated, and both answers are worth recording.
+- Summary:
+  - **Nothing needed revoking, measured rather than assumed.** Both live secret
+    values were scanned against every commit reachable from every ref
+    (`git log --all -S "<value>"`): `REPORT_EMAIL_PASSWORD` 0 hits,
+    `LOCAL_API_KEY` 0 hits. `.env` has never been tracked — `git rev-list --all
+    --objects` has no `.env` blob. What *is* in history is the three recipient
+    addresses removed by `eab5a1e`; addresses are not revocable, and Tom's
+    earlier call not to rewrite history stands.
+  - **There was no smoketest.** `docs/PATCHES.md` and `CLAUDE.md` never claimed
+    one, and searching the repo returned matches only inside `.venv`. So this
+    was not "check the smoketest", it was "there is a hole where one should be".
+  - **What it checks is chosen from defects that shipped while pytest was
+    green**, which is the only defensible basis for a second suite. Every test
+    fakes vnstock, fakes the LLM and redirects `SAVED_MODELS_DIR` to a tmpdir —
+    all three deliberately — so the suite is structurally blind to the
+    artefacts production reads. Three of the seven checks are named after the
+    defect they would have caught: the ranker overwritten by a 3-feature test
+    panel (§19), the picks snapshot whose absence blanked the homepage on every
+    restart (§22.6), and `/api/stealth/history` returning a hardcoded
+    `{"rows": []}` (§22.11).
+  - **The stealth-history check exists because a 200 is not enough.** The route
+    check sees `/api/stealth/history` answer 200; the stub answered 200 too.
+    Only `summary.events > 0` distinguishes them.
+  - **In-process, not over a port.** The API is exercised through FastAPI's
+    `TestClient`, so the smoketest binds nothing and cannot collide with a
+    running dev server or a scheduled job. `--with-report` is the one exception
+    — it shells out to `generate_report.py --no-email`, reaches vnstock, takes
+    minutes, and is off by default.
+  - **Deliberately not in CI**, with the reason written in the workflow rather
+    than left for someone to rediscover: a clean clone has no trained model, no
+    snapshot and no DB, so there it would fail for the one reason that is not a
+    defect. CI proves the repo installs; this proves the machine works.
+  - Thresholds are **imported, not retyped** — `DEFAULT_MAX_GAP` and
+    `latest_flow_date` come from `scripts/check_freshness.py`. Two definitions
+    of "stale" drift, and only one of them ends up in the job log.
+  - A check that raises is reported as a failure and the run continues. A
+    smoketest that dies on check 3 and never reports 4-7 is worth less than one
+    that finishes.
+- Verified:
+  - `uv run python scripts/smoketest.py --with-report` → **7/7**: db gap 1d ·
+    ranker 19 features · snapshot 54 tickers · routes 9/9 · history 21 events,
+    20 scored · import inert · wrote `daily_report_2026-08-25.{html,pdf}`.
+  - **Negative control on the three checks that carry the feature**, because a
+    check that has only ever been green proves nothing. Pointed
+    `SAVED_MODELS_DIR` at a dir holding the exact artefact that killed the
+    17:00 job (`["f1","f2","all_null"]`) → FAIL "3 features"; at an empty dir →
+    FAIL "no trained ranker"; fed the history check the stub's own
+    `{"rows": []}` → FAIL "0 events".
+  - `uv run pytest tests/ -q` → 342 passed. `ruff check .` → 65, unchanged;
+    `scripts/smoketest.py` clean.
+- Follow-ups:
+  - The smoketest is not wired to Task Scheduler. `check_freshness.py` already
+    runs there; adding this one means deciding what a failure should *do*, and
+    a red line nobody reads is not monitoring.
+  - Tom is rotating `REPORT_EMAIL_PASSWORD` and `LOCAL_API_KEY` provider-side
+    as a precaution despite the clean scan. After each rotation the check is
+    `uv run python scripts/smoketest.py --with-report` for the report path, and
+    a live `/api/insight/refresh` for the agent path — the smoketest fakes
+    neither but exercises neither's credentials either.
+
+---
+
 ## 2026-08-24 (16) — the stealth history was a stub, and the test for it proved nothing
 - Author: Claude Code on behalf of Tom
 - Files:
