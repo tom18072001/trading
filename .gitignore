@@ -30,6 +30,9 @@ data/bench_*.json
 # Gitignore vì nó chứa SỔ CỦA TOM (mã, giá vốn, khối lượng) — cùng lý do
 # data/trading_state.json bị ignore, và repo này public.
 data/watch/
+# Giá cho mã đang nắm ngoài universe (2026-09-17). Danh sách mã trong đó chính là
+# sổ của Tom, nên cùng lý do với data/watch/ và data/trading_state.json.
+data/holdings_prices.json
 # Operator state (2026-08-23): kill-switch flag, position book, watchlist.
 # One trader, one machine — this is Tom's book, not repo content.
 data/trading_state.json

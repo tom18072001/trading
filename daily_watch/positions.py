@@ -96,27 +96,43 @@ def track(p: dict, daily: list[dict], last: float | None) -> dict:
 
 
 def _snapshot_prices() -> tuple[str | None, dict[str, float], dict[str, list],
-                                dict[str, float]]:
+                                dict[str, float], set[str]]:
     """Giá từ snapshot PicksUniverseService — `.peek()`, KHÔNG `get_snapshot()`.
 
     Cache lạnh phải trả về sổ với `last=None` trong vài mili-giây, không phải
     chặn hàng phút sau throttle 18 req/phút của KBS (cái bẫy
     `api/routers/insight.py` ghi ở handler `/daily`).
     """
+    as_of, prices, paths, atrs = None, {}, {}, {}
+    from_snapshot: set[str] = set()
     try:
         from services.picks_universe_service import PicksUniverseService
         snap = PicksUniverseService().peek()
-        if not snap:
-            return None, {}, {}, {}
-        return (
-            str(snap.as_of),
-            {s: t.close for s, t in snap.tickers.items() if getattr(t, "close", None)},
-            {s: (getattr(t, "daily_prices", None) or []) for s, t in snap.tickers.items()},
-            {s: t.atr_pct for s, t in snap.tickers.items() if getattr(t, "atr_pct", None)},
-        )
+        if snap:
+            as_of = str(snap.as_of)
+            prices = {s: t.close for s, t in snap.tickers.items() if getattr(t, "close", None)}
+            paths = {s: (getattr(t, "daily_prices", None) or []) for s, t in snap.tickers.items()}
+            atrs = {s: t.atr_pct for s, t in snap.tickers.items() if getattr(t, "atr_pct", None)}
+            from_snapshot = set(prices)
     except Exception:  # noqa: BLE001 - tra giá không bao giờ được làm hỏng sổ
         log.exception("[position_tracking] tra giá thất bại; trả sổ chưa chấm")
-        return None, {}, {}, {}
+
+    # Mã đang nắm nhưng nằm ngoài universe: đọc cache mà job đã làm đầy.
+    # CHỈ ĐỌC ĐĨA — route cũng đi qua đây, và gọi mạng ở đây là mang cái treo
+    # 2-10 phút sau throttle KBS quay lại (§22.6). Snapshot luôn thắng cache: nó
+    # tươi hơn và là cùng một phép tính.
+    from daily_watch import holdings
+    for sym, r in (holdings.load().get("rows") or {}).items():
+        if sym in prices or r.get("close") is None:
+            continue
+        prices[sym] = r["close"]
+        paths[sym] = r.get("daily_prices") or []
+        if r.get("atr_pct"):
+            atrs[sym] = r["atr_pct"]
+    # Tập mã lấy từ snapshot trả về RIÊNG, không suy ra bằng hiệu tập hợp: một mã
+    # hôm qua ngoài universe (đã vào cache) mà hôm nay vào universe sẽ lấy giá từ
+    # snapshot, và phép hiệu sẽ gán nhầm nó là "ngoài universe".
+    return as_of, prices, paths, atrs, from_snapshot
 
 
 def mark_book(positions: list[dict] | None = None) -> dict[str, Any]:
@@ -131,7 +147,9 @@ def mark_book(positions: list[dict] | None = None) -> dict[str, Any]:
     from services import trading_state
 
     rows = trading_state.get_state()["positions"] if positions is None else positions
-    as_of, prices, paths, atrs = _snapshot_prices()
+    as_of, prices, paths, atrs, snap_syms = _snapshot_prices()
+    from daily_watch import holdings
+    held_cache = holdings.load().get("rows") or {}
 
     out: list[dict] = []
     total_cost = total_value = 0.0
@@ -140,7 +158,12 @@ def mark_book(positions: list[dict] | None = None) -> dict[str, Any]:
         last = prices.get(sym)
         entry, qty = p.get("entry_price"), p.get("qty")
         tr = track(p, paths.get(sym) or [], last)
-        row = {**p, "last": last, "pnl_pct": None, "pnl_vnd": None, "value": None, **tr}
+        cached = held_cache.get(sym)
+        price_source = ("snapshot" if sym in snap_syms
+                        else f"ngoài universe, giá phiên {cached.get('as_of')}" if cached
+                        else None)
+        row = {**p, "last": last, "pnl_pct": None, "pnl_vnd": None, "value": None,
+               "price_source": price_source, **tr}
         # Khuyến nghị bán thay cho stop-loss (Tom, 2026-09-16). Cửa sổ thời gian
         # là luật đo được; range giá là tham chiếu — xem daily_watch/sell_range.py.
         row["sell_range"] = sell_range.advise(p, tr["path"], atrs.get(sym), last)
@@ -197,7 +220,10 @@ def alerts(book: dict[str, Any] | None = None) -> list[dict]:
         kind = None
         if phase == "quá hạn":
             kind = "quá hạn"
-        elif r.get("last") and sr.get("give_back") and r["last"] <= sr["give_back"]:
+        elif (sr.get("armed") and r.get("last") and sr.get("give_back")
+              and r["last"] <= sr["give_back"]):
+            # Chỉ khi ĐÃ ARM — xem sell_range.ARM_ATR. Không có điều kiện này thì
+            # đây là cảnh báo stop-loss trên lệnh đang lỗ, thứ Tom đã bỏ.
             kind = "nhả quá sâu"
         elif phase == "trong cửa sổ bán":
             kind = "trong cửa sổ bán"

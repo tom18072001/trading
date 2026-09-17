@@ -70,7 +70,11 @@ tự khẩn cấp:
 1. **Quá hạn** — đã giữ quá 40 phiên. Ngoài khung đó không factor nào sống sót
    phép đo, nên đây là mục khẩn nhất.
 2. **Nhả quá sâu** — giá đã rơi hơn 3,5×ATR từ đỉnh. Đây là tin về *luận điểm*
-   ("sóng lên đã kết thúc"), **không phải lệnh bán cơ học**.
+   ("sóng lên đã kết thúc"), **không phải lệnh bán cơ học**. Nó **chỉ** bật khi
+   lệnh đã từng lãi ≥ 1×ATR — một mã đang lỗ mà chưa từng lãi sẽ **không** có
+   cảnh báo này, và đó là đúng: không có sóng lên nào để kết thúc, và báo động
+   ở đó chính là stop-loss Tom đã bỏ. Nếu Tom hỏi vì sao một mã lỗ sâu mà không có
+   cảnh báo: trả lời bằng đúng câu này.
 3. **Trong cửa sổ bán** — đã qua 20 phiên, chưa tới 40. Nêu range tham chiếu.
 4. **Sổ** — một dòng: mấy vị thế, tổng P&L.
 5. **Các ngày tới** — mốc nào sắp tới (mở cửa sổ bán / hết khung) và ngày của nó.

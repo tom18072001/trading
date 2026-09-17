@@ -22,6 +22,7 @@ Task `SectorFlow_daily_watch` chạy lệnh đầu lúc **17:30, T2–T6**.
 | `service.py` | dựng bản tin + ghi ra đĩa |
 | `positions.py` | chấm sổ theo giá gần nhất, đường giá từ ngày vào lệnh |
 | `sell_range.py` | bán lúc nào — cửa sổ (luật) + range (tham chiếu) |
+| `holdings.py` | giá cho mã **đang nắm ngoài universe** — `refresh()` gọi mạng (chỉ job), `load()` chỉ đọc đĩa |
 | `audit.py` | đọc kho lưu trữ, chấm lại khuyến nghị cũ |
 
 ## Đầu ra: markdown + JSON, **không HTML**
@@ -49,7 +50,17 @@ Không sinh HTML và không gửi email. Bản tin này để **trả lời tron
    giữ hết khung thắng mọi hình học thoát bằng mức giá, và càng chặt càng tệ,
    đơn điệu. Không có stop-loss ở đây, và đó là có chủ ý (`CLAUDE.md` §26.10).
 
-3. **Không dự báo hướng giá.** `projection()` trả lịch và biên độ ATR. Không
+3. **Bộ lọc mua không phải danh sách theo dõi.** Universe 54 mã là bộ lọc
+   *mua*. Mã đang nắm mà nằm ngoài nó vẫn phải được nhìn thấy — `holdings.py`
+   lấy giá riêng, **không** áp ngưỡng thanh khoản hay room (đó là điều kiện để
+   mua, không phải để được theo dõi). Gọi mạng chỉ ở job; `mark_book()` được
+   route API gọi nên chỉ đọc cache.
+
+4. **`give_back` chỉ có nghĩa sau khi đã có sóng lên.** Nó chỉ báo khi đỉnh đã
+   vượt giá vào ≥ `ARM_ATR`×ATR — đúng điều kiện bench đã đo. Không có điều
+   kiện đó thì nó là một stop-loss 3,5×ATR dưới giá vào.
+
+5. **Không dự báo hướng giá.** `projection()` trả lịch và biên độ ATR. Không
    rule nào trong repo thắng VNINDEX risk-adjusted (§26.9), nên một con số
    "giá sẽ là X" là bịa — và bịa một cách thuyết phục, vì nó đứng cạnh những
    con số có bằng chứng.

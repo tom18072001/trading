@@ -65,7 +65,7 @@ Record-count impact vs legacy: **~98% reduction** (15 sectors × ~12 features vs
 | rotation_predict | 45 16 * * 1-5 | Next-day sector ranking |
 | sector_signal_publish | 0 17 * * 1-5 | Write signals + Gmail briefing |
 | sector_risk_sentinel | */30 9-15 * * 1-5 | Stop-loss alerts on held sectors |
-| daily_watch | 30 17 * * 1-5 | **(2026-09-16)** Sổ vị thế + cảnh báo stop theo mã + shortlist → `report/watch_<date>.md`. Không gửi email. Skill `.claude/skills/theo-doi-hang-ngay/` đọc file này, **không** tự phân tích lại |
+| daily_watch | 30 17 * * 1-5 | **(2026-09-16)** Module `daily_watch/`: báo cáo sổ + đề xuất mua + đề xuất bán (cửa sổ 20-40 phiên + range tham chiếu, **không stop-loss**) → `report/watch_<date>.md` + kho `data/watch/<date>.json`. Theo dõi cả mã đang nắm **ngoài universe**. Không gửi email. Skill `.claude/skills/theo-doi-hang-ngay/` đọc output, **không** tự phân tích lại |
 
 > **2026-09-16 — task thứ 9, và một chi tiết đáng biết về 8 task cũ.** Trigger
 > của cả 8 job trên được đăng ký là `-Daily`, dù cột Cron ghi `1-5`; nên chúng
@@ -369,9 +369,9 @@ Run the two commands rather than trusting the numbers.
 
 | Suite | Count | Command |
 |---|---|---|
-| Backend (pytest) | 370 | `uv run pytest tests/` |
+| Backend (pytest) | 371 | `uv run pytest tests/` |
 | Frontend (vitest) | 13 | `cd frontend && npm test` |
-| **Total** | **383** | — |
+| **Total** | **384** | — |
 > Vì sao từng bài test tồn tại — và 4 lần negative control bắt được test vô
 > dụng của chính tôi — ở [`docs/doctrine/19-testing-history.md`](docs/doctrine/19-testing-history.md).
 > Đọc nó trước khi xoá hoặc viết lại một bài test trông có vẻ thừa.

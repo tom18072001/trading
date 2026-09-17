@@ -14,6 +14,66 @@
 
 ---
 
+## 2026-09-17 — mã đang nắm ngoài universe được theo dõi; và `give_back` là stop-loss trá hình
+- Author: Claude Code on behalf of Tom
+- Files: `daily_watch/holdings.py` (mới), `daily_watch/positions.py`,
+  `daily_watch/sell_range.py`, `daily_watch/service.py`, `daily_watch/README.md`,
+  `.claude/skills/theo-doi-hang-ngay/SKILL.md`, `CLAUDE.md` §8/§19, `.gitignore`.
+- Reason: Tom — *"có"*, cho câu hỏi sửa defect hai mã trong sổ không có giá.
+
+### Defect được yêu cầu sửa
+Universe 54 mã là **bộ lọc mua**, và sổ lấy giá từ chính nó — nên bộ lọc mua đang
+làm **danh sách theo dõi**. Trên sổ thật: hai vị thế không giá, trong đó có
+**mã lỗ nặng nhất** sổ.
+
+`daily_watch/holdings.py` lấy giá riêng cho mã đang nắm ngoài universe, bằng
+**đúng** `_fetch_ohlcv` + `_build_ticker_row` mà universe dùng — không có định
+nghĩa thứ hai. **Không** áp ngưỡng thanh khoản hay room: đó là điều kiện để mua,
+không phải để được nhìn thấy (một mã trong sổ chỉ là lô lẻ).
+
+**Cái bẫy phải tránh:** `mark_book()` được cả route `/positions/pnl` lẫn job gọi,
+và route đó cố ý chỉ `.peek()` để không treo 2-10 phút sau throttle KBS (§22.6).
+Nên `refresh()` (gọi mạng) chỉ job được gọi; `load()` (đọc đĩa) là thứ đường đọc
+dùng. Cache ở `data/holdings_prices.json`, **không** ở `data/watch/` — `audit.py`
+glob mọi `*.json` trong đó và sẽ đọc nhầm cache thành một bản lưu trữ.
+
+Kết quả: **mọi vị thế có giá**, hai mã từng thiếu giá **khớp đúng giá broker**
+Tom đưa.
+
+Một lỗi nhãn bắt được trước khi chạy: bản đầu suy tập mã-từ-snapshot bằng hiệu
+tập hợp (`giá − cache`), sẽ gán nhầm "ngoài universe" cho một mã hôm qua ngoài
+universe mà hôm nay đã vào. `_snapshot_prices()` nay trả tập đó riêng.
+
+### Defect nặng hơn, lộ ra khi mã đó lần đầu được nhìn thấy
+Ngay lần đầu có giá, mã đó bật **"nhả quá sâu (quanh đỉnh …)"**.
+Nhưng "đỉnh" đó **không phải đỉnh — nó là giá vào lệnh.** `advise()` gộp `entry` vào
+phép tính đỉnh, nên với một mã chưa từng lên trên giá vào, "đỉnh" = giá vào, và
+`give_back` = **lỗ 3,5×ATR so với giá vào. Tức một stop-loss** — đúng thứ Tom đã
+bỏ ngày hôm trước, mặc áo "range bán".
+
+Và nó **lệch khỏi thứ đã đo**: `run_trail()` chỉ bật băng *sau khi* lệnh đã lãi ≥
+`arm_atr`×ATR — docstring của chính nó ghi *"một lệnh âm không bao giờ bị quét
+ra"*. Code sống thì báo trên cả lệnh chưa từng lãi. Con số +1,07%/lệnh trong
+§26.10 là của luật **có** điều kiện arm — không phải của luật đang chạy.
+
+Sửa: đỉnh không gộp giá vào; thêm `ARM_ATR = 1.0` khớp đúng biến thể bench đã
+đo; `give_back` chỉ báo khi `armed`. **Negative control** trên đúng mã đó: hành vi
+cũ → "đỉnh" = giá vào, báo động True; sau sửa → đỉnh thật 30 phiên, armed
+False, không báo động. Range của nó dịch từ quanh giá vào xuống
+(quanh đỉnh thị trường).
+
+> Đây là **lần thứ ba trong hai ngày** một luật **đo** ở bench và luật **chạy** ở
+> production lệch nhau âm thầm (chi phí 0,70% vs 1,00%; stop neo giá vào vs băng
+> neo đỉnh; nay arm vs không arm). Mẫu chung: bench và production là **hai bản
+> code của một luật**. `ARM_ATR` nay có comment trỏ về đúng tham số bench, nhưng
+> đó là quy ước, không phải cơ chế — một test assert hai bên dùng chung hằng số
+> mới là cơ chế, và Tom đã chọn không thêm test cho phần thuật toán.
+
+- Kiểm chứng: 371 test, ruff 65. Job chạy thật lấy đủ lịch sử cho hai mã (272 và 30 phiên).
+  Kho lưu trữ có 2 bản (2026-09-16, 2026-09-17).
+
+---
+
 ## 2026-09-16 (12) — range bán không cần ngày mua, và band_hi là nhánh chết
 - Author: Claude Code on behalf of Tom
 - Files: `daily_watch/sell_range.py`, `daily_watch/service.py`,

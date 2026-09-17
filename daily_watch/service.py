@@ -174,6 +174,25 @@ def build(top_n: int = 5) -> dict[str, Any]:
     }
 
 
+def _refresh_off_universe_holdings() -> dict[str, Any] | None:
+    """Lấy giá cho mã đang nắm mà universe không có. Không bao giờ làm hỏng job."""
+    from daily_watch import holdings
+    try:
+        from services.picks_universe_service import PicksUniverseService
+        snap = PicksUniverseService().peek()
+        universe = set(snap.tickers) if snap else set()
+        positions = trading_state.get_state()["positions"]
+        held = {p["symbol"] for p in positions}
+        todo = holdings.missing(held, universe)
+        if not todo:
+            return None
+        sectors = {p["symbol"]: p.get("sector_code", "") for p in positions}
+        return holdings.refresh(todo, sectors)
+    except Exception:  # noqa: BLE001 - thiếu giá một mã không được làm hỏng bản tin
+        log.exception("[watch] refresh giá mã ngoài universe thất bại")
+        return None
+
+
 def _attach_projection(book: dict[str, Any]) -> None:
     """Gắn dự phóng biên độ + lịch cho từng vị thế.
 
@@ -284,13 +303,21 @@ def render(payload: dict[str, Any]) -> str:
             a("> Một ngày mua **ước lượng là đủ** — cửa sổ rộng 20 phiên, lệch vài "
               "ngày gần như không đổi gì. `PATCH /api/state/positions/{symbol}` "
               "với `opened_at`.")
+        off = [(p.get("symbol"), p.get("price_source")) for p in b["positions"]
+               if p.get("price_source") and p["price_source"] != "snapshot"]
+        if off:
+            a("")
+            a("> ℹ️ **Ngoài universe 54 mã, vẫn được theo dõi:** "
+              + " · ".join(f"**{s}** ({src.replace('ngoài universe, ', '')})"
+                           for s, src in off)
+              + ". Universe là bộ lọc **mua**; một mã đã nằm trong tay phải được "
+              "nhìn thấy dù nó còn đủ điều kiện để mua hay không.")
         no_px = [p.get("symbol") for p in b["positions"] if p.get("last") is None]
         if no_px:
             a("")
-            a(f"> 🟠 **{', '.join(no_px)} không có giá** — ngoài universe của hệ "
-              "thống, nên không chấm được P&L và không theo dõi được. "
-              "Universe là bộ lọc **mua**; dùng nó làm danh sách **theo dõi** là một "
-              "defect đã ghi nhận, chưa sửa.")
+            a(f"> 🟠 **{', '.join(no_px)} không lấy được giá** — kể cả qua đường "
+              "lấy riêng cho mã ngoài universe. Xem `data/holdings_prices.json` "
+              "mục `failed` để biết lý do.")
         a("")
         a(f"Chấm được **{b['priced']}/{b['count']}** vị thế"
           + (f" · tổng P&L {_fmt(b['total_pnl_pct'], '%')}" if b["total_pnl_pct"] is not None else ""))
@@ -388,7 +415,12 @@ def render(payload: dict[str, Any]) -> str:
 
 
 def run(top_n: int = 5, write: bool = True) -> dict[str, Any]:
-    """Dựng, ghi ra đĩa, trả payload. Đây là thứ `main.py --daily-watch` gọi."""
+    """Dựng, ghi ra đĩa, trả payload. Đây là thứ `main.py --daily-watch` gọi.
+
+    Đây là nơi DUY NHẤT gọi `holdings.refresh()` — nó gọi mạng. `build()` và
+    `mark_book()` chỉ đọc cache, vì route API cũng đi qua chúng.
+    """
+    _refresh_off_universe_holdings()
     payload = build(top_n=top_n)
     payload["generated_ts"] = datetime.now().isoformat(timespec="seconds")
     if write:

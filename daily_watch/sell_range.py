@@ -49,6 +49,13 @@ BAND_ATR = 1.0
 #: Mức nhả lại ít tốn nhất trong các băng ĐO ĐƯỢC — vẫn thua không dùng băng.
 GIVE_BACK_ATR = 3.5
 
+#: Lãi tối thiểu (bội ATR, tính từ giá vào) trước khi `give_back` có nghĩa.
+#: **Phải khớp bench**: biến thể "range nhả 3,5×ATR" trong
+#: `tplus_strategy_bench.py --trail` chạy với `arm_atr=1.0`, và đó là con số đã
+#: đo. Thiếu điều kiện này thì `give_back` trên một lệnh chưa từng lãi chính là
+#: một stop-loss 3,5×ATR dưới giá vào — thứ Tom đã bỏ và bench không hề kiểm.
+ARM_ATR = 1.0
+
 
 def _atr_frac(atr_pct: float | None) -> float | None:
     """`atr_pct` đi lẫn lộn hai đơn vị trong repo — chuẩn hoá về phân số.
@@ -72,7 +79,7 @@ def advise(position: dict, path: list[dict], atr_pct: float | None,
 
     out: dict[str, Any] = {
         "peak": None, "peak_basis": None, "band_lo": None, "band_hi": None,
-        "band_status": None, "give_back": None, "sell_from": None,
+        "band_status": None, "give_back": None, "armed": False, "sell_from": None,
         "sell_by": None, "sessions_held": None, "phase": "unknown", "note": "",
     }
 
@@ -89,7 +96,13 @@ def advise(position: dict, path: list[dict], atr_pct: float | None,
     # Bỏ phiên cuối ra thì cả ba trạng thái đều tới được: lập đỉnh mới hôm nay
     # sẽ đẩy giá lên phần trên của vùng hoặc vượt hẳn.
     prior = closes[:-1] if len(closes) > 1 else closes
-    peak = max(prior + ([entry] if entry else [])) if (prior or entry) else None
+    # Đỉnh là GIÁ THỊ TRƯỜNG đã đạt — KHÔNG gộp giá vào lệnh.
+    #
+    # Bản trước gộp `entry`, nên với một mã chưa từng lên trên giá vào, "đỉnh"
+    # chính là giá vào và `give_back` thành "lỗ 3,5×ATR so với giá vào": một
+    # stop-loss mặc áo range. Nó nổ thật ngày 2026-09-17 trên một vị thế đang lỗ, báo
+    # "sóng lên đã kết thúc" cho một mã chưa từng có sóng lên nào kể từ lúc mua.
+    peak = max(prior) if prior else None
     out["peak"] = peak
 
     # Cơ sở của đỉnh, nói ra chứ không im lặng — nhưng KHÔNG chặn range.
@@ -107,10 +120,12 @@ def advise(position: dict, path: list[dict], atr_pct: float | None,
     if peak and a:
         out["band_lo"] = round(peak * (1 - BAND_ATR * a), 2)
         out["band_hi"] = round(peak * (1 + BAND_ATR * a), 2)
-        # `give_back` trả lời "sóng lên đã kết thúc chưa", nên nó đo từ đỉnh của
-        # CHÍNH đợt sóng đó. Trên cửa sổ gần đây nó vẫn đọc được, chỉ là đang nói
-        # về đợt sóng của thị trường chứ không phải của lệnh Tom.
+        # `give_back` trả lời "sóng lên đã kết thúc chưa" — nên chỉ có nghĩa khi
+        # ĐÃ CÓ sóng lên: đỉnh phải vượt giá vào ít nhất ARM_ATR×ATR. Đúng điều
+        # kiện `run_trail()` đã đo. Chưa arm thì không có mức nào — một lệnh
+        # đang lỗ không có mức thoát giá, đó là nghĩa của "bỏ stop".
         out["give_back"] = round(peak * (1 - GIVE_BACK_ATR * a), 2)
+        out["armed"] = bool(entry) and peak >= entry * (1 + ARM_ATR * a)
         if last:
             out["band_status"] = ("trên vùng bán" if last > out["band_hi"]
                                   else "trong vùng bán" if last >= out["band_lo"]
@@ -147,7 +162,7 @@ def advise(position: dict, path: list[dict], atr_pct: float | None,
                        "kể từ lúc anh vào lệnh. Một ngày mua ƯỚC LƯỢNG là đủ — cửa "
                        "sổ rộng 20 phiên nên lệch vài ngày gần như không đổi gì.")
 
-    if last and out["give_back"] and last <= out["give_back"]:
+    if out["armed"] and last and out["give_back"] and last <= out["give_back"]:
         out["note"] += (f"  Giá đã nhả quá {GIVE_BACK_ATR}×ATR từ đỉnh "
                         f"({peak:,.2f}) — sóng lên nhiều khả năng đã kết thúc.")
     return out
