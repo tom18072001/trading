@@ -68,10 +68,10 @@ def previous_trading_day(d: date | None = None) -> date:
 def next_trading_day(d: date | None = None, n: int = 1) -> date:
     """The n-th trading day strictly after `d`.
 
-    The mirror of previous_trading_day, and the reason it exists: T+2.5
-    settlement means "when can I sell this" is a count of SESSIONS, not of
-    calendar days. `DailyInsightPage.tsx` was doing `setDate(+3)`, so a Thursday
-    buy claimed a Sunday sell date.
+    The mirror of previous_trading_day, and the reason it exists: "when does
+    the 4-8 week sell window open" is a count of SESSIONS, not of calendar days.
+    `DailyInsightPage.tsx` once did `setDate(+3)`, so a Thursday buy claimed a
+    Sunday sell date; 20 calendar days is not 20 sessions either.
     """
     d = d or today()
     probe = d

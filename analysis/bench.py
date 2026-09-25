@@ -28,8 +28,8 @@ from typing import Callable
 from config import (
     BACKTEST_FEE_BPS,
     BACKTEST_SELL_TAX_BPS,
-    BACKTEST_SETTLEMENT_LAG,
     BACKTEST_SLIPPAGE_MIN_PCT,
+    HOLD_SESSIONS,
 )
 
 # ============================== chi phí ======================================
@@ -198,6 +198,6 @@ def judge(factor: str, horizon: int, result: dict) -> Verdict:
 
 def cost_banner() -> str:
     return (f"chi phí: phí+thuế {ROUND_TRIP*100:.2f}% + slippage {SLIPPAGE*100:.2f}% "
-            f"= {TOTAL_COST*100:.2f}%/vòng  |  T+{BACKTEST_SETTLEMENT_LAG} tôn trọng"
+            f"= {TOTAL_COST*100:.2f}%/vòng  |  khung giữ {'/'.join(map(str, HOLD_SESSIONS))} phiên"
             + ("  |  ĐÂY LÀ PHÍA NHẸ: phí thật 0,2%/chiều (§26.9)"
                if COST_IS_OPTIMISTIC else ""))

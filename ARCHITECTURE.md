@@ -5,6 +5,26 @@
 > change must be logged in `MODIFICATION_LOG.md`.
 
 ## CHANGELOG
+- **2026-09-25 — 4 and 8 weeks are the only holding periods; the T+ mode and
+  T+2 settlement are gone** (Tom: *"bỏ T+2, chỉ sử dụng 4 tuần và 8 tuần"*).
+  One constant, `config.HOLD_SESSIONS = (20, 40)`, feeds the sell window, the
+  bulletin, the benches and the sector backtest. Contract changes:
+  `POST /api/sectors/backtest` drops `settlement_lag` and takes
+  `hold_sessions ∈ {20, 40}` (a `Literal` — a 3 is a 422); the result drops
+  `settlement_lag` and gains `hold_sessions`, `rebalance_count` and
+  `benchmark_origin`. The engine re-cuts the book on session 1 and every
+  `hold_sessions` after it instead of every session, decides from what was
+  published the session **before** (signals go out at 17:00, after the close
+  they used to be filled at), carries the last signal set across sessions that
+  published none (it used to sell everything), and refuses a VNINDEX series
+  outside 200–5,000 or covering < 90% of the sessions — trying the price
+  panel's `^VNINDEX` before the flagged sector mean. `/api/state/positions/pnl`
+  rows lose `sellable_on` (T+2); the window is `sell_range.sell_from/sell_by`.
+  `PickEntry` gains `sell_from` / `sell_by` (holiday-aware,
+  `picks_scoring.hold_window`). `/api/insight/daily` no longer builds "T+3-5"
+  cards from ranker sectors when the snapshot is empty — an empty snapshot is
+  an empty list. `PickProfile.TPLUS` and seven unused T+3 trade schemas in
+  `api/schemas.py` were removed. No schema change.
 - **2026-08-24 (3) — Exit price, realised P&L, and a measured `CONF_HORIZON`.**
   Contract change: `/api/state/*` gains `POST /state/positions/{symbol}/close`
   and `GET /state/positions/realised`, and `trading_state.json` gains a
@@ -91,7 +111,7 @@
   Contract change on `POST /api/sectors/backtest`: the request model gains
   `strategy` (a Pydantic `Literal` — an unvalidated string used to fall through
   to the `flow_raw` branch) plus bounded per-run overrides for `fee_bps`,
-  `sell_tax_bps` and `settlement_lag`; the response's `equity_curve` gains a
+  `sell_tax_bps` and `settlement_lag` (replaced by `hold_sessions` 2026-09-25); the response's `equity_curve` gains a
   `benchmark` point per row, so the chart can draw VNINDEX instead of leaving
   "did I beat the index" as mental arithmetic. Everything else the service has
   modelled since 2026-08-22 (§18.2/7–10 frictions, `trade_log`, root capture,
@@ -314,7 +334,7 @@ Trading/
 │   ├── flow/aggregation.py           # extracted aggregation helpers
 │   ├── rotation_model_service.py     # HMM regime + ranker train/predict
 │   ├── sector_signal_service.py      # publishes sector_signals; owns the halt read
-│   ├── backtest_service.py           # sector-basket backtester (T+2, fees, band)
+│   ├── backtest_service.py           # sector-basket backtester (20/40-session book, fees, band)
 │   ├── risk_service.py               # VaR + stop-loss sentinel (no cost model yet)
 │   ├── picks_universe_service.py     # dynamic HOSE universe → per-ticker picks
 │   ├── picks_scoring.py              # ranking score (measured, §26) + stop/target gate
@@ -826,7 +846,7 @@ returns an empty cartesian product at every threshold (`CLAUDE.md` §22.1).
 10. ⏳ **Drop the `_legacy_*` tables** — 9 tables, ~72k rows, no reader. The DB migration has still not been written; §13 of `CLAUDE.md` calls this migration 10, but that number is taken (applied 2026-07: foreign split + handoff), and so is **12** as of 2026-08-26. It lands as **13** — do not hardcode the next free number in prose again; read `schema_migrations`.
 11. ✅ Applied 2026-08-22 — carry price into the scheduled rollup (review P0-2/P0-3), the fix at the root of §20.1's causal chain.
 12. ✅ Applied 2026-08-26 — drop `sector_accumulation_events` + `sector_flow_handoff`, two tables that never had a writer (§5). The ORM classes went with them; `create_all` runs before migrations, so leaving a model would recreate the table and silently revert the migration.
-— 🔜 **§18 P0 remainder** (not a migration — no schema change) — §18.1/1 point-in-time constituents, §18.1/2 ETF-rebalance mask, §18.2/8 FOL check, §18.4/17 secondary HOSE source. T+2, slippage, price bands and fee/tax (§18.2/7, 9, 10) and purged k-fold (§18.3/13) closed 2026-08-22 — **in the backtest engine only**; `risk_service` still sizes with no cost model.
+— 🔜 **§18 P0 remainder** (not a migration — no schema change) — §18.1/1 point-in-time constituents, §18.1/2 ETF-rebalance mask, §18.2/8 FOL check, §18.4/17 secondary HOSE source. Slippage, price bands and fee/tax (§18.2/9, 10) and purged k-fold (§18.3/13) closed 2026-08-22 — **in the backtest engine only**; `risk_service` still sizes with no cost model. §18.2/7 (T+2) was modelled from 2026-08-22 and removed 2026-09-25 with the T+ mode: at a 20-40 session hold it cannot bind.
 
 ---
 

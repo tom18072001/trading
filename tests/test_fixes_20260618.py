@@ -133,7 +133,7 @@ def test_backtest_is_long_only_with_frictions(daily_panel):
         name="realism", start_date="2025-01-01", end_date="2025-12-31")
     assert bt.total_trades > 0
     assert bt.long_only is True            # §18.2/12 no short cash leg
-    assert bt.settlement_lag == 2          # §18.2/7 T+2
+    assert bt.hold_sessions == 20          # 4-week book; T+2 removed 2026-09-25
     assert bt.fee_bps == 15 and bt.sell_tax_bps == 10  # §18.2/10
     assert bt.total_cost_pct > 0           # frictions actually charged
     assert all(tr["side"] == "BUY" or tr["side"] == "SELL" for tr in bt.trade_log)

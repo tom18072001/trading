@@ -59,16 +59,21 @@ export type StopLossAlert = {
 
 export type BacktestStrategy = 'signals' | 'flow_z' | 'flow_raw';
 
+/** 4 or 8 weeks, in trading sessions — config.HOLD_SESSIONS. Nothing shorter:
+ *  the T+ mode was removed on 2026-09-25. */
+export type HoldSessions = 20 | 40;
+
 export type BacktestRequest = {
   name: string;
   start_date: string;
   end_date: string;
   initial_capital?: number;
   strategy?: BacktestStrategy;
-  // null/omitted = use the config defaults (§18.2/7,10).
+  // null/omitted = use the config defaults (§18.2/10).
   fee_bps?: number | null;
   sell_tax_bps?: number | null;
-  settlement_lag?: number | null;
+  /** Rebalance period. Replaces `settlement_lag` (T+2 removed 2026-09-25). */
+  hold_sessions?: HoldSessions | null;
 };
 
 export type BacktestResult = {
@@ -93,7 +98,9 @@ export type BacktestResult = {
   // §18.2 realism diagnostics — modelled by the service since 2026-08-22,
   // returned all along, rendered by nobody until backlog step 5.
   long_only: boolean;
-  settlement_lag: number;
+  hold_sessions: HoldSessions;
+  /** Sessions on which the book was re-cut: 1, 1+hold, 1+2·hold … */
+  rebalance_count: number;
   fee_bps: number;
   sell_tax_bps: number;
   total_cost_pct: number;
@@ -101,6 +108,8 @@ export type BacktestResult = {
   root_capture_ratio: number | null;
   strategy_source: BacktestStrategy;
   benchmark_source: 'vnindex' | 'sector_mean';
+  /** Where the index came from — macro_anchors, or the price panel's ^VNINDEX. */
+  benchmark_origin?: 'macro_anchors' | 'price_panel' | 'sector_mean';
   signal_dates_covered: number;
 };
 
@@ -196,8 +205,22 @@ export type PnlRow = Position & {
   dist_to_stop_pct: number | null;
   dist_to_target_pct: number | null;
   sessions_held: number | null;
-  /** T+2: the first session this can be sold. Trading days, holidays excluded. */
-  sellable_on: string | null;
+  /** daily_watch/sell_range.advise — the 4-8 week window and the price range.
+   *  Replaces `sellable_on` (T+2), removed with the T+ mode on 2026-09-25. */
+  sell_range?: SellRange;
+};
+
+export type SellRange = {
+  /** Window opens 20 sessions after the buy, closes at 40. Null without a buy date. */
+  sell_from: string | null;
+  sell_by: string | null;
+  phase: 'giữ' | 'trong cửa sổ bán' | 'quá hạn' | 'unknown';
+  peak_basis: 'since_entry' | 'recent_window' | null;
+  band_lo: number | null;
+  band_hi: number | null;
+  give_back: number | null;
+  armed: boolean;
+  note: string;
 };
 
 export type PnlResponse = {

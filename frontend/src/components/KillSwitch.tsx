@@ -443,8 +443,10 @@ export function MyBookPanel() {
                     {p.opened_at}
                     <div className="text-[10px] text-lo/70">
                       {m?.sessions_held != null && <>{m.sessions_held} phiên</>}
-                      {m?.sellable_on && m.sellable_on > (m.path.at(-1)?.date ?? '')
-                        && <> · bán từ {m.sellable_on.slice(5)}</>}
+                      {/* The 4-8 week window, not T+2: at a 20-40 session hold
+                          the settlement date is never the one that binds. */}
+                      {m?.sell_range?.sell_from && m.sell_range.sell_by
+                        && <> · bán {m.sell_range.sell_from.slice(5)}→{m.sell_range.sell_by.slice(5)}</>}
                     </div>
                   </td>
                   <td className="p-1.5 text-right whitespace-nowrap">

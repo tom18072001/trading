@@ -14,6 +14,48 @@
 
 ---
 
+## 2026-09-25 (1) — 4 tuần và 8 tuần là hai khung giữ duy nhất: bỏ chế độ T+ và luật T+2 trong backtest
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `config.py`, `services/picks_scoring.py`, `services/picks_universe_service.py`,
+  `services/backtest_service.py`, `services/trader_agent.py`, `api/routers/insight.py`,
+  `api/routers/sectors_backtest.py`, `api/routers/state.py`, `api/schemas.py`,
+  `daily_watch/positions.py`, `daily_watch/sell_range.py`, `daily_watch/service.py`,
+  `generate_report.py`, `report/report_template.html`, `utils/clock.py`,
+  `analysis/bench.py`, `scripts/{ticker_alpha_bench,tplus_strategy_bench,picks_portfolio_sim,
+  ticker_ranker_experiment,audit_past_picks}.py`, `frontend/src/{api/client.ts,
+  components/KillSwitch.tsx,pages/BacktestPage.tsx,pages/DailyInsightPage.tsx}`, tests
+  (`test_backtest_controls`, `test_fixes_20260618`, `test_picks_scoring`,
+  `test_position_track`, `DailyInsightPage.test.tsx`), `CLAUDE.md` §18.2/7, §18.6, §18.7,
+  §23, `ARCHITECTURE.md`, `specs/picks_universe.md`, `docs/reference/{ALGORITHM,GLOSSARY_VI}.md`.
+- Reason: Tom, 2026-09-25 — *"bỏ t+2 chỉ sử dụng 4 tuần và 8 tuần"*; chọn "bỏ cả luật T+2
+  trong backtest". Review 2026-09-24 §3.1: danh mục lãi tăng dốc tới ~40 phiên rồi đi ngang;
+  ở khung ≥ 20 phiên T+2 không bao giờ là ràng buộc.
+- Summary:
+  - Một hằng số `config.HOLD_SESSIONS = (20, 40)` cho cửa sổ bán, bản tin, bench và backtest.
+    `picks_scoring.hold_window(as_of)` đổi nó thành `sell_from`/`sell_by` (đếm phiên, trừ lễ);
+    `PickEntry` mang hai trường này; thẻ Daily Insight thay ô T0..T+3 bằng Mua → +20 → +40.
+  - Bỏ `PickProfile.TPLUS`, `PROFILE_HORIZON_SESSIONS`, nhánh "T+3-5" của `/api/insight/daily`
+    (dựng thẻ từ ngành BUY của ranker bằng hình học TPLUS khi snapshot rỗng) và 7 schema T+3
+    không ai dùng trong `api/schemas.py`. Thesis thẻ mua không còn in stop/target (sổ không có
+    stop từ §26.10) mà in khung giữ: mua ATO phiên sau, giữ tới ~40 phiên, bán ATO.
+  - Sổ vị thế bỏ `sellable_on` (T+2); bảng vị thế hiện cửa sổ `sell_from→sell_by`. Ghi chú
+    "trong cửa sổ bán" nói rõ mặc định giữ tới ~40 phiên, phiên 20 không phải tín hiệu bán.
+  - Backtest ngành: `settlement_lag` → `hold_sessions ∈ {20, 40}`; tái cơ cấu ở phiên 1 rồi mỗi
+    `hold` phiên thay vì mỗi phiên (§23.5: 844 lệnh/năm); quyết định từ dữ liệu phiên TRƯỚC, khớp
+    giá đóng phiên sau (tín hiệu ra 17:00); giữ tín hiệu gần nhất khi phiên không có dòng mới (cũ:
+    bán hết); VNINDEX ngoài 200-5.000 bị loại từng dòng, phủ < 90% phiên thì thử `^VNINDEX` của
+    price panel rồi mới về TB ngành. Trên bản DB 2026-09-24, `flow_z` 2024-01→2026-09: 163 lệnh
+    (khung 20) / 81 (khung 40); benchmark VNINDEX +60,0% thay vì trung bình ngành.
+  - Bench/research: `ticker_alpha_bench` từ chối horizon ngoài {20, 40}; `tplus_strategy_bench`,
+    `picks_portfolio_sim`, `ticker_ranker_experiment` chỉ nhận 20/40; book sim bỏ hàng đợi T+2.
+    `audit_past_picks.py` giữ nguyên các khung ngắn nhưng ghi rõ là tài liệu lịch sử (§26.3).
+  - Agent Minh: persona "giữ 4-8 tuần", tín hiệu ngành/regime là bối cảnh chưa kiểm chứng.
+  - Test: pytest 371 → 383 (12 mới, gồm lịch tái cơ cấu, từ chối T+, khớp t+1, giữ tín hiệu,
+    VNINDEX rác, benchmark từ panel); vitest 13 → 14. Negative control: chạy test mới trên engine
+    cũ — khớp t+1 và VNINDEX rác đỏ đúng lý do; bỏ carry-forward thì test giữ tín hiệu đỏ.
+- Follow-ups: luật shortlist chung + bỏ ngưỡng 2,5 (entry kế tiếp); dữ liệu ngành
+  (`close_idx`, `return_1d`, ATR, VNINDEX) sẽ đổi số backtest sau script sửa DB.
+
 ## 2026-09-24 — review thuật toán: thước đo đang phóng đại edge, tầng ngành phát tín hiệu từ dữ liệu hỏng (chỉ tài liệu)
 - Author: Claude (Cowork) on behalf of Tom
 - Files: `docs/reviews/ALGO_REVIEW_2026-09-24.md` (mới), `docs/reviews/algo_review_2026-09-24/`

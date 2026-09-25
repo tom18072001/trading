@@ -123,7 +123,6 @@ def remove_position(symbol: str, side: str = "BUY"):
     return trading_state.remove_position(symbol, side)
 
 
-#: T+2 cash settlement on HOSE — you may sell on the 2nd session after the buy.
 @router.get("/positions/pnl")
 def positions_pnl():
     """Sổ được chấm theo giá đóng gần nhất — logic ở daily_watch/positions.py.

@@ -58,6 +58,7 @@ from services.picks_scoring import (
     PickProfile,
     blended_rank_scores,
     compute_stop_target_rr,
+    hold_window,
     horizon_note,
     is_valid_long_pick,
     score_ticker,
@@ -188,6 +189,11 @@ class PickEntry:
     technical_bits: list[str]  # ["RSI 58", "MACD+", "above SMA20", "Vol 1.4x"]
     thesis: str                # 1-line VN rationale
     news: list[dict[str, Any]] = field(default_factory=list)
+    # BUY only: the 4-8 week sell window if filled at the next session's ATO
+    # (picks_scoring.hold_window). Defaults keep snapshots written before
+    # 2026-09-25 loadable.
+    sell_from: str | None = None
+    sell_by: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -208,6 +214,8 @@ class PickEntry:
             "technical_bits": self.technical_bits,
             "thesis": self.thesis,
             "news": self.news,
+            "sell_from": self.sell_from,
+            "sell_by": self.sell_by,
         }
 
 
@@ -359,13 +367,12 @@ def _compose_thesis(r: "TickerRow", action: str) -> str:
     bits = _technical_bits(r)
     tag = ", ".join(bits[:4]) if bits else "clean technicals"
     if action == "BUY":
-        rr_txt = f", R:R {r.rr:.1f}" if r.rr else ""
-        # The horizon is part of the instruction, not decoration. Without it the
-        # card reads as a three-day trade and gets closed as one -- see
-        # PROFILE_HORIZON_SESSIONS for what that costs.
-        return (f"Điểm xếp hạng {r.score:+.1f}. {tag}{rr_txt}. "
-                f"Mua {r.close:.1f}, stop {r.stop:.1f}, target {r.target:.1f}. "
-                f"{horizon_note(PickProfile.SWING)}")
+        # The horizon is part of the instruction, not decoration: 26.3 found the
+        # card had never stated one, so it was read as a three-day trade and
+        # closed as one. Stop and target are NOT in the sentence -- the book has
+        # no stop since 26.10, and printing one here would invite using it.
+        return (f"Điểm xếp hạng {r.score:+.1f}. {tag}. "
+                f"Mua quanh {r.close:.1f}. {horizon_note()}")
     # SELL
     return (f"Điểm xếp hạng {r.score:+.1f}. {tag}. "
             f"Đề xuất thoát / tránh: giá {r.close:.1f}, stop-out nếu thủng {r.stop:.1f}.")
@@ -628,8 +635,8 @@ def _build_ticker_row(symbol: str, sector_code: str, ohlcv: pd.DataFrame,
         "price_to_sma_200": row.price_to_sma_200,
     })
 
-    # Stop / target / RR — default to SWING profile; callers needing TPLUS
-    # recompute via compute_stop_target_rr() directly.
+    # Stop / target / RR — SWING, the only profile. A screening by-product for
+    # is_valid_long_pick's R:R floor, not an exit: the book has no stop (26.10).
     stop, target, rr, err = compute_stop_target_rr({
         "close": row.close,
         "atr_pct": row.atr_pct,
@@ -1064,6 +1071,7 @@ class PicksUniverseService:
 
         from services.picks_news import fetch_news
 
+        window = hold_window(as_of) if action_up == "BUY" else {}
         out: list[PickEntry] = []
         for r in chosen:
             pct_up = ((r.target - r.close) / r.close * 100) if (r.target and r.close) else None
@@ -1093,6 +1101,8 @@ class PicksUniverseService:
                 technical_bits=tech_bits,
                 thesis=thesis,
                 news=news,
+                sell_from=window.get("sell_from"),
+                sell_by=window.get("sell_by"),
             ))
         return out
 

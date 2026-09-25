@@ -305,7 +305,7 @@ thường" mà nhất quán với horizon.
 
 | # | finding | trạng thái |
 |---|---|---|
-| 7 | **[BLOCKER]** Chưa mô hình hoá thanh toán T+2 → `settlement_lag=2` | **đóng ở backtest** (§23), mở ở `risk_service` |
+| 7 | **[BLOCKER]** Chưa mô hình hoá thanh toán T+2 → `settlement_lag=2` | **bỏ 2026-09-25** — Tom: *"bỏ T+2, chỉ sử dụng 4 tuần và 8 tuần"*. Ở khung ≥ 20 phiên T+2 không bao giờ là ràng buộc; backtest tái cơ cấu theo `config.HOLD_SESSIONS` thay vì mỗi phiên |
 | 8 | **[BLOCKER]** Chưa kiểm room ngoại (FOL) — `foreign_net` về 0 vì hết room chứ không phải vì hết niềm tin. Room median < 3% → hạ trọng số signal 0,5× | mở |
 | 9 | **[BLOCKER]** Slippage + biên giá ±7% HOSE; bỏ fill khi rổ chạm trần/sàn | **đóng ở backtest** (§23) |
 | 10 | **[BLOCKER]** Thiếu dòng thuế + phí: `fee_bps=15`/chiều + `sell_tax_bps=10` | **đóng ở backtest** (§23) |
@@ -344,16 +344,17 @@ thường" mà nhất quán với horizon.
 ### 18.6 Priority queue (append to §13 + §16.10)
 Ship order, blockers first:
 - P0: §18.1/1–2, §18.2/7–10, §18.3/13, §18.4/17 — before any live paper trade.
-  > **2026-08-23:** §18.2/7, 9, 10 are **closed in the backtest engine** — T+2,
+  > **2026-08-23:** §18.2/9, 10 are **closed in the backtest engine** —
   > slippage, fee, sell tax and the ±7% band are modelled and now reported on
   > every run (§23). They stay open in `risk_service`, which sizes positions
-  > with no cost model. §18.3/13 closed 2026-08-22 (§20.2 P0-6).
+  > with no cost model. §18.3/13 closed 2026-08-22 (§20.2 P0-6). §18.2/7 (T+2)
+  > was closed the same way and **removed 2026-09-25** with the T+ mode.
 - P1: §18.1/3–6, §18.2/11–12, §18.3/14–15, §18.5/21–22 — before shadow-run metrics matter.
 - P2: remaining HYGIENE + EDGE.
 
 ### 18.7 Success re-definition
 Current §16.11 targets are necessary but not sufficient. Add:
-- **Net-of-cost Sharpe ≥ 0.8** (after fees, taxes, slippage, T+2 lag, price-band misses).
+- **Net-of-cost Sharpe ≥ 0.8** (after fees, taxes, slippage, price-band misses, on a 20- or 40-session book).
 - **Max adverse excursion on ACCUMULATE entries ≤ 6%** — if early entries routinely bleed more than that before working, the "root" claim is false.
 - **Decile monotonicity** of the ranker: mean forward 20d return must be monotone across score deciles on out-of-sample data. Non-monotone = model is guessing.
 
@@ -520,16 +521,20 @@ là *chưa chấm được*, không phải trượt.
 
 → Nguyên văn: [`docs/doctrine/23-backtest-controls.md`](docs/doctrine/23-backtest-controls.md)
 
-- **Chi phí đã mô hình hoá trong backtest engine**: T+2, phí mỗi chiều, thuế bán
-  0,1%, slippage `max(0,3%, 0,5×ATR%)`, biên ±7% HOSE. **§18.2/7, 9, 10 đóng ở
+- **Chi phí đã mô hình hoá trong backtest engine**: phí mỗi chiều, thuế bán
+  0,1%, slippage `max(0,3%, 0,5×ATR%)`, biên ±7% HOSE. **§18.2/9, 10 đóng ở
   backtest**, còn mở ở `risk_service` — nơi sizing vị thế **không có** cost model.
+  T+2 (§18.2/7) **bỏ 2026-09-25**: danh mục tái cơ cấu mỗi 20 hoặc 40 phiên
+  (`config.HOLD_SESSIONS`), khớp ở phiên **sau** phiên công bố tín hiệu.
   Đừng viết lại caveat "chưa mô hình hoá": một caveat sai dạy người đọc chiết
   khấu một con số vốn đã net.
 - **`flow_z` xếp hạng trên `flow_z20`** (z của ngành so với *chính lịch sử 20d
   của nó*). Bản cross-sectional cũ là ánh xạ affine dương → **giữ nguyên thứ tự
   raw VND**, tức `flow_z` và `flow_raw` từng là một chiến lược.
-- **§23.5 còn mở:** 45% ma sát trên 844 lệnh/năm — không phải bug cost model mà
-  là turnover. Không tiêu chí Sharpe net nào của §18.7 đáng tin cho tới khi đổi.
+- **§23.5 đóng về cấu trúc 2026-09-25:** 45% ma sát trên 844 lệnh/năm là
+  turnover của việc tái cơ cấu **mỗi phiên**. Nay chỉ tái cơ cấu mỗi 20 hoặc 40
+  phiên: `flow_z` 2024-01→2026-09 còn 163 lệnh ở khung 20 và 81 ở khung 40 (đo
+  trên bản DB 2026-09-24, trước khi sửa dữ liệu ngành — §4 review 2026-09-24).
 
 ## 24. Filter, preset và giá của tranh cãi P1-1 — 2026-08-23
 

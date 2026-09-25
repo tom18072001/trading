@@ -22,7 +22,9 @@ stop neo ở giá vào; đây là cùng kết luận cho băng neo ở đỉnh.
 Nên module này tách bạch hai thứ, và chỉ MỘT trong hai là luật đo được:
 
   - `sell_from` / `sell_by` — **cửa sổ thời gian. ĐÂY là luật.** Giữ 20-40 phiên
-    rồi bán. Dưới 20 và trên 40 phiên không factor nào sống sót phép đo (§26.9).
+    (4-8 tuần), **mặc định tới ~40**; phiên 20 mở cửa sổ, không phải tín hiệu
+    bán. Đo lại 2026-09-24 (review §3.1): lợi nhuận danh mục tăng dốc tới ~40
+    phiên rồi đi ngang — giữ lâu hơn 40 không thêm gì đo được.
   - `band_lo` / `band_hi` — **range tham chiếu, KHÔNG phải luật.** Nó trả lời
     "giá đang ở đâu so với nhịp thường của chính mã này", để Tom quyết định bán
     vào vùng nào trong cửa sổ. Thoát tự động tại `band_lo` đã được đo và **thua**
@@ -36,10 +38,12 @@ from __future__ import annotations
 
 from typing import Any
 
-#: Cửa sổ giữ, đo được (§26.9 + quét 10/20/40/60 ngày 2026-09-16).
-#: Ngoài khoảng này không factor nào qua được hai tiêu chí bắt buộc.
-HOLD_MIN_SESSIONS = 20
-HOLD_MAX_SESSIONS = 40
+from config import HOLD_SESSIONS
+
+#: Cửa sổ giữ: 4 và 8 tuần — config.HOLD_SESSIONS, một định nghĩa cho cả hệ
+#: thống (Tom 2026-09-25: "chỉ sử dụng 4 tuần và 8 tuần"). Bench, bản tin, thẻ
+#: Daily Insight và backtest ngành đọc cùng một chỗ.
+HOLD_MIN_SESSIONS, HOLD_MAX_SESSIONS = HOLD_SESSIONS
 
 #: Range tham chiếu: ±1 ATR quanh ĐỈNH đã đạt. Một ATR là "một nhịp thường của
 #: chính mã đó", nên vùng này đọc được ngay: dưới đáy range là đã nhả hơn một
@@ -146,12 +150,14 @@ def advise(position: dict, path: list[dict], atr_pct: float | None,
             elif held <= HOLD_MAX_SESSIONS:
                 out["phase"] = "trong cửa sổ bán"
                 out["note"] = (f"đang trong cửa sổ {HOLD_MIN_SESSIONS}-"
-                               f"{HOLD_MAX_SESSIONS} phiên. Còn "
-                               f"{HOLD_MAX_SESSIONS - held} phiên tới hạn.")
+                               f"{HOLD_MAX_SESSIONS} phiên, còn "
+                               f"{HOLD_MAX_SESSIONS - held} phiên tới hạn. Mặc định "
+                               f"giữ tiếp tới ~{HOLD_MAX_SESSIONS} phiên — cửa sổ mở "
+                               "không phải tín hiệu bán. Khi bán, đặt lệnh ở phiên ATO.")
             else:
                 out["phase"] = "quá hạn"
                 out["note"] = (f"đã giữ {held} phiên, quá khung {HOLD_MAX_SESSIONS}. "
-                               "Ngoài khung này không factor nào sống sót phép đo.")
+                               "Giữ lâu hơn không thêm gì đo được — bán ở phiên ATO.")
         except (ValueError, TypeError):
             pass
 

@@ -16,6 +16,12 @@ Three comparisons, because a raw return number means nothing on its own:
 
 Entry is the NEXT session's open: the report is generated at 17:00, after the
 close it quotes, so its `entry` price is not purchasable.
+
+HISTORICAL. This script answered the 2026-09-16 T+3 question and its short
+windows (T+1..T+15) are that diagnosis; they are kept so the numbers quoted in
+CLAUDE.md §26.3 stay reproducible. The T+ mode itself was removed on 2026-09-25
+(Tom: "chỉ sử dụng 4 tuần và 8 tuần"). The live audit of what the system
+recommends is `scripts/audit_watch.py`, on the 20/40-session horizons.
 """
 from __future__ import annotations
 
@@ -32,8 +38,6 @@ sys.path.insert(0, str(ROOT))
 
 PANEL_DB = ROOT / "data" / "price_panel.db"
 PICKS_CSV = ROOT / "data" / "past_picks.csv"
-
-from config import BACKTEST_SETTLEMENT_LAG  # noqa: E402
 
 # Trước 2026-09-16 đây là phí+thuế thôi, KHÔNG slippage — nên cột "net%" của
 # script này là 0,40%/vòng trong khi ticker_alpha_bench chấm 1,00%. Một cột tên
@@ -143,8 +147,7 @@ def main() -> int:
           f"{d['date'].nunique()} report dates "
           f"({d['date'].min().date()} .. {d['date'].max().date()})")
     print("entry = next session OPEN (report is written after the close it quotes)")
-    print(f"cost: {ROUND_TRIP*100:.2f}% round trip (phí + thuế + slippage) | "
-          f"T+{BACKTEST_SETTLEMENT_LAG} settlement\n")
+    print(f"cost: {ROUND_TRIP*100:.2f}% round trip (phí + thuế + slippage)\n")
 
     print(f"{'hold':>6s} {'picks%':>8s} {'BASE%':>8s} {'excess%':>9s} "
           f"{'net%':>8s} {'win':>6s} {'base win':>9s} {'n':>5s}")

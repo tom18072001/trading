@@ -181,7 +181,7 @@ càng "trưởng thành". Trước 2026-08-23 cột này bằng 0 ở mọi dòn
 
 | Thuật ngữ | Giải thích |
 |---|---|
-| **T+2 Settlement** | Mua hôm nay, bán được sau **2 phiên giao dịch** (không phải 2 ngày dương lịch — nghỉ lễ và cuối tuần không tính). Backtest khoá vốn đúng 2 phiên (§18.2/7); sổ lệnh trả `sellable_on` tính qua `utils/clock.next_trading_day` nên đã trừ lịch nghỉ HOSE. §18 gọi là "T+2.5" vì tiền về trong ngày T+2 chứ không phải đầu phiên |
+| **Khung giữ 4-8 tuần** | Hệ thống chỉ dùng hai khung: **20 phiên (4 tuần) và 40 phiên (8 tuần)** — `config.HOLD_SESSIONS`. Mặc định giữ tới ~40 phiên; phiên 20 mở cửa sổ bán, không phải tín hiệu bán. Đếm bằng **phiên giao dịch** (`utils/clock.next_trading_day`, đã trừ lịch nghỉ HOSE), không phải ngày dương lịch. Chế độ T+ (3-5 phiên) và luật T+2 trong backtest đã bỏ ngày 2026-09-25: ở khung ≥ 20 phiên, T+2 không bao giờ là ràng buộc |
 | **Fees** | 15bps phí + 10bps thuế = ~40bps round-trip (1bp = 0.01%) |
 | **Price band** | Biên độ giá: HOSE ±7%, HNX ±10%, UPCoM ±15%. Chạm trần → skip fill |
 | **ATR stops** | Stop loss = giá - 1.8×ATR20 (BUY) hoặc 2.5×ATR20 (ACCUMULATE) |

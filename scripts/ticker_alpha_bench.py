@@ -17,12 +17,14 @@ the same discipline CLAUDE.md 16.12 forced on the sector gate:
     retyped.
   * Entry is the NEXT session's open. The report goes out after the close; you
     cannot buy the close you ranked on.
-  * Exit is h sessions after entry, and h >= BACKTEST_SETTLEMENT_LAG, because
-    T+2 means a position opened on day d cannot be sold before d+2.
+  * Exit is h sessions after entry, and h is one of config.HOLD_SESSIONS --
+    4 or 8 weeks. Tom, 2026-09-25: "bỏ T+2, chỉ sử dụng 4 tuần và 8 tuần"; the
+    bench refuses any other horizon rather than quietly measuring a product the
+    system no longer sells.
 
 Usage:
     python scripts/ticker_alpha_bench.py
-    python scripts/ticker_alpha_bench.py --topk 5 --min-dv 5e6 --horizons 2,3,5
+    python scripts/ticker_alpha_bench.py --topk 5 --min-dv 5e6 --horizons 20,40
 """
 from __future__ import annotations
 
@@ -39,7 +41,7 @@ sys.path.insert(0, str(ROOT))
 
 PANEL_DB = ROOT / "data" / "price_panel.db"
 
-from config import BACKTEST_SETTLEMENT_LAG  # noqa: E402
+from config import HOLD_SESSIONS  # noqa: E402
 
 # Chi phí và registry sống ở analysis/bench.py — MỘT định nghĩa. Bản sao gõ tay
 # trong ticker_ranker_experiment.py từng chấm cùng một lệnh ở 0,70% thay vì
@@ -54,7 +56,7 @@ from analysis.bench import (  # noqa: E402
     register,
 )
 
-HORIZONS = (2, 3, 5, 10, 20)
+HORIZONS = HOLD_SESSIONS
 
 
 # ============================== panel ========================================
@@ -644,7 +646,7 @@ def main() -> int:
     ap.add_argument("--topk", type=int, default=5)
     ap.add_argument("--min-dv", type=float, default=5e6)
     ap.add_argument("--only", default="")
-    ap.add_argument("--horizons", default="2,3,5,10,20")
+    ap.add_argument("--horizons", default=",".join(map(str, HOLD_SESSIONS)))
     ap.add_argument("--verdict", action="store_true",
                     help="chấm mỗi factor theo tiêu chí doctrine và in phán quyết")
     ap.add_argument("--json", default="",
@@ -660,11 +662,11 @@ def main() -> int:
                   + ", ".join(plugins))
 
     horizons = tuple(int(x) for x in args.horizons.split(","))
-    bad = [h for h in horizons if h < BACKTEST_SETTLEMENT_LAG]
+    bad = [h for h in horizons if h not in HOLD_SESSIONS]
     if bad:
-        print(f"refusing horizons {bad}: T+{BACKTEST_SETTLEMENT_LAG} settlement means "
-              f"a position cannot be sold sooner than {BACKTEST_SETTLEMENT_LAG} sessions "
-              f"after entry.", file=sys.stderr)
+        print(f"refusing horizons {bad}: the system holds for {HOLD_SESSIONS} sessions "
+              f"(4 / 8 weeks) and nothing else -- config.HOLD_SESSIONS.",
+              file=sys.stderr)
         return 2
 
     p = load_panel()

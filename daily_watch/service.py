@@ -25,7 +25,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from config import BASE_DIR
+from config import BASE_DIR, HOLD_SESSIONS
 from daily_watch import positions as position_tracking
 from services import trading_state
 
@@ -61,7 +61,7 @@ ARCHIVE_DIR = Path(BASE_DIR) / "data" / "watch"
 #: Cùng một factor thắng ở 20 và 40, nên hai khung KHÔNG cho hai danh sách khác
 #: nhau — chỉ khác thời gian giữ. Dựng ra hai bảng khác nhau sẽ là bịa.
 #: Khoảng dùng được hẹp: dưới 20 và trên 40 đều không có gì sống sót.
-HORIZONS = (20, 40)
+HORIZONS = HOLD_SESSIONS
 
 #: Quy năm đo được ở mỗi khung, để bản tin nói bằng tiền chứ không bằng %/lệnh.
 HORIZON_ANNUALISED = {20: 0.059, 40: 0.117}
@@ -121,14 +121,16 @@ def _shortlist(top_n: int) -> tuple[list[dict], dict[str, Any]]:
 
 
 def _window_if_bought() -> dict[str, str | None]:
-    """Cửa sổ bán cho một lệnh mở ở phiên giao dịch kế tiếp."""
+    """Cửa sổ bán cho một lệnh mở ở phiên giao dịch kế tiếp.
+
+    Cùng một hàm với thẻ Daily Insight (`picks_scoring.hold_window`) — hai chỗ
+    tự đếm phiên là hai định nghĩa sẽ lệch (§22.11).
+    """
     try:
-        from daily_watch.sell_range import HOLD_MAX_SESSIONS, HOLD_MIN_SESSIONS
-        from utils.clock import next_trading_day, today
-        d0 = next_trading_day(today(), 1)
-        return {"sell_from": next_trading_day(d0, HOLD_MIN_SESSIONS).isoformat(),
-                "sell_by": next_trading_day(d0, HOLD_MAX_SESSIONS).isoformat()}
-    except (ValueError, TypeError, ImportError):
+        from services.picks_scoring import hold_window
+        from utils.clock import today
+        return hold_window(today())
+    except ImportError:
         return {"sell_from": None, "sell_by": None}
 
 

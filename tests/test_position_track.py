@@ -22,9 +22,9 @@ from fastapi.testclient import TestClient
 # Rời api/routers/state.py rồi rời services/ ngày 2026-09-16: job có lịch cần
 # đúng định nghĩa "đã chạm stop chưa" mà không gọi được một route (§22.11), và
 # Tom muốn cả module nằm một chỗ.
-from daily_watch.positions import SETTLEMENT_SESSIONS
 from daily_watch.positions import track as _track
 from services import trading_state
+from services.picks_scoring import hold_window
 from utils.clock import next_trading_day, sessions_between
 
 
@@ -149,22 +149,30 @@ def test_a_hand_edited_opened_at_does_not_break_the_whole_book():
     out = _track(p, _bars(("2026-08-17", 26.0)), 26.0)
 
     assert out["sessions_held"] is None
-    assert out["sellable_on"] is None
+    # T+2 `sellable_on` was removed with the T+ mode (2026-09-25): at a 20-40
+    # session hold the settlement date is never the one that binds.
+    assert "sellable_on" not in out
 
 
 # ----- 3. sessions, not calendar days --------------------------------------
 
-def test_sellable_on_skips_weekends():
-    """T+2 counts SESSIONS. A Thursday buy settles Monday, not Saturday —
-    which is the bug tPlusDays() shipped with (`setDate(+i)`)."""
+def test_the_sell_window_counts_sessions_not_calendar_days():
+    """A Thursday signal fills at Friday's ATO, and "4 weeks" is 20 SESSIONS
+    after that fill, not 20 days — `setDate(+i)` was the bug tPlusDays()
+    shipped with, one box at a time."""
     thu = date(2026, 8, 20)
     assert thu.strftime("%a") == "Thu"
-    assert next_trading_day(thu, SETTLEMENT_SESSIONS) == date(2026, 8, 24)
+    w = hold_window(thu)
+    d0 = next_trading_day(thu, 1)
+    assert d0 == date(2026, 8, 21)
+    assert sessions_between(d0, date.fromisoformat(w["sell_from"])) == 20
+    assert sessions_between(d0, date.fromisoformat(w["sell_by"])) == 40
 
 
-def test_sellable_on_skips_holidays_too():
-    """2026-04-30 and 05-01 are HOSE holidays; Wed 29th settles Tuesday 5th."""
-    assert next_trading_day(date(2026, 4, 29), SETTLEMENT_SESSIONS) == date(2026, 5, 5)
+def test_session_counting_skips_holidays_too():
+    """2026-04-30 and 05-01 are HOSE holidays: two sessions after Wed 29th is
+    Tuesday the 5th, not Friday the 1st."""
+    assert next_trading_day(date(2026, 4, 29), 2) == date(2026, 5, 5)
 
 
 def test_sessions_held_counts_trading_days_and_never_goes_negative():
@@ -202,4 +210,5 @@ def test_pnl_still_works_when_stop_is_missing(client, monkeypatch):
     assert row["pnl_pct"] == pytest.approx((27.0 / 26.0 - 1) * 100)
     assert row["stop"] is None and row["dist_to_stop_pct"] is None
     assert len(row["path"]) == 2
-    assert row["sellable_on"] and row["sessions_held"] is not None
+    assert "sellable_on" not in row and row["sessions_held"] is not None
+    assert row["sell_range"]["sell_from"] and row["sell_range"]["sell_by"]

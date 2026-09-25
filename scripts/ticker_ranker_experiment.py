@@ -39,6 +39,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from analysis.bench import TOTAL_COST as COST  # noqa: E402
+from config import HOLD_SESSIONS  # noqa: E402
 from scripts.ticker_alpha_bench import (  # noqa: E402
     FACTORS,
     build_features,
@@ -170,7 +171,8 @@ def score(df: pd.DataFrame, pred_col: str, topk: int) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--horizon", type=int, default=20)
+    ap.add_argument("--horizon", type=int, default=HOLD_SESSIONS[0], choices=HOLD_SESSIONS,
+                    help="4 or 8 weeks, in sessions (config.HOLD_SESSIONS)")
     ap.add_argument("--topk", type=int, default=5)
     ap.add_argument("--min-dv", type=float, default=5e6)
     ap.add_argument("--folds", type=int, default=8)

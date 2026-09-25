@@ -8,9 +8,12 @@ curve look like next to VNINDEX?
 Mechanics, all of them deliberate:
   * entry at the NEXT session's open (the report is written after the close)
   * equal weight across at most MAX_POS concurrent names, one entry per name
-  * T+2: capital from a sale is unavailable for BACKTEST_SETTLEMENT_LAG sessions
+  * sale proceeds are reusable the same session -- the T+2 settlement queue was
+    removed on 2026-09-25 with the T+ mode (Tom: "bỏ cả luật T+2 trong
+    backtest"); at a 20-40 session hold it could only ever delay a re-entry
   * fees + sell tax from config, slippage per side on the parameter
-  * exit at max_hold sessions, or a stop if one is asked for
+  * exit at max_hold sessions (config.HOLD_SESSIONS: 20 or 40), or a stop if
+    one is asked for
 
 Reported against two baselines, because one is not enough:
   * VNINDEX buy-and-hold (11)
@@ -33,7 +36,7 @@ from analysis.bench import SLIPPAGE_BPS_PER_SIDE  # noqa: E402
 from config import (  # noqa: E402
     BACKTEST_FEE_BPS,
     BACKTEST_SELL_TAX_BPS,
-    BACKTEST_SETTLEMENT_LAG,
+    HOLD_SESSIONS,
 )
 from scripts.ticker_alpha_bench import PANEL_DB, build_features, load_panel  # noqa: E402
 from scripts.tplus_strategy_bench import RULES  # noqa: E402
@@ -80,16 +83,9 @@ def simulate(entries: pd.DataFrame, f: dict, p: dict, *, max_pos: int,
 
     cash, equity = 1.0, []
     book: dict[int, dict] = {}          # column index -> position
-    pending: list[tuple[int, float]] = []   # (settles_on_i, amount)
     trades = []
 
     for i in range(i0, len(dates) - 1):
-        for k in range(len(pending) - 1, -1, -1):
-            when, amt = pending[k]
-            if when <= i:
-                cash += amt
-                pending.pop(k)
-
         # --- exits, evaluated on today's bar ---
         for j in list(book):
             pos = book[j]
@@ -100,8 +96,7 @@ def simulate(entries: pd.DataFrame, f: dict, p: dict, *, max_pos: int,
                 px, why = CL[i, j], "time"
             if px is None:
                 continue
-            proceeds = pos["shares"] * px * (1 - fee_out)
-            pending.append((i + BACKTEST_SETTLEMENT_LAG, proceeds))
+            cash += pos["shares"] * px * (1 - fee_out)
             trades.append({"symbol": syms[j], "in": dates[pos["i"]], "out": dates[i],
                            "ret": px / pos["px"] - 1 - fee_in - fee_out, "why": why})
             del book[j]
@@ -125,7 +120,7 @@ def simulate(entries: pd.DataFrame, f: dict, p: dict, *, max_pos: int,
 
         mtm = sum(pos["shares"] * CL[i, j] for j, pos in book.items()
                   if np.isfinite(CL[i, j]))
-        equity.append((dates[i], cash + mtm + sum(a for _, a in pending)))
+        equity.append((dates[i], cash + mtm))
 
     eq = pd.Series(dict(equity)).sort_index()
     return eq, pd.DataFrame(trades)
@@ -146,7 +141,8 @@ def stats(eq: pd.Series) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--max-pos", type=int, default=5)
-    ap.add_argument("--max-hold", type=int, default=20)
+    ap.add_argument("--max-hold", type=int, default=HOLD_SESSIONS[-1],
+                    choices=HOLD_SESSIONS, help="4 or 8 weeks, in sessions")
     ap.add_argument("--stop-atr", type=float, default=0.0, help="0 = no stop")
     ap.add_argument("--min-dv", type=float, default=5e6)
     # Mặc định từ config qua analysis/bench.py (§18.2/9), không gõ tay 15.
@@ -162,7 +158,7 @@ def main() -> int:
 
     names = args.rules.split(",") if args.rules else list(RULES)
     print(f"book: max {args.max_pos} positions, hold {args.max_hold} sessions, "
-          f"stop {args.stop_atr or 'none'}xATR, T+{BACKTEST_SETTLEMENT_LAG} settlement")
+          f"stop {args.stop_atr or 'none'}xATR")
     print(f"cost: {BACKTEST_FEE_BPS}bps/side + {BACKTEST_SELL_TAX_BPS}bps sell tax + "
           f"{args.slippage_bps}bps slippage/side, from {args.start}\n")
     print(f"{'rule':26s} {'total%':>9s} {'CAGR%':>8s} {'Sharpe':>7s} {'MaxDD%':>8s} "

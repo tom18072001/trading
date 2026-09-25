@@ -1,10 +1,14 @@
-"""Event-style bench: entry rule + target/stop geometry, exactly as Tom trades it.
+"""Event-style bench: entry rule + exit geometry, walked bar by bar.
+
+The file name is historical: it was written on 2026-09-16 to measure the T+
+(3-5 session) trade, and kept its name when that mode was removed on 2026-09-25
+(Tom: "bỏ T+2, chỉ sử dụng 4 tuần và 8 tuần") because docs point at it. It now
+measures only 20- and 40-session holds -- config.HOLD_SESSIONS.
 
 `ticker_alpha_bench.py` ranks the cross-section and exits on a fixed clock. That
-is the right shape for measuring a factor and the wrong shape for measuring the
-product: the daily card carries an ENTRY, a TARGET and a STOP, and the trade ends
-at whichever comes first. A fixed-clock exit cannot see that the shipped card's
-stop is three times more likely to be touched inside T+3 than its target.
+is the right shape for measuring a factor and the wrong shape for measuring an
+exit rule: a price level (target, stop, trailing band) ends the trade at
+whichever comes first, and a fixed-clock exit cannot see which one fires.
 
 So this walks each trade forward bar by bar:
 
@@ -17,8 +21,8 @@ eligible universe on the same dates with the same geometry. 16.12's rule applies
 here too: a rule that does not beat its own control is not a rule.
 
 Usage:
-    python scripts/tplus_strategy_bench.py
-    python scripts/tplus_strategy_bench.py --max-hold 3 --slippage-bps 15
+    python scripts/tplus_strategy_bench.py                 # 40 sessions
+    python scripts/tplus_strategy_bench.py --max-hold 20 --trail
 """
 from __future__ import annotations
 
@@ -35,7 +39,7 @@ sys.path.insert(0, str(ROOT))
 PANEL_DB = ROOT / "data" / "price_panel.db"
 
 from analysis.bench import SLIPPAGE_BPS_PER_SIDE  # noqa: E402
-from config import BACKTEST_FEE_BPS, BACKTEST_SELL_TAX_BPS  # noqa: E402
+from config import BACKTEST_FEE_BPS, BACKTEST_SELL_TAX_BPS, HOLD_SESSIONS  # noqa: E402
 from scripts.ticker_alpha_bench import build_features, load_panel  # noqa: E402
 
 FEE_ROUND_TRIP = (2 * BACKTEST_FEE_BPS + BACKTEST_SELL_TAX_BPS) / 10_000.0
@@ -166,8 +170,7 @@ def _(f):
 
 GEOMETRIES = {
     # name:            (target_atr, stop_atr)   -- ATR multiples, as picks_scoring does
-    "SWING 2.5/1.8 (shipped)": (2.5, 1.8),
-    "TPLUS 2.0/1.0": (2.0, 1.0),
+    "SWING 2.5/1.8 (screening geometry)": (2.5, 1.8),
     "tight 1.0/1.0": (1.0, 1.0),
     "tight 1.2/0.8": (1.2, 0.8),
     "wide-stop 1.5/2.5": (1.5, 2.5),
@@ -391,7 +394,8 @@ def main_trail(args, f, p, idx, years, cost) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--max-hold", type=int, default=3)
+    ap.add_argument("--max-hold", type=int, default=HOLD_SESSIONS[-1],
+                    choices=HOLD_SESSIONS, help="4 or 8 weeks, in sessions")
     ap.add_argument("--min-dv", type=float, default=5e6)
     # Mặc định lấy từ config qua analysis/bench.py (§18.2/9 = 30bps/chiều), KHÔNG
     # phải 15 gõ tay. Ba script từng chạy ở 15 và một script ở 0, nên cùng một

@@ -16,11 +16,6 @@ from fastapi import APIRouter
 from config import SECTORS
 from database.connection import SessionLocal
 from database.models import SectorFlowDaily, SectorRegime, SectorSignal
-from services.picks_scoring import (
-    PickProfile as _PickProfile,
-    compute_stop_target_rr as _compute_stop_target_rr,
-    is_valid_long_pick as _is_valid_long_pick,
-)
 from services.picks_universe_service import (
     FreshnessReport,
     UniverseSnapshot,
@@ -32,105 +27,6 @@ from services import insight_refresh as _insight_refresh
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/insight", tags=["daily-insight"])
-
-PORTFOLIO_RISK_PCT = 0.01   # risk 1% of equity per trade when sizing
-
-# T+ swing profile (VN cash: T+2.5 settlement → typical holding 3-5 sessions).
-# ATR multipliers come from services.picks_scoring.PickProfile.TPLUS; constants
-# here govern entry limit offset + horizon label only.
-TPLUS_ENTRY_DISCOUNT  = 0.005  # limit at -0.5% (T+ needs quick fill, not deep dip)
-TPLUS_HOLD_DAYS       = "3-5"
-
-
-def _build_picks(top_sectors: list[tuple[str, float, str]],
-                 sector_ctx: dict[str, dict[str, float | None]],
-                 snapshot: "UniverseSnapshot") -> list[dict[str, Any]]:
-    """Build T+ (3-5 session) picks from the PicksUniverseService snapshot.
-
-    Picks per sector come from `snapshot.by_sector[code][:3]`, sorted by the
-    composite score the service already computed. The sizing is recomputed
-    with PickProfile.TPLUS (2.0× ATR target / 1.0× ATR stop), then gated by
-    `is_valid_long_pick` for BUY/ACCUMULATE actions — rejected picks are
-    dropped with a log line.
-    """
-    picks: list[dict[str, Any]] = []
-    for code, score, action in top_sectors:
-        ctx = sector_ctx.get(code, {})
-        flow_z = ctx.get("flow_z20")
-        foreign_hit = ctx.get("foreign_hit_20d")
-        stealth_age = ctx.get("accumulation_age") or 0
-        rs20 = ctx.get("rs_vnindex_20d")
-
-        bucket = snapshot.by_sector.get(code, [])
-        # Top-3 ranked by composite score
-        for ticker in bucket[:3]:
-            px = ticker.close
-            # Reuse the snapshot's atr_pct (already in percent units, e.g. 2.5)
-            atr_pct = (ticker.atr_pct or 0)
-            # Recompute stop/target with the T+ profile (the snapshot defaults
-            # to SWING; insight uses shorter horizon)
-            stop_t, target_t, rr_t, _err = _compute_stop_target_rr(
-                {"close": px, "atr_pct": atr_pct,
-                 "bb_upper": ticker.bb_upper, "bb_lower": ticker.bb_lower},
-                _PickProfile.TPLUS,
-            )
-            entry = round(px * (1 - TPLUS_ENTRY_DISCOUNT), 2)
-
-            upside_pct = round((target_t - entry) / entry * 100, 2) if (target_t and entry) else 0
-            downside_pct = round((entry - stop_t) / entry * 100, 2) if (stop_t and entry) else 0
-            position_pct = None
-            if downside_pct and downside_pct > 0:
-                position_pct = round(min(PORTFOLIO_RISK_PCT * 100 / (downside_pct / 100), 25.0), 2)
-
-            common = {
-                "symbol": ticker.symbol,
-                "sector": code,
-                "sector_name": SECTORS.get(code, code),
-                "action": action,
-                "horizon": f"T+{TPLUS_HOLD_DAYS}",
-                "score": round(float(score), 3),
-                "ticker_score": float(ticker.score),
-                "upside_pct": upside_pct,
-                "downside_pct": downside_pct,
-                "r_r": rr_t,
-                "position_pct": position_pct,
-                "flow_z20": round(flow_z, 2) if flow_z is not None else None,
-                "foreign_hit_20d": round(foreign_hit, 2) if foreign_hit is not None else None,
-                "stealth_age": int(stealth_age),
-                "rs_vnindex_20d": round(rs20, 3) if rs20 is not None else None,
-                "foreign_room_pct": (
-                    round(ticker.foreign_room_pct, 2)
-                    if ticker.foreign_room_pct is not None else None
-                ),
-                "dv_20d": round(ticker.dv_20d, 0),
-            }
-
-            # Validity gate for long actions — protects against degenerate
-            # target/stop math (e.g. low-ATR penny with target < entry).
-            if action in ("BUY", "ACCUMULATE"):
-                ok, reason = _is_valid_long_pick(entry, target_t, stop_t)
-                if not ok:
-                    log.info("insight: skipping %s %s — %s", ticker.symbol, action, reason)
-                    continue
-
-            bits = [
-                f"T+{TPLUS_HOLD_DAYS}",
-                f"flow_z {common['flow_z20']:+.2f}" if common['flow_z20'] is not None else None,
-                f"FH {int(common['foreign_hit_20d']*100)}%" if common['foreign_hit_20d'] is not None else None,
-                f"RS20 {rs20:+.1%}" if rs20 is not None else None,
-                f"score {ticker.score:+.1f}",
-            ]
-            thesis = " · ".join([b for b in bits if b])
-            picks.append({
-                **common,
-                "price": round(px, 2),
-                "entry": entry,
-                "target": target_t,
-                "stop": stop_t,
-                "thesis": thesis,
-            })
-    return picks
-
 
 def _latest_two_days() -> pd.DataFrame:
     sess = SessionLocal()
@@ -237,15 +133,6 @@ def insight_daily():
             )
     finally:
         sess.close()
-    top_sectors: list[tuple[str, float, str]] = []
-    for s in sig_rows:
-        if s.action in ("BUY", "ACCUMULATE") and len(top_sectors) < 3:
-            top_sectors.append((s.sector_code, float(s.score), s.action))
-    # Fallback: if no BUY today, still surface top-2 ranked sectors as "watch"
-    if not top_sectors and sig_rows:
-        for s in sig_rows[:2]:
-            top_sectors.append((s.sector_code, float(s.score), s.action or "HOLD"))
-
     # Per-sector context from today's flow_daily row (ATR, flow z, stealth age, RS…)
     sector_ctx: dict[str, dict[str, float | None]] = {}
     sess = SessionLocal()
@@ -284,13 +171,16 @@ def insight_daily():
             tickers={}, by_sector={c: [] for c in SECTORS},
             freshness=_fr, is_valid=False,
         )
-    # Prefer the snapshot's pre-computed top-5 BUY / top-5 SELL list (with
-    # news + technical thesis). Fall back to the legacy per-sector loop when
-    # the snapshot has no top picks (e.g. is_valid=False).
-    if snapshot.top_buys or snapshot.top_sells:
-        picks = [p.to_dict() for p in snapshot.top_buys + snapshot.top_sells]
-    else:
-        picks = _build_picks(top_sectors, sector_ctx, snapshot)
+    # The snapshot's top-5 BUY / top-5 SELL is the ONLY source of picks. An
+    # empty snapshot means an empty list and the degraded-data banner.
+    #
+    # 2026-09-25: the fallback that used to live here built "T+3-5" cards from
+    # the ranker's BUY sectors with the TPLUS geometry (2.0x/1.0x ATR, entry
+    # -0.5%). Both halves are gone: the T+ mode was removed (Tom: "chỉ sử dụng
+    # 4 tuần và 8 tuần"), and a sector gate on buys has no measured edge
+    # (review 2026-09-24 §4.2). A list nobody can buy from on a degraded day is
+    # the honest answer; a list rebuilt from a different rule is not.
+    picks = [p.to_dict() for p in snapshot.top_buys + snapshot.top_sells]
 
     # ----- Market context: regime + stealth count + top / bottom sector -----
     sess = SessionLocal()

@@ -306,8 +306,10 @@ VNINDEX buy-and-hold. Baseline targets (`CLAUDE.md` §11):
 Trader-lens additions (§18.7):
 
 - **Net-of-cost Sharpe ≥ 0.8** — after fees (`fee_bps=15`/side),
-  sell tax (`sell_tax_bps=10`), slippage (`max(0.3%, 0.5 × ATR%)`), T+2
-  settlement lag, and ±7% price-band miss modeling.
+  sell tax (`sell_tax_bps=10`), slippage (`max(0.3%, 0.5 × ATR%)`), and ±7%
+  price-band miss modeling, on a book re-cut every 20 or 40 sessions
+  (`config.HOLD_SESSIONS`). The T+2 settlement lag was modelled until
+  2026-09-25 and removed with the T+ mode — at a 20-session hold it cannot bind.
 - **Max adverse excursion on ACCUMULATE ≤ 6%** — early entries cannot bleed
   more than this before working, or the "root" thesis is false.
 - **Decile monotonicity** — mean fwd 20d return must be monotone across
@@ -329,10 +331,11 @@ P0 (must ship before live paper-trade):
 - §18.2/8 FOL (foreign ownership room) check
 - §18.4/17 secondary HOSE scraper fallback
 
-Closed since this list was written — **in the backtest engine only**. §18.2/7
-(T+2 settlement), /9 (±7% band + slippage) and /10 (fee + sell tax) are
-modelled and reported on every run since 2026-08-22, and surfaced in the UI
-since §23. They stay **open in `risk_service`**, which still sizes positions
+Closed since this list was written — **in the backtest engine only**. §18.2/9
+(±7% band + slippage) and /10 (fee + sell tax) are modelled and reported on
+every run since 2026-08-22, and surfaced in the UI since §23. §18.2/7 (T+2
+settlement) was modelled the same day and removed on 2026-09-25 with the T+
+mode (Tom: 4- and 8-week holds only). They stay **open in `risk_service`**, which still sizes positions
 with no cost model. §18.3/13 (purged k-fold, embargo = horizon + 2) closed the
 same day in `models/rotation_ranker.py`.
 

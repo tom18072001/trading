@@ -793,9 +793,13 @@ def main(argv: list[str] | None = None) -> None:
 
     # ----- Risk & Execution notes -----
     RISK_NOTES = (
-        "<b>T+2.5 Settlement:</b> mọi BUY hôm nay chỉ có thể bán từ phiên T+2; "
-        "backtest Sharpe phải đã trừ 2.5d lag. "
-        "<b>Fees:</b> hardcode 15bps phí + 10bps thuế bán = ~40bps round-trip. "
+        # 2026-09-25: the T+2.5 paragraph that opened this block is gone with the
+        # T+ mode (Tom: "chỉ sử dụng 4 tuần và 8 tuần"). At a 20-40 session hold
+        # the settlement lag can never bind; the horizon is the instruction.
+        "<b>Khung giữ:</b> 4-8 tuần (20-40 phiên), mặc định tới ~40 phiên — phiên 20 "
+        "không phải tín hiệu bán. Mua ATO phiên sau, bán ATO ngày thoát. "
+        "<b>Chi phí thật:</b> phí 0,15%/chiều + thuế bán 0,1% + trượt giá 0,3%/chiều "
+        "≈ 1,00%/vòng — xoay vòng 20 phiên tốn ~12,6%/năm, 40 phiên ~6,3%/năm. "
         "<b>Price band:</b> HOSE ±7%, HNX ±10%, UPCoM ±15%; nếu basket chạm trần, skip fill ngày đó. "
         "<b>FOL:</b> các mã cạn room ngoại (room &lt; 3%) giảm trọng số foreign_net 0.5×. "
         "<b>ATR stops:</b> mặc định 1.8×ATR20 cho BUY, 2.5×ATR20 cho ACCUMULATE (wider). "
@@ -824,7 +828,7 @@ def main(argv: list[str] | None = None) -> None:
         if sells:
             items.append(f"<li>Thoát / tránh: {', '.join(s['sym'] for s in sells[:5])}. Không bắt đáy cho đến khi breadth phục hồi.</li>")
         # 5. Risk oversight
-        items.append("<li>Kiểm tra kill-switch + T+2 lịch tiền về trước 09:00 sáng mai. Đừng full-margin khi regime = chop.</li>")
+        items.append("<li>Kiểm tra kill-switch và cửa sổ bán của các vị thế trong sổ (bản theo dõi 17:30) trước 09:00 sáng mai. Đừng full-margin khi regime = chop.</li>")
         # 6. News radar
         items.append("<li>Mở News &amp; Catalyst section ngay đầu phiên, cross-check tin 48h trước khi đặt lệnh.</li>")
         return "".join(items)

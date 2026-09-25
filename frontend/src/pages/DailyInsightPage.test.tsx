@@ -148,6 +148,16 @@ describe('PickTable', () => {
     expect(screen.getByText('RSI 55')).toBeInTheDocument();
   });
 
+  it('shows the 4-8 week sell window on BUY rows, and no T+ day', () => {
+    // 2026-09-25: the T+ mode is gone (Tom: "chỉ sử dụng 4 tuần và 8 tuần").
+    // The dates come from the backend's holiday-aware hold_window().
+    const withWindow = [{ ...buyPicks[0], sell_from: '2026-10-23', sell_by: '2026-11-20' }];
+    render(<PickTable title="BUY" subtitle="x" kind="BUY" picks={withWindow} />);
+    expect(screen.getByText(/^Cửa sổ bán$/)).toBeInTheDocument();
+    expect(screen.getByText('23/10 → 20/11')).toBeInTheDocument();
+    expect(screen.queryByText(/T\+\d/)).toBeNull();
+  });
+
   it('falls back to legacy field names (price / r_r / sector)', () => {
     const legacy = [
       { symbol: 'BVH', sector: 'INSUR', sector_name: 'Bảo hiểm',

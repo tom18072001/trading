@@ -157,18 +157,27 @@ def test_compute_stop_target_zero_close_returns_error():
     assert stop is None and target is None and rr is None
 
 
-def test_compute_stop_target_tplus_vs_swing_profile():
-    """TPLUS uses tighter ATR multipliers → tighter stop, smaller target."""
+def test_swing_is_the_only_profile_and_its_geometry_is_unchanged():
+    """TPLUS (1.0x stop / 2.0x target, 3-5 sessions) was removed with the T+
+    mode on 2026-09-25. SWING must still be 1.8x ATR below and 2.5x ATR above:
+    `is_valid_long_pick` screens on it, so a silent change would change which
+    names reach the shortlist."""
+    assert [m.name for m in PickProfile] == ["SWING"]
     p = {"close": 100.0, "atr_pct": 3.0, "bb_upper": None, "bb_lower": None}
-    s_swing, t_swing, rr_swing, _ = compute_stop_target_rr(p, PickProfile.SWING)
-    s_tplus, t_tplus, rr_tplus, _ = compute_stop_target_rr(p, PickProfile.TPLUS)
-    # SWING = 1.8× ATR stop, 2.5× ATR target
-    # TPLUS = 1.0× ATR stop, 2.0× ATR target
-    # Both stops must be below close; TPLUS stop is CLOSER to close.
-    assert s_swing < s_tplus < p["close"]
-    # Both targets above close; SWING target is FURTHER from close.
-    assert t_tplus < t_swing
-    assert t_tplus > p["close"]
+    stop, target, rr, _ = compute_stop_target_rr(p, PickProfile.SWING)
+    assert stop == pytest.approx(100.0 * (1 - 1.8 * 0.03))            # 94.6
+    # 2.5x ATR gives 107.5, then MIN_RR 1.5 stretches it to 100 + 1.5 * 5.4
+    assert target == pytest.approx(108.1) and rr == pytest.approx(1.5)
+
+
+def test_the_horizon_note_names_4_and_8_weeks_and_no_t_plus():
+    """Every BUY card prints this sentence; 26.3 found the card had never
+    stated a horizon and was closed on a three-day clock because of it."""
+    from config import HOLD_SESSIONS
+    from services.picks_scoring import horizon_note
+    txt = horizon_note()
+    assert f"{HOLD_SESSIONS[0]}-{HOLD_SESSIONS[1]} phiên" in txt
+    assert "T+" not in txt
 
 
 def test_compute_stop_target_accepts_fractional_atr_input():

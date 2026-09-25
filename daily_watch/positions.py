@@ -17,7 +17,11 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-SETTLEMENT_SESSIONS = 2
+# `SETTLEMENT_SESSIONS = 2` and the `sellable_on` date it produced were removed
+# on 2026-09-25 with the T+ mode (Tom: "bỏ T+2, chỉ sử dụng 4 tuần và 8 tuần").
+# At a 20-40 session hold "sellable from T+2" is never the binding date; the
+# sell window (`sell_range.advise` -> sell_from / sell_by) is, and printing both
+# invited reading the earlier one as permission to sell.
 
 
 def track(p: dict, daily: list[dict], last: float | None) -> dict:
@@ -40,13 +44,13 @@ def track(p: dict, daily: list[dict], last: float | None) -> dict:
     vì nó bảo người đọc bán một lệnh đang chạy tốt. `stop_set_at` mặc định None
     và rơi về `opened_at`, nên lệnh đặt stop ngay từ đầu không đổi hành vi.
     """
-    from utils.clock import next_trading_day, sessions_between, to_market_date
+    from utils.clock import sessions_between, to_market_date
 
     stop, target = p.get("stop"), p.get("target")
     out: dict = {
         "path": [], "hit_stop": False, "hit_target": False,
         "dist_to_stop_pct": None, "dist_to_target_pct": None,
-        "sessions_held": None, "sellable_on": None,
+        "sessions_held": None,
     }
 
     opened = p.get("opened_at")
@@ -54,7 +58,6 @@ def track(p: dict, daily: list[dict], last: float | None) -> dict:
         try:
             d0 = to_market_date(opened)
             out["sessions_held"] = sessions_between(d0)
-            out["sellable_on"] = next_trading_day(d0, SETTLEMENT_SESSIONS).isoformat()
         except (ValueError, TypeError):
             pass   # một opened_at sửa tay không được làm 500 cả cuốn sổ
 

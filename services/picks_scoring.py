@@ -15,58 +15,76 @@ from __future__ import annotations
 
 import math
 
+from datetime import date
 from enum import Enum
 from typing import Any
 
+from config import HOLD_SESSIONS
+
 
 class PickProfile(str, Enum):
-    """Sizing profile for a long pick."""
-    SWING = "swing"   # 3-4 week horizon: 2.5× ATR target, 1.8× ATR stop
-    TPLUS = "tplus"   # 3-5 day horizon:  2.0× ATR target, 1.0× ATR stop
+    """Sizing profile for a long pick.
+
+    One member since 2026-09-25. TPLUS (3-5 sessions, 2.0x/1.0x ATR) was
+    removed with the T+ trading mode -- Tom: "bỏ T+2, chỉ sử dụng 4 tuần và 8
+    tuần". The enum stays so the stop/target call sites keep one explicit
+    argument instead of an implicit default.
+    """
+    SWING = "swing"   # 2.5x ATR target, 1.8x ATR stop -- a SCREENING geometry
 
 
 # --- Profile → ATR multipliers ---
 _PROFILE_PARAMS: dict[PickProfile, dict[str, float]] = {
     PickProfile.SWING: {"target_atr": 2.5, "stop_atr": 1.8},
-    PickProfile.TPLUS: {"target_atr": 2.0, "stop_atr": 1.0},
 }
 
-# --- How long the geometry above actually needs, measured ---------------------
-# 2026-09-16, `scripts/audit_past_picks.py` over the 174 picks this system
-# emailed between 2026-07-23 and 2026-09-14:
+# --- Holding period: 4 or 8 weeks, and nothing shorter ------------------------
+# 2026-09-25, Tom: "bỏ T+2, chỉ sử dụng 4 tuần và 8 tuần". The horizon lives in
+# config.HOLD_SESSIONS so the sell window, the bulletin, the benches and the
+# sector backtest cannot drift apart.
 #
-#   reached the printed SWING target at all ....... 15%   median 7 sessions
-#   reached it inside T+3 .......................... 4%
-#   touched the printed stop ...................... 50%   median 4 sessions
-#   touched it inside T+3 ......................... 24%
+# Why these two, measured (docs/reviews/ALGO_REVIEW_2026-09-24.md §3.1): as a
+# staggered book, 2023-01..2026-09, 1.00% round trip, the SMA200-gated blend
+# ordering earns -2.1%/yr at 10 sessions, 7.2% at 20 and 11.7% at 40, then goes
+# flat -- 10.6% at 60, 10.9% at 120 (VNINDEX: 17.5% on the same dates). Most of
+# that climb is the cost being spread over fewer round trips (12.6%/yr at 20
+# sessions, 6.3% at 40), which is why the default is to hold to ~40 and why
+# session 20 is not a sell signal.
 #
-# So the SWING card is a three-to-four-week trade, and closing it on a T+3 clock
-# turns a 15%/50% target-vs-stop race into a 4%/24% one. The card never said
-# that, which is the whole of Tom's "kết quả chậm hơn nhiều so với T+3": the
-# picks were not slow, the horizon printed on them was never three days.
-#
-# TPLUS is NOT the fix and is not the default. Measured across the panel
-# (`scripts/tplus_strategy_bench.py`), its 1.0xATR stop is touched by noise on
-# 31-42% of three-session holds against 11-12% for SWING's 1.8xATR -- a tighter
-# stop on a short clock is a worse lottery, not a shorter one.
-PROFILE_HORIZON_SESSIONS: dict[PickProfile, int] = {
-    PickProfile.SWING: 20,
-    PickProfile.TPLUS: 5,
-}
+# The stop/target that `compute_stop_target_rr` returns is NOT part of the
+# instruction. It is a screening by-product (`is_valid_long_pick` needs a stop
+# below entry to compute its R:R floor); the book has had no stop since
+# 2026-09-16 (CLAUDE.md §26.10).
 
 
-def horizon_note(profile: PickProfile = PickProfile.SWING) -> str:
-    """One VN sentence naming the holding period the geometry implies.
+def horizon_note() -> str:
+    """One VN sentence naming the holding period, printed on every BUY card.
 
-    It lives beside the multipliers, not in a renderer, so whoever changes the
-    target distance owns the sentence describing it -- the same placement
-    argument 25.6 made for `confidence_phrase`.
+    It lives beside the scoring, not in a renderer, so whoever changes the
+    horizon owns the sentence describing it -- the same placement argument
+    25.6 made for `confidence_phrase`.
     """
-    n = PROFILE_HORIZON_SESSIONS[profile]
-    if profile is PickProfile.SWING:
-        return (f"Khung ~{n} phiên (3-4 tuần). Đo trên picks thật: chỉ 4% chạm "
-                f"target trong T+3, trung vị 7 phiên mới tới.")
-    return f"Khung ~{n} phiên."
+    lo, hi = HOLD_SESSIONS
+    return (f"Giữ {lo}-{hi} phiên (4-8 tuần), mặc định tới ~{hi} phiên; "
+            f"phiên {lo} không phải tín hiệu bán. Mua ATO phiên sau, bán ATO ngày thoát.")
+
+
+def hold_window(as_of: date) -> dict[str, str | None]:
+    """Sell window for a buy filled at the ATO of the session after `as_of`.
+
+    `sell_from` opens the window (4 weeks), `sell_by` closes it (8 weeks).
+    Counted in trading SESSIONS with the holiday-aware calendar, never calendar
+    days: a Thursday buy plus 20 days is not 20 sessions.
+    """
+    try:
+        from utils.clock import next_trading_day
+        lo, hi = HOLD_SESSIONS
+        d0 = next_trading_day(as_of, 1)
+        return {"sell_from": next_trading_day(d0, lo).isoformat(),
+                "sell_by": next_trading_day(d0, hi).isoformat()}
+    except (ValueError, TypeError, ImportError):
+        return {"sell_from": None, "sell_by": None}
+
 
 # --- Validity invariants ---
 MIN_STOP_PCT    = 0.015   # stop must be at least 1.5% below entry
@@ -349,8 +367,8 @@ def is_valid_long_pick(
 
 __all__ = [
     "PickProfile",
-    "PROFILE_HORIZON_SESSIONS",
     "horizon_note",
+    "hold_window",
     "MIN_BUY_SCORE",
     "MAX_5D_DROP_PCT",
     "UNTRENDED_FLOOR",

@@ -90,10 +90,14 @@ Sectors rank candidates desc by `(score, dv_20d)`.
 ## 8. Stop / target / RR
 
 `services.picks_scoring.compute_stop_target_rr(row, profile)`:
-- `PickProfile.SWING` — 2.5× ATR target, 1.8× ATR stop. Used by the email
-  report (`generate_report.py`).
-- `PickProfile.TPLUS`  — 2.0× ATR target, 1.0× ATR stop. Used by Daily
-  Insight (`api/routers/insight.py`).
+- `PickProfile.SWING` — 2.5× ATR target, 1.8× ATR stop. The only profile, and a
+  **screening** geometry: `is_valid_long_pick` needs a stop below entry to
+  compute its R:R floor. It is not an exit — the book has had no stop since
+  2026-09-16 (`CLAUDE.md` §26.10).
+- `PickProfile.TPLUS` (2.0× / 1.0×, 3-5 sessions) was removed 2026-09-25 with
+  the T+ mode. The holding period is `config.HOLD_SESSIONS` = 20 / 40 sessions
+  (4 / 8 weeks); `picks_scoring.hold_window(as_of)` turns it into the
+  `sell_from` / `sell_by` dates every BUY `PickEntry` carries.
 
 Enforced invariants (single source of truth in `picks_scoring`):
 - `stop ≤ close × (1 − 1.5%)`

@@ -28,10 +28,13 @@ class BacktestRequest(BaseModel):
     end_date: str
     initial_capital: float = 100_000_000
     strategy: Literal["signals", "flow_z", "flow_raw"] = "signals"
-    # Per-run overrides of the §18.2/7,10 defaults. None = use config.
+    # Per-run overrides of the §18.2/10 defaults. None = use config.
     fee_bps: float | None = Field(default=None, ge=0, le=500)
     sell_tax_bps: float | None = Field(default=None, ge=0, le=500)
-    settlement_lag: int | None = Field(default=None, ge=0, le=10)
+    # Rebalance period: 4 or 8 weeks (config.HOLD_SESSIONS). Replaces the
+    # `settlement_lag` knob, removed with the T+ mode on 2026-09-25. Literal so
+    # a 5 or a 3 is a 422, not a silent T+ backtest.
+    hold_sessions: Literal[20, 40] | None = None
 
 
 @router.post("/backtest")
@@ -42,7 +45,7 @@ def run_backtest(req: BacktestRequest, db: Session = Depends(get_session_depende
         strategy=req.strategy,
         fee_bps=req.fee_bps,
         sell_tax_bps=req.sell_tax_bps,
-        settlement_lag=req.settlement_lag,
+        hold_sessions=req.hold_sessions,
     )
     out = asdict(result)
     out["equity_curve"] = out["equity_curve"][:200]
