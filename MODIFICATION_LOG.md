@@ -14,6 +14,20 @@
 
 ---
 
+## 2026-09-25 (3) — `give_back` chỉ arm khi có ngày mua
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `daily_watch/sell_range.py`, `daily_watch/service.py`, `daily_watch/README.md`,
+  `tests/test_sell_range.py` (mới — module này chưa từng có test riêng).
+- Reason: review 2026-09-24 §3.2 / §8 P1-9. `armed = peak ≥ entry × (1 + ARM×ATR)` không xét
+  `peak_basis`: thiếu ngày mua thì `peak` là đỉnh ~30 phiên gần nhất, có thể có TRƯỚC lúc mua,
+  và bản tin 2026-09-23 báo "NHẢ QUÁ SÂU" cho đúng một vị thế như vậy (đỉnh cao hơn giá vào ~11%).
+- Summary: `armed` thêm điều kiện `peak_basis == "since_entry"`; ghi chú cho vị thế thiếu ngày
+  mua nói rõ không báo "nhả quá sâu" và vì sao; bản tin mục 2 liệt kê cả hai thứ bị thiếu.
+  Range (`band_lo`/`band_hi`) vẫn tính — nó là tính chất của mã, không của lệnh.
+  8 test mới; negative control: trên `sell_range.py` cũ, 2 test thiếu-ngày-mua đỏ đúng lý do,
+  và test "tăng nhẹ không arm" giữ nguyên để chứng minh ngày mua không phải điều kiện duy nhất.
+- Follow-ups: nhập ngày mua (ước lượng cũng được) cho các vị thế còn thiếu (review §8 P2-18).
+
 ## 2026-09-25 (2) — một luật mua cho mọi bề mặt; bỏ ngưỡng `MIN_BUY_SCORE` 2,5, giữ cổng SMA200
 - Author: Claude (Cowork) on behalf of Tom
 - Files: `services/picks_universe_service.py` (`long_shortlist` mới, `_select_top`),

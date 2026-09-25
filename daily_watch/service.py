@@ -316,11 +316,11 @@ def render(payload: dict[str, Any]) -> str:
                    if (p.get("sell_range") or {}).get("peak_basis") != "since_entry"]
         if no_date:
             a("")
-            a(f"> `*` **{', '.join(no_date)} chưa có ngày mua.** Thứ duy nhất bị "
-              "thiếu là **cửa sổ bán** — nó đếm phiên kể từ lúc vào lệnh nên không "
-              "có gì thay thế được. **Range giá vẫn dùng được**: nó neo ở đỉnh ~30 "
-              "phiên gần nhất, tức đỉnh của thị trường chứ không phải đỉnh kể từ "
-              "lúc anh vào lệnh.")
+            a(f"> `*` **{', '.join(no_date)} chưa có ngày mua.** Thiếu hai thứ: "
+              "**cửa sổ bán** — nó đếm phiên kể từ lúc vào lệnh nên không có gì thay "
+              "thế được — và tin **\"nhả quá sâu\"**, vì không biết đỉnh ~30 phiên "
+              "gần nhất có trước hay sau lúc anh mua. **Range giá vẫn dùng được**: "
+              "nó neo ở đỉnh của thị trường chứ không phải đỉnh kể từ lúc anh vào lệnh.")
             a(">")
             a("> Một ngày mua **ước lượng là đủ** — cửa sổ rộng 20 phiên, lệch vài "
               "ngày gần như không đổi gì. `PATCH /api/state/positions/{symbol}` "

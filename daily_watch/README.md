@@ -56,9 +56,12 @@ Không sinh HTML và không gửi email. Bản tin này để **trả lời tron
    mua, không phải để được theo dõi). Gọi mạng chỉ ở job; `mark_book()` được
    route API gọi nên chỉ đọc cache.
 
-4. **`give_back` chỉ có nghĩa sau khi đã có sóng lên.** Nó chỉ báo khi đỉnh đã
-   vượt giá vào ≥ `ARM_ATR`×ATR — đúng điều kiện bench đã đo. Không có điều
-   kiện đó thì nó là một stop-loss 3,5×ATR dưới giá vào.
+4. **`give_back` chỉ có nghĩa sau khi đã có sóng lên — kể từ lúc mua.** Nó chỉ
+   báo khi đỉnh đã vượt giá vào ≥ `ARM_ATR`×ATR — đúng điều kiện bench đã đo —
+   **và** vị thế có ngày mua (`peak_basis == "since_entry"`, 2026-09-25). Không
+   có điều kiện đầu thì nó là một stop-loss 3,5×ATR dưới giá vào; không có điều
+   kiện sau thì đỉnh ~30 phiên có thể có trước lúc mua, và "sóng lên đã kết
+   thúc" nói về một con sóng anh không có mặt.
 
 5. **Không dự báo hướng giá.** `projection()` trả lịch và biên độ ATR. Không
    rule nào trong repo thắng VNINDEX risk-adjusted (§26.9), nên một con số

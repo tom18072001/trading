@@ -129,7 +129,14 @@ def advise(position: dict, path: list[dict], atr_pct: float | None,
         # kiện `run_trail()` đã đo. Chưa arm thì không có mức nào — một lệnh
         # đang lỗ không có mức thoát giá, đó là nghĩa của "bỏ stop".
         out["give_back"] = round(peak * (1 - GIVE_BACK_ATR * a), 2)
-        out["armed"] = bool(entry) and peak >= entry * (1 + ARM_ATR * a)
+        # ...và chỉ khi đỉnh đó là đỉnh KỂ TỪ LÚC MUA. Thiếu ngày mua thì `peak`
+        # là đỉnh ~30 phiên gần nhất, có thể có TRƯỚC lúc Tom vào lệnh — so nó
+        # với giá vào là hỏi "sóng lên đã kết thúc chưa" về một con sóng Tom
+        # không có mặt. Bản tin 2026-09-23 báo đúng như thế ("NHẢ QUÁ SÂU") cho
+        # một vị thế không có ngày mua, đỉnh cao hơn giá vào ~11% (review
+        # 2026-09-24 §3.2). Range vẫn tính được; chỉ tin "nhả quá sâu" là không.
+        out["armed"] = (bool(entry) and out["peak_basis"] == "since_entry"
+                        and peak >= entry * (1 + ARM_ATR * a))
         if last:
             out["band_status"] = ("trên vùng bán" if last > out["band_hi"]
                                   else "trong vùng bán" if last >= out["band_lo"]
@@ -162,11 +169,13 @@ def advise(position: dict, path: list[dict], atr_pct: float | None,
             pass
 
     if out["peak_basis"] != "since_entry":
-        out["note"] = ("chưa biết ngày mua nên KHÔNG có cửa sổ bán — đó là thứ duy "
-                       "nhất bị thiếu. Range giá vẫn dùng được: nó neo ở đỉnh ~30 "
-                       "phiên gần nhất, tức đỉnh của thị trường chứ không phải đỉnh "
-                       "kể từ lúc anh vào lệnh. Một ngày mua ƯỚC LƯỢNG là đủ — cửa "
-                       "sổ rộng 20 phiên nên lệch vài ngày gần như không đổi gì.")
+        out["note"] = ("chưa biết ngày mua nên KHÔNG có cửa sổ bán, và không xác "
+                       "định được đã có sóng lên sau khi mua hay chưa — nên cũng "
+                       "không báo \"nhả quá sâu\". Range giá vẫn dùng được: nó neo ở "
+                       "đỉnh ~30 phiên gần nhất, tức đỉnh của thị trường chứ không "
+                       "phải đỉnh kể từ lúc anh vào lệnh. Một ngày mua ƯỚC LƯỢNG là "
+                       "đủ — cửa sổ rộng 20 phiên nên lệch vài ngày gần như không "
+                       "đổi gì.")
 
     if out["armed"] and last and out["give_back"] and last <= out["give_back"]:
         out["note"] += (f"  Giá đã nhả quá {GIVE_BACK_ATR}×ATR từ đỉnh "
