@@ -14,6 +14,31 @@
 
 ---
 
+## 2026-09-24 — review thuật toán: thước đo đang phóng đại edge, tầng ngành phát tín hiệu từ dữ liệu hỏng (chỉ tài liệu)
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `docs/reviews/ALGO_REVIEW_2026-09-24.md` (mới), `docs/reviews/algo_review_2026-09-24/`
+  (mới: 9 script đo lại + `.gitignore` cho `out/`), `docs/PATCHES.md` (một dòng "Đang làm").
+  **Không đổi dòng code production nào.**
+- Reason: Tom — *"review thuật toán đang sử dụng … tối ưu và đưa ra kết quả chính xác hơn …
+  so sánh cách làm với cách hiện tại"*; chọn "toàn bộ, đào sâu picks + bán" và "báo cáo + đo, chưa sửa".
+- Summary:
+  - Bench picks so factor có cổng SMA200 với base cũng có cổng, và bỏ 109/898 phiên có < 30 mã
+    trên SMA200. Chấm lại với một base NO GATE trên mọi phiên thì không luật nào dương đủ 4 năm —
+    "1/41 sống sót" (§26.9) là artefact của hai lựa chọn đó (cần cả hai mới lật được 2023).
+  - Luật như ship (điểm ≥ 2,5 → blend) chưa từng được đo: +0,29%/lệnh (t 0,86) ở 20 phiên,
+    +0,62% (t 1,06) ở 40, âm 2023. Ngưỡng `MIN_BUY_SCORE` tốn ~0,4%/lệnh (t −1,5…−1,6).
+  - Danh mục staggered cùng ngày: luật ship 2,7% / 9,3%/năm (20 / 40 phiên) vs VNINDEX 17,5%,
+    Sharpe 0,98 — không phải "11,7% vs 15,7%".
+  - `run_trail()` có look-ahead trong phiên (đỉnh cập nhật bằng giá đóng trước khi so giá thấp) →
+    giá của băng thoát bị phóng đại 2-3 lần. `sell_range.advise()` arm `give_back` cả khi thiếu
+    ngày mua (một vị thế trong bản tin 2026-09-23).
+  - Tầng ngành: cột stealth NULL từ 2026-08-25 → ranker chấm trên 0; ATR ngành chia n hai lần
+    (nhỏ 5×); `close_idx` nhảy khi rổ thiếu mã; 613 dòng `vnindex` ≈ 1,82 trong `macro_anchors`;
+    backtest `signals` bán hết ngày không có tín hiệu; ranker/regime/stealth không có edge OOS.
+  - ML ensemble ở chi phí đúng: ensemble − ship +0,62 (t 1,74) ở 20 phiên, −0,20 ở 40 → không dựng.
+  - Mọi số picks được một agent kiểm độc lập bằng harness tự viết lại: lệch ≤ 0,03 điểm %/lệnh.
+- Follow-ups: 20 khuyến nghị P0/P1/P2 ở §8 của review — chờ Tom quyết.
+
 ## 2026-09-17 — mã đang nắm ngoài universe được theo dõi; và `give_back` là stop-loss trá hình
 - Author: Claude Code on behalf of Tom
 - Files: `daily_watch/holdings.py` (mới), `daily_watch/positions.py`,
