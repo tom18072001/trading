@@ -81,11 +81,20 @@ reimplemented.
 
 Every indicator is computed in memory from fresh OHLCV; nothing persists.
 
-## 7. Composite score
+## 7. Composite score, and the one buy rule
 
-Lifted from the then-current report generator's `score_symbol` into
-`services.picks_scoring.score_ticker(row) -> int`. Same rules both surfaces.
-Sectors rank candidates desc by `(score, dv_20d)`.
+`services.picks_scoring.score_ticker(row) -> float` (≈ −9..+7, floored at
+`UNTRENDED_FLOOR` = −20 when the uptrend is not confirmed — `CLAUDE.md` §26.4).
+Stage E writes `TickerRow.rank_score` = the 50/50 rank blend of score and OBV
+trend over the whole universe; `_rank_key` orders by it.
+
+**The buy list** is `long_shortlist(rows, n, exclude=())` — `is_valid_buy` and
+`score > UNTRENDED_FLOOR` (the SMA200 gate), ordered by `_rank_key`, top-n
+(2026-09-25). It is the only buy rule: `_select_top` (Daily Insight,
+`snapshot.top_buys`), `generate_report.py` (takes `top_buys` verbatim) and
+`daily_watch._shortlist` (with `exclude=` the held names) all call it. Sector
+signals do not gate or order buys. `MIN_BUY_SCORE` is retired as a gate and is
+passed as `min_score=` only by the bulletin's shadow log of the old rule.
 
 ## 8. Stop / target / RR
 

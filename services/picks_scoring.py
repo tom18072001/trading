@@ -111,21 +111,31 @@ SCORE_CONST     = -1.0   # rank-irrelevant; kept so the shipped score and the
 # rank below an ungated one, which is the opposite of the gate's intent.
 UNTRENDED_FLOOR = -20.0
 
-# --- Shortlist thresholds, both measured on the same panel ---------------------
-# MIN_BUY_SCORE: the 78th percentile of gated scores over 143 names x 1,168
-# sessions (p80 = +2.91, p90 = +4.12), and the 5th-best name on a median day
-# scores +3.64 -- so this admits a full shortlist on a normal day and thins it
-# on a bad one, which is the behaviour wanted. It replaces a literal `>= 3` on
-# the old 0..7 integer scale, which means nothing on this one.
+# --- Admission to the buy shortlist: the SMA200 gate, and nothing else --------
+# 2026-09-25, Tom: "bỏ ngay, giữ cổng SMA200". A name is admitted when
+# `score > UNTRENDED_FLOOR`, i.e. its uptrend is confirmed; `blended_rank_scores`
+# then decides the order. That is the rule 26.9 actually measured.
+#
+# MIN_BUY_SCORE is RETIRED as a gate. It was set at the 78th percentile of the
+# gated score (26.4) -- a distribution fact, never a return measurement -- and
+# when it was finally measured (review 2026-09-24 §2.2, same ordering with and
+# without it, 2023-01..2026-09, NO GATE base, Newey-West t):
+#
+#     hold   cutoff - no cutoff   NW t    book with -> without
+#     20     -0.39%/trade         -1.60   2.7%/yr -> 7.2%/yr
+#     40     -0.44%/trade         -1.48   9.3%/yr -> 11.7%/yr
+#
+# In-sample and t < 2, but the burden of proof sits with the filter that was
+# ADDED, and measured it points the wrong way. The constant stays for one job:
+# `daily_watch` logs the list it WOULD have produced (`shortlist_with_cutoff` in
+# data/watch/<date>.json), so the switch can be audited out of sample.
 MIN_BUY_SCORE = 2.5
 
-# MAX_5D_DROP_PCT: a free-fall guard, NOT a momentum filter. The rule it
-# replaces was `ret_5d > -1`, which excluded every name that had pulled back --
-# i.e. exactly the names the scoring rewrite is built to find. But the extreme
-# tail is genuinely toxic: `B_rev5_trimmed` in the bench shows the worst weekly
-# losers keep falling (they are down on news, not on liquidity demand), so the
-# floor stays, an order of magnitude lower.
-MAX_5D_DROP_PCT = -12.0
+# MAX_5D_DROP_PCT (-12%, email only) was removed on 2026-09-25 for the same
+# reason. Measured on the gate-only rule: it changes the list on 50/919
+# sessions and is worth +0.01%/trade (NW t +0.24) at 20 sessions and -0.01%
+# (t -0.17) at 40 -- nothing, in either direction. A filter that does nothing
+# measurable is a second rule for the reader to reconcile, so it went.
 
 # --- Cross-sectional ordering (2026-09-16, second pass) -----------------------
 # `score_ticker` answers "is this name worth owning" from one row. It cannot
@@ -190,8 +200,9 @@ def blended_rank_scores(
     CALLERS MUST GATE FIRST. With equal weights the best score paired with the
     worst flow ties the worst score paired with the best flow (0.5 + 0 either
     way), so this is an ordering for names already judged worth owning, not a
-    filter. `_select_top` applies MIN_BUY_SCORE before consulting it, and
-    `test_flow_cannot_rescue_a_name_the_score_gate_rejects` pins that.
+    filter. `picks_universe_service.long_shortlist` applies the SMA200 gate
+    (`score > UNTRENDED_FLOOR`) before consulting it, and
+    `test_flow_cannot_rescue_a_name_below_its_sma200` pins that.
     """
     rs = _pct_rank(list(scores))
     ro = _pct_rank(list(obv_trends))
@@ -370,7 +381,6 @@ __all__ = [
     "horizon_note",
     "hold_window",
     "MIN_BUY_SCORE",
-    "MAX_5D_DROP_PCT",
     "UNTRENDED_FLOOR",
     "score_ticker",
     "compute_stop_target_rr",

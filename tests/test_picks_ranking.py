@@ -201,58 +201,85 @@ def test_a_short_history_cannot_fake_an_uptrend():
     assert row.score == UNTRENDED_FLOOR
 
 
-# -------------------------------------------------- the shortlist score gate
+# ------------------------------------------------- the shortlist admission gate
 
-def test_a_negative_score_is_never_offered_as_a_top_buy(monkeypatch):
-    """`is_valid_buy` is about geometry, not about whether a name is worth owning.
+def test_only_the_sma200_gate_decides_admission(monkeypatch):
+    """2026-09-25 (Tom: "bỏ ngay, giữ cổng SMA200"): admission is the uptrend
+    gate and nothing else.
 
-    Observed on the first live rebuild, 2026-09-16: `top_buys` came back as
-    VIC +3.48, VHM +1.20, NTP +0.83, HCM -0.65, SAB -0.77 -- the page padding
-    itself to five by reaching past the score gate into names the new ranking
-    puts BELOW neutral. A negative score means "overbought inside an uptrend",
-    which is the exact shape 26 exists to demote, so offering it as a top buy
-    undoes the rewrite at the last step.
+    On 2026-09-16 this test pinned the opposite. The first live rebuild had
+    returned VIC +3.48, VHM +1.20, NTP +0.83, HCM -0.65, SAB -0.77, the names
+    below +2.5 were called padding, and MIN_BUY_SCORE kept them out. The cutoff
+    was then measured for the first time (review 2026-09-24 §2.2, same ordering
+    with and without it): -0.39%/trade at 20 sessions, -0.44% at 40, and the
+    book fell from 7.2% to 2.7%/yr and from 11.7% to 9.3%. A gated name with a
+    low score is an uptrend name that is not oversold; the blend ranks it on its
+    money flow, and that ranking is what was measured.
 
-    Under the old 0..7 integer score nothing could go negative, which is why the
-    missing gate was invisible for as long as it was.
+    What must NEVER be admitted is a name whose uptrend is not confirmed.
     """
     import services.picks_universe_service as mod
     from datetime import date
 
-    from services.picks_scoring import MIN_BUY_SCORE
-
-    good = TickerRow(symbol="AAA", sector_code="BANK", close=10.0,
-                     score=MIN_BUY_SCORE + 1.0, is_valid_buy=True,
+    high = TickerRow(symbol="AAA", sector_code="BANK", close=10.0, score=3.48,
+                     rank_score=0.50, is_valid_buy=True,
                      stop=9.0, target=12.0, rr=2.0, atr_pct=2.0)
-    bad = TickerRow(symbol="BBB", sector_code="BANK", close=10.0,
-                    score=-0.77, is_valid_buy=True,
+    low = TickerRow(symbol="BBB", sector_code="BANK", close=10.0, score=-0.77,
+                    rank_score=0.90, is_valid_buy=True,
                     stop=9.0, target=12.0, rr=2.0, atr_pct=2.0)
-    tickers = {r.symbol: r for r in (good, bad)}
+    floored = TickerRow(symbol="CCC", sector_code="BANK", close=10.0,
+                        score=UNTRENDED_FLOOR, rank_score=0.99, is_valid_buy=True,
+                        stop=9.0, target=12.0, rr=2.0, atr_pct=2.0)
+    tickers = {r.symbol: r for r in (high, low, floored)}
 
     svc = mod.PicksUniverseService()
     monkeypatch.setattr(svc, "_sectors_with_action", lambda *a, **k: {"BANK"})
     monkeypatch.setattr(mod, "fetch_news", lambda *a, **k: [], raising=False)
 
-    out = svc._select_top(tickers, {"BANK": [good, bad]},
+    out = svc._select_top(tickers, {"BANK": [high, low, floored]},
                           action="BUY", n=5, as_of=date(2026, 9, 16))
-    assert [p.symbol for p in out] == ["AAA"], (
-        "a short, honest list beats one padded with names the score demotes")
+    assert [p.symbol for p in out] == ["BBB", "AAA"]
 
 
-def test_the_sell_list_is_not_score_gated():
-    """The gate is a BUY-side filter only.
-
-    A SELL list exists to surface the weakest names, so applying a minimum
-    score to it would empty exactly the list that should be full.
-    """
-    import inspect
-
+def test_the_buy_list_ignores_sector_signals(monkeypatch):
+    """The BUY list used to put BUY/ACCUMULATE-sector names first. The ranker
+    has no out-of-sample edge (review 2026-09-24 §4.2), so a sector flag must
+    not move a name ahead of a better-ranked one."""
     import services.picks_universe_service as mod
+    from datetime import date
 
-    src = inspect.getsource(mod.PicksUniverseService._select_top)
-    buy_branch = src.split('if action_up == "BUY":')[1].split("else:")[0]
-    assert "MIN_BUY_SCORE" in buy_branch
-    assert "MIN_BUY_SCORE" not in src.split("else:")[-1]
+    flagged = TickerRow(symbol="AAA", sector_code="BANK", close=10.0, score=5.0,
+                        rank_score=0.40, is_valid_buy=True,
+                        stop=9.0, target=12.0, rr=2.0, atr_pct=2.0)
+    better = TickerRow(symbol="ZZZ", sector_code="TECH", close=10.0, score=1.0,
+                       rank_score=0.95, is_valid_buy=True,
+                       stop=9.0, target=12.0, rr=2.0, atr_pct=2.0)
+    svc = mod.PicksUniverseService()
+    monkeypatch.setattr(svc, "_sectors_with_action", lambda *a, **k: {"BANK"})
+    monkeypatch.setattr(mod, "fetch_news", lambda *a, **k: [], raising=False)
+    out = svc._select_top({r.symbol: r for r in (flagged, better)},
+                          {"BANK": [flagged], "TECH": [better]},
+                          action="BUY", n=5, as_of=date(2026, 9, 16))
+    assert [p.symbol for p in out] == ["ZZZ", "AAA"]
+
+
+def test_the_sell_list_is_not_score_gated(monkeypatch):
+    """The gate is a BUY-side filter only. A SELL list exists to surface the
+    weakest names, so a floor there would empty exactly the list that should be
+    full — a name below its SMA200 is the most natural member of it."""
+    import services.picks_universe_service as mod
+    from datetime import date
+
+    weak = TickerRow(symbol="WWW", sector_code="REAL", close=10.0,
+                     score=UNTRENDED_FLOOR, is_valid_buy=True, stop=9.0)
+    ok = TickerRow(symbol="OOO", sector_code="REAL", close=10.0, score=2.0,
+                   is_valid_buy=True, stop=9.0)
+    svc = mod.PicksUniverseService()
+    monkeypatch.setattr(svc, "_sectors_with_action", lambda *a, **k: {"REAL"})
+    monkeypatch.setattr(mod, "fetch_news", lambda *a, **k: [], raising=False)
+    out = svc._select_top({r.symbol: r for r in (weak, ok)}, {"REAL": [weak, ok]},
+                          action="SELL", n=5, as_of=date(2026, 9, 16))
+    assert [p.symbol for p in out] == ["WWW", "OOO"]
 
 
 # ------------------------------------------- the cross-sectional ordering pass
@@ -292,11 +319,11 @@ def test_a_50_50_blend_can_tie_the_best_score_with_the_worst():
     either way. The first draft of this test asserted the opposite and failed,
     which is how the property was found.
 
-    It is safe ONLY because the admission gate runs first: `_select_top` drops
-    everything under MIN_BUY_SCORE before this ordering is consulted, so the
-    blend never ranks a name that is not already worth owning. The test below
-    pins that dependency, and the two must be read together -- removing the gate
-    would make this tie a live defect.
+    It is safe ONLY because the admission gate runs first: `long_shortlist`
+    drops every name below its SMA200 (score at the floor) before this ordering
+    is consulted, so the blend never ranks a name whose uptrend is unconfirmed.
+    The test below pins that dependency, and the two must be read together --
+    removing the gate would make this tie a live defect.
     """
     from services.picks_scoring import blended_rank_scores
 
@@ -304,22 +331,21 @@ def test_a_50_50_blend_can_tie_the_best_score_with_the_worst():
     assert out[0] == pytest.approx(out[3])
 
 
-def test_flow_cannot_rescue_a_name_the_score_gate_rejects(monkeypatch):
+def test_flow_cannot_rescue_a_name_below_its_sma200(monkeypatch):
     """The guarantee the tie above relies on.
 
-    Best possible money-flow trend, score below MIN_BUY_SCORE: it must not
-    appear. Without the gate the blend would happily rank it first.
+    Best possible money-flow trend, uptrend NOT confirmed (score at the floor):
+    it must not appear. Without the gate the blend would happily rank it first.
     """
     from datetime import date
 
     import services.picks_universe_service as mod
-    from services.picks_scoring import MIN_BUY_SCORE
 
     ok = TickerRow(symbol="AAA", sector_code="BANK", close=10.0,
-                   score=MIN_BUY_SCORE + 0.5, obv_chg20=-9.0, rank_score=0.10,
+                   score=0.5, obv_chg20=-9.0, rank_score=0.10,
                    is_valid_buy=True, stop=9.0, target=12.0, rr=2.0, atr_pct=2.0)
     junk = TickerRow(symbol="BBB", sector_code="BANK", close=10.0,
-                     score=MIN_BUY_SCORE - 3.0, obv_chg20=9.0, rank_score=0.99,
+                     score=UNTRENDED_FLOOR, obv_chg20=9.0, rank_score=0.99,
                      is_valid_buy=True, stop=9.0, target=12.0, rr=2.0, atr_pct=2.0)
 
     svc = mod.PicksUniverseService()

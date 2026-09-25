@@ -445,3 +445,52 @@ that way.
 
 What it does justify is putting the question to Tom with a number attached
 rather than leaving the geometry unexamined because it has always been there.
+
+### 26.11 One buy rule, and the cutoff it no longer has — 2026-09-25
+
+**Decision (Tom, 2026-09-25):** *"bỏ ngay, giữ cổng SMA200"* — drop
+`MIN_BUY_SCORE`, keep the SMA200 gate; and (§8 of the review) one buy rule on
+every surface. Measurements from `docs/reviews/ALGO_REVIEW_2026-09-24.md`
+(§2.1-2.4) plus one taken the same day for this change.
+
+**Three surfaces, three rules, before.** The 17:30 bulletin ran score ≥ 2.5 →
+blend → top-5. Daily Insight put BUY/ACCUMULATE-sector names first and topped
+up from the universe. The 17:00 email took only ranker BUY/ACCUMULATE sectors
+(a silent ranker meant no buys), score ≥ 2.5, `ret_5d > −12%`, sorted by the
+**raw** score — `P2`, the weakest ordering in the table — top 6, then merged
+with Daily Insight's list and re-sorted each source bucket by raw score. None
+of the last two could be backtested: `sector_signals` starts 2026-04-09.
+
+**The cutoff, measured for the first time** (same production ordering with and
+without it, NO GATE base, every session from 2023-01, Newey-West t):
+
+| hold | with − without | NW t | 2023 / 24 / 25 / 26 | book, with → without |
+|---|---|---|---|---|
+| 20 | −0.39%/trade | −1.60 | −0.89 / −0.01 / −0.21 / −0.53 | 2.7% → 7.2%/yr |
+| 40 | −0.44%/trade | −1.48 | −1.42 / +0.60 / −0.87 / +0.20 | 9.3% → 11.7%/yr |
+
+In-sample, t below 2. It was set at the 78th percentile of the gated score
+(§26.4) — a statement about the score's distribution, never about returns.
+Without it the list is five names most days, half of them scoring under 2.5:
+names in an uptrend with strong OBV that are not yet oversold.
+
+**The 5-day free-fall guard** (email only, `ret_5d > −12%`), measured on the
+gate-only rule the same way (`docs/reviews/algo_review_2026-09-24/drop5.py`,
+2023-01 → 2026-09): it changes the list on 50 of 919 sessions and 69 of 4,595 picks, and
+is worth **+0.008%/trade (NW t +0.24)** at 20 sessions and **−0.008% (t −0.17)**
+at 40; book CAGR 7.2 → 7.4% and 11.7 → 11.7%. Nothing, in either direction —
+so it went with the cutoff rather than stay as a second rule to reconcile.
+
+**What ships:** `picks_universe_service.long_shortlist` — `is_valid_buy` and
+`score > UNTRENDED_FLOOR`, ordered by `_rank_key`. `_select_top` (Daily
+Insight), `generate_report.py` (email: `snapshot.top_buys` verbatim, no ranker
+side, no re-sort) and `daily_watch._shortlist` all call it. The ranker keeps
+one job in the email: choosing which sectors the AVOID list is drawn from.
+
+**Out-of-sample check, built in:** `daily_watch` writes the list the retired
+rule WOULD have produced (`shortlist_with_cutoff`) and the close of every
+universe name into `data/watch/<date>.json`; `daily_watch/audit.py --hold
+20|40` scores both lists against the same base, same days. The review's
+in-sample prediction is **+0.39 / +0.44 points per trade** for the rule now
+running. A few months of that log is the first evidence about this decision
+that was not also used to make it.

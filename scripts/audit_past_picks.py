@@ -21,7 +21,7 @@ HISTORICAL. This script answered the 2026-09-16 T+3 question and its short
 windows (T+1..T+15) are that diagnosis; they are kept so the numbers quoted in
 CLAUDE.md §26.3 stay reproducible. The T+ mode itself was removed on 2026-09-25
 (Tom: "chỉ sử dụng 4 tuần và 8 tuần"). The live audit of what the system
-recommends is `scripts/audit_watch.py`, on the 20/40-session horizons.
+recommends is `daily_watch/audit.py`, on the 20/40-session horizons.
 """
 from __future__ import annotations
 

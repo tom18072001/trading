@@ -49,39 +49,45 @@ WATCH_DIR = Path(BASE_DIR) / "report"
 #: `generated_ts` cho biết bản nào.
 ARCHIVE_DIR = Path(BASE_DIR) / "data" / "watch"
 
-#: Khung giữ được trình bày, và **cùng một danh sách mã cho cả hai** — đây là
-#: kết quả đo, không phải lười. Quét 41 factor ở 4 khung
-#: (`ticker_alpha_bench.py --horizons 10,20,40,60 --verdict`, 2026-09-16):
-#:
-#:     10 phiên  không factor nào qua 2 tiêu chí bắt buộc
-#:     20 phiên  X_prop_obv   +5,9%/năm   excess +0,49%/lệnh
-#:     40 phiên  X_prop_obv  +11,7%/năm   excess +0,77%/lệnh   <- tốt nhất
-#:     60 phiên  không factor nào qua
-#:
-#: Cùng một factor thắng ở 20 và 40, nên hai khung KHÔNG cho hai danh sách khác
-#: nhau — chỉ khác thời gian giữ. Dựng ra hai bảng khác nhau sẽ là bịa.
-#: Khoảng dùng được hẹp: dưới 20 và trên 40 đều không có gì sống sót.
+#: Khung giữ: 4 và 8 tuần, và **cùng một danh sách mã cho cả hai** — hai khung
+#: không cho hai danh sách khác nhau, chỉ khác thời gian giữ; dựng hai bảng
+#: khác nhau sẽ là bịa. `config.HOLD_SESSIONS` (Tom 2026-09-25: "chỉ sử dụng 4
+#: tuần và 8 tuần").
 HORIZONS = HOLD_SESSIONS
 
-#: Quy năm đo được ở mỗi khung, để bản tin nói bằng tiền chứ không bằng %/lệnh.
-HORIZON_ANNUALISED = {20: 0.059, 40: 0.117}
+#: Lợi nhuận/năm của LUẬT ĐANG CHẠY (cổng SMA200 → blend, top-5) như một danh
+#: mục thật: staggered, 2023-01 → 2026-09, chi phí 1,00%/vòng, để tiền mặt khi
+#: không có mã (review 2026-09-24 §2.1, §3.1). Đo in-sample — đây là trần của
+#: phép đo, không phải lời hứa. Số cũ (5,9% / 11,7%) là quy năm số học của
+#: %/lệnh, không phải danh mục, và thuộc về luật có ngưỡng 2,5 (danh mục thật:
+#: 2,7% / 9,3%).
+HORIZON_ANNUALISED = {20: 0.072, 40: 0.117}
+HORIZON_SHARPE = {20: 0.44, 40: 0.65}
+
+#: VNINDEX mua & giữ trên CÙNG các ngày đó — trần trung thực. Chưa luật nào
+#: vượt nó, cả lợi nhuận lẫn Sharpe.
+VNINDEX_CAGR, VNINDEX_SHARPE, VNINDEX_MAXDD = 0.175, 0.98, -0.181
 
 
 def _shortlist(top_n: int) -> tuple[list[dict], dict[str, Any]]:
-    """Ứng viên tốt nhất theo đúng thứ tự production đang dùng.
+    """Ứng viên tốt nhất theo đúng luật production — `long_shortlist`.
 
     Dùng `.peek()` chứ không `get_snapshot()`: job có lịch chạy SAU pipeline
     hằng ngày nên cache đã ấm; nếu lạnh thì trả rỗng kèm cờ, chứ không đứng chờ
     2-10 phút sau throttle KBS (cái bẫy `api/routers/insight.py` ghi ở `/daily`).
 
-    Thứ tự là `_rank_key` — **cùng một hàm** trang Daily Insight dùng, không
-    phải một bản chép. Nó mới là thứ được đo ở §26.9 (`X_prop_obv`, factor duy
-    nhất trong 41 cái qua được hai tiêu chí bắt buộc).
+    **Cùng một hàm** với trang Daily Insight và email 17:00 — không phải bản
+    chép (review 2026-09-24 §2.4: ba bề mặt từng chạy ba luật mua khác nhau).
+    Luật: cổng SMA200 (điểm trên sàn −20) → thứ tự blend điểm + OBV → top-N,
+    bỏ mã anh đang nắm. Ngưỡng `MIN_BUY_SCORE` 2,5 đã bỏ 2026-09-25 (Tom: "bỏ
+    ngay, giữ cổng SMA200"); danh sách nó LẼ RA cho ra vẫn được ghi vào
+    `meta["shortlist_with_cutoff"]` để `daily_watch/audit.py` so hai luật trên
+    dữ liệu chưa từng dùng để chọn luật.
     """
     meta: dict[str, Any] = {"as_of": None, "universe": 0, "cold_cache": False}
     try:
         from services.picks_scoring import MIN_BUY_SCORE
-        from services.picks_universe_service import PicksUniverseService, _rank_key
+        from services.picks_universe_service import PicksUniverseService, long_shortlist
     except ImportError:
         log.exception("[watch] không import được picks layer")
         return [], meta
@@ -95,13 +101,22 @@ def _shortlist(top_n: int) -> tuple[list[dict], dict[str, Any]]:
     meta["universe"] = len(snap.tickers)
     held = trading_state.held_symbols()
 
-    rows = [r for r in snap.tickers.values()
-            if r.is_valid_buy and r.score >= MIN_BUY_SCORE and r.symbol not in held]
-    rows.sort(key=_rank_key)
+    rows = long_shortlist(snap.tickers.values(), len(snap.tickers), exclude=held)
+    shadow = long_shortlist(snap.tickers.values(), top_n, exclude=held,
+                            min_score=MIN_BUY_SCORE)
 
     meta["qualified"] = len(rows)
-    meta["min_buy_score"] = MIN_BUY_SCORE
+    meta["rule"] = "cổng SMA200 → blend điểm + OBV"
     meta["excluded_held"] = sorted(held)
+    meta["retired_min_buy_score"] = MIN_BUY_SCORE
+    meta["shortlist_with_cutoff"] = [
+        {"symbol": r.symbol, "close": r.close, "score": round(r.score, 2)}
+        for r in shadow]
+    # Giá đóng của CẢ universe, để kho tự chấm được mọi danh sách — kể cả base
+    # rate NO GATE — mà không cần một mã phải được nhắc lại sau 20 phiên. Tiền
+    # tố _ = nội bộ; build() gỡ nó khỏi meta trước khi ghi.
+    meta["_universe_closes"] = {s: t.close for s, t in snap.tickers.items()
+                                if getattr(t, "close", None)}
     return [{
         "symbol": r.symbol,
         "sector_code": r.sector_code,
@@ -140,6 +155,8 @@ def build(top_n: int = 5) -> dict[str, Any]:
     alerts = position_tracking.alerts(book)
     _attach_projection(book)
     picks, meta = _shortlist(top_n)
+    universe_closes = meta.pop("_universe_closes", {})
+    shadow = meta.pop("shortlist_with_cutoff", [])
 
     as_of = meta.get("as_of") or book.get("as_of")
     stale = 0
@@ -167,10 +184,13 @@ def build(top_n: int = 5) -> dict[str, Any]:
         } for a in alerts],
         "book": book,
         "shortlist": picks,
+        # Luật cũ (ngưỡng 2,5), chỉ để audit: danh sách nó LẼ RA cho ra hôm nay.
+        # Không in như một khuyến nghị — `daily_watch/audit.py` chấm cả hai.
+        "shortlist_with_cutoff": shadow,
         # Giá đóng của mọi mã kho này nhắc tới, lưu lại để N ngày lưu trữ tự cho
-        # một chuỗi giá — `scripts/audit_watch.py` chấm khuyến nghị cũ bằng chính
+        # một chuỗi giá — `daily_watch/audit.py` chấm khuyến nghị cũ bằng chính
         # các bản lưu sau nó, không cần nguồn giá thứ hai.
-        "marks": _marks(book, picks),
+        "marks": {**universe_closes, **_marks(book, picks + shadow)},
         "shortlist_meta": meta,
         "horizons": list(HORIZONS),
     }
@@ -334,8 +354,10 @@ def render(payload: dict[str, Any]) -> str:
     a("## 3. Ứng viên")
     if not payload["shortlist"]:
         a("")
-        a("Không mã nào qua ngưỡng hôm nay. **Đó là câu trả lời, không phải lỗi** — "
-          "danh sách được phép ngắn, và rỗng khi cả bảng đang quá mua (§26.4).")
+        a("Không mã nào trên SMA200 hôm nay (sau khi bỏ mã anh đang nắm). **Đó là "
+          "câu trả lời, không phải lỗi.** Phần vốn định mua: đặt vào ETF theo chỉ "
+          "số thay vì để tiền mặt — review 2026-09-24 §3.4 đo được cách đó tốt hơn "
+          "ở mọi năm.")
     else:
         a("")
         # Cột stop/target CỐ Ý không in ở đây. Chúng là sản phẩm phụ của bộ lọc
@@ -351,10 +373,16 @@ def render(payload: dict[str, Any]) -> str:
               f"| {p['score']} | {_fmt(p.get('atr_pct'), '%')} "
               f"| {p.get('sell_from') or '—'} → {p.get('sell_by') or '—'} |")
         a("")
-        a(f"Lọc từ {m.get('universe', 0)} mã · {m.get('qualified', 0)} mã qua ngưỡng "
-          f"điểm ≥ {m.get('min_buy_score', '—')}"
+        a(f"Lọc từ {m.get('universe', 0)} mã · {m.get('qualified', 0)} mã trên SMA200"
           + (f" · đã loại {len(m.get('excluded_held') or [])} mã anh đang nắm"
              if m.get("excluded_held") else ""))
+    shadow = payload.get("shortlist_with_cutoff") or []
+    if shadow != [] or payload["shortlist"]:
+        a("")
+        a("<sub>So sánh, **không phải khuyến nghị**: luật cũ (điểm ≥ "
+          f"{m.get('retired_min_buy_score', 2.5)}) hôm nay sẽ cho "
+          + (", ".join(x["symbol"] for x in shadow) if shadow else "danh sách rỗng")
+          + ". Ghi vào kho để `daily_watch/audit.py` so hai luật.</sub>")
 
     # --- 4. Các ngày tới ---------------------------------------------------
     a("")
@@ -384,35 +412,39 @@ def render(payload: dict[str, Any]) -> str:
       "khoảng tin cậy và đừng suy ra xác suất từ nó.")
 
     # --- 5. Đọc thế nào ----------------------------------------------------
+    lo, hi = HORIZONS
     a("")
     a("## 5. Đọc bảng trên thế nào")
     a("")
-    a("- **Giữ 8 tuần đáng gấp đôi giữ 4 tuần.** Quét 41 factor ở 4 khung:")
+    a("- **Luật chọn:** cổng xu hướng (giá trên SMA200) → xếp theo blend hạng "
+      "điểm + OBV → top-5. **Cùng một hàm** với Daily Insight và email 17:00. "
+      "Ngưỡng điểm 2,5 đã bỏ ngày 2026-09-25: đo ra nó tốn ~0,4%/lệnh "
+      "(review 2026-09-24 §2.2).")
+    a(f"- **Giữ {lo}-{hi} phiên (4-8 tuần), mặc định tới ~{hi} phiên.** Phiên {lo} "
+      "chỉ mở cửa sổ bán, không phải tín hiệu bán. Luật này như một danh mục thật "
+      "(2023-01 → 2026-09, chi phí 1,00%/vòng, đo in-sample):")
     a("")
-    a("  | giữ | factor sống sót | quy năm |")
-    a("  |---|---|---|")
-    a("  | 10 phiên (2 tuần) | *không cái nào* | — |")
-    a("  | 20 phiên (4 tuần) | `X_prop_obv` | +5,9% |")
-    a("  | **40 phiên (8 tuần)** | `X_prop_obv` | **+11,7%** |")
-    a("  | 60 phiên (12 tuần) | *không cái nào* | — |")
+    a("  | giữ | lợi nhuận/năm | Sharpe | VNINDEX cùng kỳ |")
+    a("  |---|---|---|---|")
+    for h in HORIZONS:
+        bold = "**" if h == hi else ""
+        a(f"  | {bold}{h} phiên ({h // 5} tuần){bold} "
+          f"| {bold}{HORIZON_ANNUALISED[h] * 100:+.1f}%{bold} "
+          f"| {HORIZON_SHARPE[h]:.2f} "
+          f"| {VNINDEX_CAGR * 100:+.1f}%, Sharpe {VNINDEX_SHARPE:.2f} |")
     a("")
-    a("  **Cùng một factor thắng ở cả 20 và 40**, nên bảng ứng viên ở trên dùng "
-      "được cho cả hai khung — không có \"danh sách 4 tuần\" và \"danh sách 8 "
-      "tuần\" riêng, chỉ có thời gian giữ khác nhau. Dưới 20 và trên 40 phiên "
-      "thì không factor nào sống sót, nên khoảng dùng được là **20-40 phiên**.")
-    a("- **Stop/target in ra là hình học SWING** (2,5×ATR / 1,8×ATR) — chỉnh cho "
-      "khung 20 phiên. Giữ tới 40 phiên thì target thường đã chạm trước đó; "
-      "hình học cho 8 tuần **chưa được dựng**, đừng coi cột stop/target là đã "
-      "hiệu chỉnh cho khung dài. Đây **không phải** lệnh T+3: đóng nó trên đồng "
-      "hồ T+3 biến cuộc đua 15%-vs-50% thành 4%-vs-24% (§26.3).")
-    a("- **Thứ tự** dùng đúng hàm production (`_rank_key`) — điểm quyết định được "
-      "vào danh sách, blend rank (score + OBV) quyết định thứ tự (§26.9).")
-    a("- **Trần trung thực:** VNINDEX buy-and-hold +15,7%/năm, Sharpe 0,91. Cấu "
-      "hình tốt nhất đo được ≈ +5,9%/năm ở chi phí đúng 1,00%/vòng. **Chưa luật "
-      "nào thắng index risk-adjusted** — đây là shortlist cho người đã quyết định "
-      "tự chọn mã, không phải lý do chọn mã thay vì mua index (§26.9).")
-    a("- **Xoay vòng là thuế.** T+3 tốn 84%/năm chi phí; 4 tuần tốn 12,6%; 8 tuần "
-      "6,3%. Giữ lâu hơn đáng giá hơn mọi cải tiến thuật toán đo được (§26.6).")
+    a(f"  Lợi nhuận tăng dốc tới ~{hi} phiên rồi đi ngang — giữ lâu hơn không "
+      "thêm gì đo được (review §3.1).")
+    a("- **Khớp lệnh:** mua ở phiên ATO phiên sau; khi thoát, bán ở phiên ATO — "
+      "+0,06-0,09%/lệnh so với bán ATC (review §3.3).")
+    a("- **Trần trung thực:** chưa luật nào thắng VNINDEX, cả lợi nhuận lẫn "
+      "Sharpe. Đây là shortlist cho người đã quyết định tự chọn mã. Nếu mục tiêu "
+      "là lợi nhuận trên rủi ro, cân nhắc mô hình lõi-vệ tinh: phần lớn vốn theo "
+      "index, shortlist là phần vệ tinh.")
+    a("- **\"Nhả quá sâu\" là tin về luận điểm, không phải lệnh bán.** Bán cơ học "
+      "theo mức giá tốn 0,7-2,0 điểm %/năm so với giữ hết khung (review §3.2).")
+    a("- **Xoay vòng là thuế:** chi phí ~12,6%/năm nếu giữ 4 tuần, ~6,3%/năm nếu "
+      "giữ 8 tuần.")
     return "\n".join(L) + "\n"
 
 

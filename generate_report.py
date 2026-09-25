@@ -10,11 +10,15 @@ different stocks because:
 This generator unifies the two into a single list per Tom's directive
 (2026-04-23):
 
-  * UNIFIED picks list = UNION(snapshot.top_buys, ranker-gated buys),
-    deduped by symbol, each entry tagged with its source:
-      BOTH          → shown in Daily Insight AND ranker-BUY    (consensus)
-      DAILY_INSIGHT → only in snapshot.top_buys (no ranker gate)
-      RANKER        → only from a ranker BUY/ACCUMULATE sector
+  * BUY list = snapshot.top_buys, verbatim (2026-09-25). It used to be a
+    UNION with ranker-gated buys; the ranker has no out-of-sample edge (review
+    2026-09-24 §4.2), so there is now ONE buy rule — `long_shortlist`, SMA200
+    gate -> rank blend — shared with Daily Insight and the 17:30 bulletin.
+  * AVOID list = UNION(snapshot.top_sells, ranker SELL sectors), deduped by
+    symbol, each entry tagged with its source:
+      BOTH          → in snapshot.top_sells AND a ranker-SELL sector
+      DAILY_INSIGHT → only in snapshot.top_sells
+      RANKER        → only from a ranker SELL sector
   * EXPERT TRADER MEMO at the top of HTML + PDF — senior-PM voice,
     rationale per pick, conviction rating, catalyst + link pointer.
   * Plain-text email body = short actionable summary of BUY list
@@ -302,12 +306,13 @@ def main(argv: list[str] | None = None) -> None:
     # dict shape that downstream rendering code expects.
     scored = [_tr.as_picks_dict() for _tr in _universe_snap.tickers.values()]
 
-    # --- Align with the rotation ranker (sector_signals) — Option A safe doctrine ---
-    # The email previously picked BUYs from raw flow_delta; that surfaced picks
-    # (e.g. NVL/REAL) the ranker had rated HOLD. Now the ranker is the gate:
-    #   in_secs  = sectors with action ∈ {BUY, ACCUMULATE} on the latest signal date
+    # --- The rotation ranker (sector_signals): SELL side only since 2026-09-25 ---
+    # It used to be the hard gate for BUYs too ("if the ranker emits no BUYs,
+    # the email emits no BUYs"). The ranker has no out-of-sample edge (review
+    # 2026-09-24 §4.2: IC -0.010, and it scored all-zero features from
+    # 2026-08-25), so buys now come from the shared shortlist below and the
+    # ranker only picks which sectors the AVOID list is drawn from.
     #   out_secs = sectors with action == SELL
-    # If the ranker emits no BUYs, the email also emits no BUYs (safe behaviour).
     # Flow delta (top_in/top_out) is kept only as a display ordering aid.
     try:
         from config import SECTORS as _SECTOR_CODE_NAME
@@ -336,36 +341,35 @@ def main(argv: list[str] | None = None) -> None:
         ranker_in, ranker_out = set(), set()
         sig_action_by_vn = {}
 
-    # Flow-delta ordering still drives the "Sector Money Flow" chart, but picks
-    # must intersect with the ranker gate.
+    # Flow-delta ordering still drives the "Sector Money Flow" chart.
     top_in  = sector_stats[:3]; top_out = sector_stats[-3:][::-1]
     flow_out_secs = {s["sector"] for s in top_out}
-    # Hard gate: long-leg = ranker BUY/ACCUMULATE; short-leg = ranker SELL.
-    in_secs  = ranker_in if ranker_in else set()
-    out_secs = ranker_out if ranker_out else flow_out_secs  # only fall back on SELL side
+    # AVOID leg = ranker SELL sectors, else the weakest flow sectors.
+    out_secs = ranker_out if ranker_out else flow_out_secs
 
-    from services.picks_scoring import MAX_5D_DROP_PCT, MIN_BUY_SCORE
+    from services.picks_universe_service import long_shortlist
 
-    # Thresholds and tie-break: services/picks_scoring.py, 2026-09-16. The old
-    # `score >= 3` was a cut on a 0..7 integer scale that no longer exists, the
-    # old `ret_5d > -1` excluded the pullbacks the new score is built to find,
-    # and the old `(score, dv)` tie-break was measured to make the shortlist
-    # worse, not neutral. Ties break on the symbol: stable, and not a second
-    # unmeasured factor smuggled into the ranking.
-    buy_cands = [s for s in scored
-                 if s["sector"] in in_secs
-                 and s["score"] >= MIN_BUY_SCORE
-                 and s["ret_5d"] > MAX_5D_DROP_PCT]
-    buy_cands.sort(key=lambda x: (-x["score"], x["sym"]))
-    buys = buy_cands[:6]
+    # BUY = the ONE rule (2026-09-25). This block used to be a third buy rule:
+    # only names in the ranker's BUY/ACCUMULATE sectors (so a silent ranker
+    # meant no buys), a score >= 2.5 cutoff, a -12% 5-day guard, sorted by the
+    # RAW score -- `P2`, the weakest ordering measured -- top 6 (review
+    # 2026-09-24 §2.4). The sector gate has no out-of-sample edge (§4.2), the
+    # cutoff measured negative (§2.2) and the 5-day guard measured nothing. It
+    # now takes Daily Insight's list verbatim: `snapshot.top_buys`, which
+    # `long_shortlist` builds (SMA200 gate -> rank blend) -- the same function
+    # the 17:30 bulletin calls. Email = Daily Insight = shortlist.
+    buy_cands = [_universe_snap.tickers[p.symbol].as_picks_dict()
+                 for p in _universe_snap.top_buys
+                 if p.symbol in _universe_snap.tickers]
+    buys = list(buy_cands)
     sell_cands = [s for s in scored if s["sector"] in out_secs]
     sell_cands.sort(key=lambda x: (x["score"], x["sym"]))
     sells = sell_cands[:6]
     already = {b["sym"] for b in buys} | {s["sym"] for s in sells}
-    watch_cands = [s for s in scored
-                   if s["sym"] not in already and s["score"] >= MIN_BUY_SCORE]
-    watch_cands.sort(key=lambda x: (-x["score"], x["sym"]))
-    watches = watch_cands[:5]
+    # WATCH = the next names in the SAME order, not a second rule.
+    watches = [r.as_picks_dict()
+               for r in long_shortlist(_universe_snap.tickers.values(), len(buys) + 10)
+               if r.symbol not in already][:5]
     volatile = sorted(scored, key=lambda x: (x.get("atr_pct") or 0), reverse=True)[:12]
 
     # ========== CHARTS (reuse from v2) ==========
@@ -654,7 +658,8 @@ def main(argv: list[str] | None = None) -> None:
         return f"Sector outflow + {', '.join(bits) if bits else 'technicals yếu'}. Exit / tránh."
 
     def watch_thesis(p):
-        return f"Điểm cao ({p['score']:+.1f}) — chờ sector confirm trước khi size."
+        return (f"Kế tiếp trong cùng thứ tự (điểm {p['score']:+.1f}) — "
+                "vào danh sách mua khi một mã phía trên rời đi.")
 
     # Stop/target + validity moved to services.picks_scoring (single source of
     # truth). Local adapters preserve the previous (stop, target, err) signature
@@ -1061,34 +1066,35 @@ def main(argv: list[str] | None = None) -> None:
             "technical_bits": list(pe.technical_bits or []),
             "thesis": pe.thesis,
             "news": list(pe.news or []),
+            "sell_from": getattr(pe, "sell_from", None),
+            "sell_by": getattr(pe, "sell_by", None),
             "source": source,
         }
 
 
     def build_unified_list(kind):
-        """Build the unified BUY or SELL list.
+        """Build the BUY or SELL list for the email.
 
-        Strategy (§v5):
-          * Daily Insight source = snapshot.top_buys / snapshot.top_sells.
-          * Ranker source = top-2 tickers by composite score from every sector
-            whose SectorSignal.action == BUY / ACCUMULATE (for BUY kind) or
-            SELL (for SELL kind). Skip tickers without a close or without a
-            valid stop/target.
-          * Merge by symbol. If a symbol appears in both sources → source=BOTH.
-          * Order: BOTH first, then DAILY_INSIGHT, then RANKER. Within each
-            bucket, sort by score descending.
+          * BUY  = `snapshot.top_buys` verbatim — the shared shortlist rule, in
+            its own order (2026-09-25).
+          * SELL = union of `snapshot.top_sells` and the top-2 tickers of every
+            sector the ranker marked SELL, merged by symbol (source BOTH /
+            DAILY_INSIGHT / RANKER) — the §v5 rule, unchanged.
         """
-        # --- 1. Daily Insight side ---
+        # --- 0. BUY: the shortlist, verbatim (2026-09-25) ---
+        # One rule, one order. No ranker side -- the sector signal has no
+        # measured edge, so "the ranker agrees" is not evidence and a
+        # ranker-only buy is a buy from noise (review 2026-09-24 §4.2) -- and
+        # no merge either: merge_pick_sources re-sorts each bucket by RAW
+        # score, which is not the order the rule ranks by (§2.1, `P2`).
         if kind == "BUY":
-            di_list = list(_universe_snap.top_buys)
-            ranker_sectors = ranker_in
-            ranker_action_for = lambda code: sig_action_by_vn.get(
-                SECTORS.get(code, code), "BUY"
-            )
-        else:
-            di_list = list(_universe_snap.top_sells)
-            ranker_sectors = ranker_out
-            ranker_action_for = lambda code: "SELL"
+            return [_pick_entry_to_unified(pe, "DAILY_INSIGHT")
+                    for pe in _universe_snap.top_buys]
+
+        # --- 1. Daily Insight side (SELL) ---
+        di_list = list(_universe_snap.top_sells)
+        ranker_sectors = ranker_out
+        ranker_action_for = lambda code: "SELL"
 
         di_by_sym = {p.symbol: p for p in di_list}
 
@@ -1108,18 +1114,12 @@ def main(argv: list[str] | None = None) -> None:
         # Daily side = already-built PickEntry objects; source is decided by merge.
         daily_side = [_pick_entry_to_unified(pe, "DAILY_INSIGHT") for pe in di_list]
 
-        # Ranker side = build from TickerRow, apply BUY validity gate inline so
-        # the merge helper sees only valid candidates (mirrors §18.1).
+        # Ranker side = build from TickerRow.
         ranker_side = []
         for sym, code in ranker_syms:
-            action = ranker_action_for(code) if kind == "BUY" else "SELL"
-            up = _ticker_row_to_unified_pick(sym, action, "RANKER")
+            up = _ticker_row_to_unified_pick(sym, ranker_action_for(code), "RANKER")
             if up is None:
                 continue
-            if kind == "BUY":
-                ok, _why = _is_valid_long_pick(up["close"], up["target"], up["stop"])
-                if not ok:
-                    continue
             ranker_side.append(up)
 
         # --- 4. Delegate the merge to services.unified_picks (testable pure fn)
@@ -1149,6 +1149,10 @@ def main(argv: list[str] | None = None) -> None:
         """Render one UnifiedPick as an HTML card."""
         action_cls = "tag-buy" if kind == "BUY" else "tag-sell"
         src_label, src_cls = SOURCE_LABELS.get(p["source"], (p["source"], "src-ranker"))
+        # BUY has one source since 2026-09-25 (the shared shortlist), so a
+        # source tag there says nothing; the hold window says what to do.
+        src_html = ("" if kind == "BUY"
+                    else f"<span class='src-tag {src_cls}'>{src_label}</span>")
         # Technical bits
         bits_html = "".join(f"<span class='pill'>{_esc(b)}</span>"
                             for b in (p.get("technical_bits") or [])[:6])
@@ -1162,6 +1166,8 @@ def main(argv: list[str] | None = None) -> None:
             nums_parts.append(f"<span class='warn'>R:R {p['rr']:.1f}</span>")
         if p.get("atr_pct") is not None:
             nums_parts.append(f"ATR {p['atr_pct']:.1f}%")
+        if kind == "BUY" and p.get("sell_from") and p.get("sell_by"):
+            nums_parts.append(f"<b>giữ tới {p['sell_by']}</b> (cửa sổ bán mở {p['sell_from']})")
         nums_html = " · ".join(nums_parts)
         # News
         news_html = ""
@@ -1179,7 +1185,7 @@ def main(argv: list[str] | None = None) -> None:
             f"<span class='sym'>{_esc(p['symbol'])}</span>"
             f"<span class='mut'>{_esc(p['sector_name'])}</span>"
             f"<span class='tag {action_cls}'>{kind}</span>"
-            f"<span class='src-tag {src_cls}'>{src_label}</span>"
+            f"{src_html}"
             f"<span class='mut'>điểm {float(p.get('score') or 0):+.1f}</span>"
             f"</div>"
             f"<div class='snap-nums mono'>{nums_html}</div>"
@@ -1199,7 +1205,8 @@ def main(argv: list[str] | None = None) -> None:
             out.extend(_render_unified_card(p, "BUY") for p in UNIFIED_BUYS)
             out.append("</div>")
         else:
-            out.append("<p class='mut'>Không có BUY nào hôm nay (cả Daily Insight lẫn Ranker đều im).</p>")
+            out.append("<p class='mut'>Không mã nào trên SMA200 hôm nay — phần vốn định mua: "
+                       "ETF theo chỉ số thay vì tiền mặt (review 2026-09-24 §3.4).</p>")
         if UNIFIED_SELLS:
             out.append("<h3 style='margin-top:12px'>Nên TRÁNH / CẮT ({} picks)</h3>".format(len(UNIFIED_SELLS)))
             out.append("<div class='snap-grid'>")
@@ -1217,13 +1224,16 @@ def main(argv: list[str] | None = None) -> None:
     # context. Keeps output stable even when the Claude agent is down.
 
     def _conviction_bucket(p):
-        """Map a UnifiedPick → (label, css-class) based on source + score."""
-        if p["source"] == "BOTH":
-            return ("High conviction", "high")
-        score = p.get("score") or 0
-        if score >= 4:
-            return ("Medium", "med")
-        return ("Low / watch", "low")
+        """Map a UnifiedPick → (label, css-class).
+
+        2026-09-25: "BOTH = high conviction" meant "the ranker agrees", and the
+        ranker has no measured edge; a raw score >= 4 was never measured
+        either. The only thing known about a BUY is its place in the rule's
+        order, so that is what the label says.
+        """
+        rank = next((i for i, q in enumerate(UNIFIED_BUYS, 1)
+                     if q["symbol"] == p["symbol"]), None)
+        return (f"#{rank} theo luật chung" if rank else "—", "med")
 
 
     def build_expert_memo():
@@ -1237,16 +1247,16 @@ def main(argv: list[str] | None = None) -> None:
         conf_txt = conf_phrase(regime_conf)
         if regime_label == "risk_on":
             stance = (f"Tape đang <b>risk-on</b> ({conf_txt}). Ưu tiên long theo dòng tiền, "
-                      "chấp nhận size full trên consensus picks.")
+                      "danh sách mua dùng như bình thường.")
         elif regime_label == "risk_off":
             stance = (f"Tape đang <b>risk-off</b> ({conf_txt}). Giảm gross exposure, "
-                      "ưu tiên bảo toàn vốn, chỉ nên giữ consensus picks với size nhỏ.")
+                      "ưu tiên bảo toàn vốn, vào danh sách mua với size nhỏ.")
         elif regime_label == "rotation":
             stance = (f"Tape đang <b>rotation</b> ({conf_txt}). Tránh VNINDEX beta trần, "
                       "chơi spread giữa sector inflow và outflow.")
         else:
             stance = (f"Tape đang <b>chop</b> ({conf_txt}). Không có persistent edge; "
-                      "chỉ đánh stealth chất lượng và consensus picks với 0.5× size.")
+                      "danh sách mua với 0.5× size.")
 
         # Flow leaders / laggards.
         if sector_stats:
@@ -1260,25 +1270,13 @@ def main(argv: list[str] | None = None) -> None:
         else:
             flow_bridge = ""
 
-        # Consensus line.
-        consensus = [p for p in UNIFIED_BUYS if p["source"] == "BOTH"]
-        daily_only = [p for p in UNIFIED_BUYS if p["source"] == "DAILY_INSIGHT"]
-        ranker_only = [p for p in UNIFIED_BUYS if p["source"] == "RANKER"]
-        consensus_line_parts = []
-        if consensus:
-            consensus_line_parts.append(
-                "Consensus BUY (Daily Insight + Ranker cùng gật): <b>"
-                + ", ".join(p["symbol"] for p in consensus[:8]) + "</b>"
-            )
-        if daily_only:
-            consensus_line_parts.append(
-                f"Daily-Insight-only ({len(daily_only)}): " + ", ".join(p["symbol"] for p in daily_only[:8])
-            )
-        if ranker_only:
-            consensus_line_parts.append(
-                f"Ranker-only ({len(ranker_only)}): " + ", ".join(p["symbol"] for p in ranker_only[:8])
-            )
-        consensus_line = ". ".join(consensus_line_parts) + ("." if consensus_line_parts else "")
+        # Rule line (replaces the Daily-Insight-vs-Ranker "consensus" line: since
+        # 2026-09-25 there is one buy rule and one list, on every surface).
+        consensus_line = (
+            "Danh sách mua = <b>luật chung</b>: giá trên SMA200 → xếp theo blend hạng "
+            "điểm + OBV → top-5. Giống hệt Daily Insight và bản theo dõi 17:30. "
+            "Giữ 4-8 tuần, mặc định tới ~40 phiên; mua ATO phiên tới, bán ATO ngày thoát."
+        ) if UNIFIED_BUYS else ""
 
         # Pick-by-pick memo — top 5 BUYs.
         pick_blocks = []
@@ -1288,8 +1286,9 @@ def main(argv: list[str] | None = None) -> None:
             rr_s = f"R:R {rr:.1f}" if rr else "R:R n/a"
             up_s = f"+{p['upside_pct']:.1f}%" if p.get("upside_pct") is not None else "n/a"
             dn_s = f"{-p['downside_pct']:.1f}%" if p.get("downside_pct") is not None else "n/a"
-            src_label, _ = SOURCE_LABELS.get(p["source"], (p["source"], ""))
             thesis = p.get("thesis") or ""
+            window = (f" Giữ tới <b>{p['sell_by']}</b> (cửa sổ bán mở {p['sell_from']})."
+                      if p.get("sell_from") and p.get("sell_by") else "")
             news_hint = ""
             if p.get("news"):
                 # Just point to the first cached news link if present.
@@ -1298,13 +1297,15 @@ def main(argv: list[str] | None = None) -> None:
                     news_hint = (f"<br><span class='mut'>↪ <a href='{_esc(first.get('url'))}' "
                                  f"target='_blank' rel='noopener' style='color:#7dd3fc'>"
                                  f"{_esc((first.get('title') or '')[:90])}</a></span>")
+            # Target/stop stay, labelled for what they are: the SWING screening
+            # geometry, not orders -- the book has had no stop since 26.10.
             pick_blocks.append(
                 f"<p><b>{_esc(p['symbol'])}</b> "
-                f"<span class='mut'>({_esc(p['sector_name'])} · nguồn {src_label})</span> · "
+                f"<span class='mut'>({_esc(p['sector_name'])})</span> · "
                 f"<span class='conviction {css}'>{label}</span> — "
-                f"entry quanh <b>{p['close']:,.2f}</b>, target "
-                f"<b class='pos'>{(p['target'] or 0):,.2f}</b> ({up_s}), "
-                f"stop <b class='neg'>{(p['stop'] or 0):,.2f}</b> ({dn_s}), {rr_s}. "
+                f"mua quanh <b>{p['close']:,.2f}</b>.{window} "
+                f"<span class='mut'>Tham chiếu hình học (không phải lệnh): target "
+                f"{(p['target'] or 0):,.2f} ({up_s}), stop {(p['stop'] or 0):,.2f} ({dn_s}), {rr_s}.</span> "
                 f"{_esc(thesis)}{news_hint}</p>"
             )
 
@@ -1338,7 +1339,7 @@ def main(argv: list[str] | None = None) -> None:
 
         meta_line = (
             f"Regime <b>{REGIME_LABEL}</b> · "
-            f"{len(UNIFIED_BUYS)} BUY ({len(consensus)} consensus) · "
+            f"{len(UNIFIED_BUYS)} BUY · "
             f"{len(UNIFIED_SELLS)} AVOID · Stealth {NUM_STEALTH}"
         )
         return (
@@ -1370,35 +1371,26 @@ def main(argv: list[str] | None = None) -> None:
             lines.append(f"Lag sector:  {lag['sector']} (Δflow {fmtM(lag['flow_delta'])})")
         lines.append("")
 
-        # Consensus summary
-        consensus = [p for p in UNIFIED_BUYS if p["source"] == "BOTH"]
-        daily_only = [p for p in UNIFIED_BUYS if p["source"] == "DAILY_INSIGHT"]
-        ranker_only = [p for p in UNIFIED_BUYS if p["source"] == "RANKER"]
-        lines.append(f"Unified BUY ({len(UNIFIED_BUYS)} total): "
-                     f"{len(consensus)} consensus · {len(daily_only)} Daily-only · {len(ranker_only)} Ranker-only")
+        # One buy rule since 2026-09-25 — say which, instead of counting sources.
+        lines.append(f"Danh sách mua ({len(UNIFIED_BUYS)} mã): giá trên SMA200 → blend "
+                     "điểm + OBV → top-5. Giống Daily Insight và bản theo dõi 17:30.")
+        lines.append("Giữ 4-8 tuần, mặc định tới ~40 phiên. Mua ATO phiên tới, bán ATO ngày thoát.")
         lines.append("")
 
         # BUY block
         lines.append("— NÊN MUA —")
         if not UNIFIED_BUYS:
-            lines.append("  (Không có BUY nào hôm nay.)")
+            lines.append("  (Không mã nào trên SMA200 hôm nay — phần vốn định mua: ETF theo chỉ số.)")
         else:
             for i, p in enumerate(UNIFIED_BUYS[:10], 1):
-                src_label, _ = SOURCE_LABELS.get(p["source"], (p["source"], ""))
-                target = p.get("target"); stop = p.get("stop"); rr = p.get("rr")
-                up = p.get("upside_pct"); dn = p.get("downside_pct")
-                lines.append(
-                    f"{i}. {p['symbol']} ({p['sector_name']}) — nguồn {src_label}"
-                )
+                target = p.get("target"); stop = p.get("stop")
+                lines.append(f"{i}. {p['symbol']} ({p['sector_name']})")
                 price_line = f"   Giá {p['close']:,.2f}"
-                if target is not None:
-                    price_line += f" · Target {target:,.2f}"
-                    if up is not None: price_line += f" (+{up:.1f}%)"
-                if stop is not None:
-                    price_line += f" · Stop {stop:,.2f}"
-                    if dn is not None: price_line += f" (-{dn:.1f}%)"
-                if rr is not None:
-                    price_line += f" · R:R {rr:.1f}"
+                if p.get("sell_from") and p.get("sell_by"):
+                    price_line += f" · giữ tới {p['sell_by']} (cửa sổ bán mở {p['sell_from']})"
+                if target is not None and stop is not None:
+                    price_line += (f" · tham chiếu (không phải lệnh): target {target:,.2f}"
+                                   f" / stop {stop:,.2f}")
                 lines.append(price_line)
                 thesis = p.get("thesis") or ""
                 if thesis:

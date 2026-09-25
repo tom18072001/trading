@@ -117,10 +117,11 @@ def test_missing_atr_does_not_silently_zero_the_pullback_term():
     assert isinstance(score_ticker(row), float)
 
 
-def test_min_buy_score_admits_a_normal_shortlist_name():
-    """MIN_BUY_SCORE is a measured percentile, not a round number someone liked.
-    A mildly oversold name in an uptrend has to clear it or the daily email is
-    empty on ordinary days."""
+def test_the_retired_cutoff_still_admits_a_normal_shortlist_name():
+    """MIN_BUY_SCORE is no longer a gate (2026-09-25) — it survives only to
+    shadow-log the list the old rule would have produced. That log is only a
+    comparison if the old rule still behaves as it did: a mildly oversold name
+    in an uptrend clears it."""
     ordinary = {"close": 10.0, "rsi_2": 25.0, "ret_1d": -1.0, "atr_pct": 2.0,
                 "price_to_sma_50": 0.02, "price_to_sma_200": 0.08}
     assert score_ticker(ordinary) >= MIN_BUY_SCORE

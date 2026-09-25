@@ -17,7 +17,7 @@ Pivot the VN Trading system from per-symbol prediction to **sector-level money-f
 - REMOVE: 170-symbol universe, `stock_prices`, `stock_features`, `trade_setups`, `predictions`, symbol screener, T+3 scanner, symbol pages in frontend, per-symbol ML.
 - REPLACE: primary key `symbol` → `sector_code` everywhere.
 - **Per-ticker picks (2026-04-17 onward):** `generate_report.py` and `api/routers/insight.py` read per-ticker BUY/ACCUMULATE picks exclusively from `services.picks_universe_service.PicksUniverseService` (dynamic HOSE universe from vnstock Listing). They no longer read `_legacy_stocks`, `_legacy_stock_prices`, or `_legacy_stock_features`. These three tables stay in the DB during a 2-week shadow window then drop in migration 10.
-- **Email report (2026-04-23 onward):** `generate_report.py` is the **sole** daily email generator. It unifies the picks surfaced in the Daily Insight page (`snapshot.top_buys`/`top_sells` — no ranker gate) with the ranker-gated BUY/ACCUMULATE picks into a single de-duped list, each entry tagged with its source (`BOTH` / `DAILY_INSIGHT` / `RANKER`). The HTML/PDF gains an Expert Trader Memo section at the top; the email body is plain text (buy symbols + reasons + Dashboard + news links). Recipients come from `REPORT_EMAIL_TO` in the local `.env` — **no list is committed and there is no fallback in code** (removed 2026-08-24 when the repo went public; a source file is the wrong place to publish an inbox). Empty means the HTML/PDF are written and no mail is sent. `scripts/jobs/job_sector_signal_publish.bat` calls `generate_report.py`.
+- **Email report (2026-04-23 onward):** `generate_report.py` is the **sole** daily email generator. **Since 2026-09-25 its BUY list is `snapshot.top_buys` verbatim** — one buy rule (`picks_universe_service.long_shortlist`: SMA200 gate → rank blend) shared with Daily Insight and the 17:30 bulletin; the ranker no longer gates or adds buys (no out-of-sample edge, review 2026-09-24 §4.2). The AVOID list still unifies `snapshot.top_sells` with the ranker's SELL sectors into one de-duped list, each entry tagged with its source (`BOTH` / `DAILY_INSIGHT` / `RANKER`). The HTML/PDF gains an Expert Trader Memo section at the top; the email body is plain text (buy symbols + reasons + Dashboard + news links). Recipients come from `REPORT_EMAIL_TO` in the local `.env` — **no list is committed and there is no fallback in code** (removed 2026-08-24 when the repo went public; a source file is the wrong place to publish an inbox). Empty means the HTML/PDF are written and no mail is sent. `scripts/jobs/job_sector_signal_publish.bat` calls `generate_report.py`.
 - **One report generator, no versioned copies.** `generate_report.py` is the only
   daily-report generator in the repo. Every earlier numbered copy is gone:
   SecV2 on 2026-04-20, SecV3 + SecV4 on 2026-06-18 (they were kept only as
@@ -594,15 +594,22 @@ score = −1
       sàn −20 trừ khi trên SMA200
 ```
 
-- **`MIN_BUY_SCORE` được thi hành ở `_select_top`, và danh sách được phép ngắn.**
-  Lọc bằng `is_valid_buy` một mình chỉ nói stop/target hợp lệ về hình học, nên
-  trang từng tự độn cho đủ 5 mã bằng những cái tên điểm −0,65.
+- **Một luật mua cho mọi bề mặt — `long_shortlist` (2026-09-25):** cổng SMA200
+  (`score > UNTRENDED_FLOOR`) → thứ tự blend → top-5. Daily Insight, email 17:00
+  và bản tin 17:30 cùng gọi nó; **không** lọc theo tín hiệu ngành. Danh sách
+  chỉ rỗng khi không mã nào trên SMA200 — phần vốn đó mua ETF chỉ số.
+- **`MIN_BUY_SCORE` 2,5 đã bỏ làm cổng** (Tom: *"bỏ ngay, giữ cổng SMA200"*). Nó
+  đặt theo phân vị 78 của điểm, chưa từng đo lợi nhuận; đo rồi thì tốn
+  −0,39%/lệnh ở 20 phiên, −0,44% ở 40 (t −1,5…−1,6, in-sample). Hằng số còn lại
+  **chỉ** để `daily_watch` ghi danh sách luật cũ vào kho (`shortlist_with_cutoff`)
+  — `daily_watch/audit.py` chấm hai luật ngoài mẫu. `MAX_5D_DROP_PCT` (−12%, chỉ
+  email) cũng bỏ: đo ra ±0,01%/lệnh.
 - **Tie-break theo symbol, không theo dollar volume**: `dv_20d` không trung tính
   mà **có hại** (−0,06% → −0,15%) — trong mỗi bậc điểm nó luôn trả về mã to
   nhất, chậm nhất. Thanh khoản thuộc về bộ lọc cứng ở thượng nguồn.
 - **Thứ tự do tầng cross-sectional quyết**: `blended_rank_scores` (blend rank
   50/50 giữa score và OBV trend) chạy một lần mỗi build, ghi `TickerRow.rank_score`.
-  **Score quyết định được vào hay không; blend quyết định thứ tự.** Bản cộng
+  **Cổng SMA200 quyết định được vào hay không; blend quyết định thứ tự.** Bản cộng
   OBV theo từng dòng thua rõ — cộng giá trị thô để dispersion một ngày quyết
   định số hạng đó át hay biến mất.
 - Bench **import** hệ số chứ không gõ lại (§22.11).

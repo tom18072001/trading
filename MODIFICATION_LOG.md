@@ -14,6 +14,42 @@
 
 ---
 
+## 2026-09-25 (2) — một luật mua cho mọi bề mặt; bỏ ngưỡng `MIN_BUY_SCORE` 2,5, giữ cổng SMA200
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `services/picks_universe_service.py` (`long_shortlist` mới, `_select_top`),
+  `services/picks_scoring.py`, `daily_watch/service.py`, `daily_watch/audit.py`,
+  `generate_report.py`, `report/report_template.html`, `scripts/audit_past_picks.py`,
+  `frontend/src/pages/DailyInsightPage.tsx` (+ test), `tests/test_shortlist_rule.py` (mới),
+  `tests/test_picks_ranking.py`, `tests/test_picks_scoring.py`,
+  `docs/reviews/algo_review_2026-09-24/drop5.py` (mới), `CLAUDE.md` §2, §26.4,
+  `docs/doctrine/26-ticker-picks.md` (§26.11 mới), `ARCHITECTURE.md`,
+  `specs/picks_universe.md`, `daily_watch/README.md`.
+- Reason: Tom, 2026-09-25 — *"bỏ ngay, giữ cổng SMA200"*; review 2026-09-24 §2.2 (ngưỡng tốn
+  −0,39 / −0,44%/lệnh ở 20 / 40 phiên) và §8 P0-6 (ba bề mặt, ba luật mua; email lọc mua bằng
+  tín hiệu ngành không có edge).
+- Summary:
+  - `long_shortlist(rows, n, exclude=, min_score=)`: `is_valid_buy` + `score > UNTRENDED_FLOOR`
+    (cổng SMA200) → `_rank_key` → top-n. Daily Insight (`_select_top`, bỏ ưu tiên ngành
+    BUY/ACCUMULATE), email (`snapshot.top_buys` nguyên văn — bỏ cổng ngành, ngưỡng 2,5, chặn
+    −12%/5 phiên, xếp theo điểm thô, bên "Ranker" và việc sắp lại theo điểm thô của
+    `merge_pick_sources`) và bản tin 17:30 cùng gọi nó. Danh sách WATCH của email = các mã
+    kế tiếp trong cùng thứ tự. Ranker chỉ còn chọn ngành cho danh sách TRÁNH.
+  - `MIN_BUY_SCORE` không còn là cổng; chỉ dùng để ghi danh sách luật cũ LẼ RA cho ra vào kho
+    (`shortlist_with_cutoff`, cấp cao nhất của payload). `marks` nay có giá đóng của cả
+    universe, và `daily_watch/audit.py` chấm luật đang chạy vs luật cũ vs base NO GATE, cùng
+    ngày — phép đo ngoài mẫu đầu tiên cho quyết định này. `MAX_5D_DROP_PCT` bỏ: đo trên luật
+    mới +0,008%/lệnh (t +0,24) ở 20 phiên, −0,008% (t −0,17) ở 40 (`drop5.py`).
+  - Bản tin mục 5 viết lại: số danh mục thật của luật đang chạy (7,2% / 11,7%/năm, Sharpe
+    0,44 / 0,65) cạnh VNINDEX cùng kỳ (17,5%, Sharpe 0,98) thay cho 5,9% / 11,7% (quy năm số
+    học) và 15,7% / 0,91; giữ mặc định tới ~40 phiên; mua ATO, bán ATO; `give_back` là tin;
+    lõi-vệ tinh. Mục 3: danh sách rỗng → ETF chỉ số. Email và thẻ Daily Insight: rỗng =
+    "không mã nào trên SMA200", không còn "không có ngành BUY".
+  - Chạy thử trên snapshot 2026-09-24 của máy Tom: luật mới BSR, NTP, QNS, VIC, TCB (13 mã
+    qua cổng); luật cũ BSR, NTP, VIC, GMD, BVH.
+  - Test: pytest 383 → 394; vitest 14 → 15. Negative control: đổi cổng thành `score ≥ 2,5`
+    → 6 test đỏ; đưa lại ưu tiên ngành vào `_select_top` → 2 test đỏ.
+- Follow-ups: vài tháng log `shortlist_with_cutoff` rồi chạy `daily_watch/audit.py --hold 20/40`.
+
 ## 2026-09-25 (1) — 4 tuần và 8 tuần là hai khung giữ duy nhất: bỏ chế độ T+ và luật T+2 trong backtest
 - Author: Claude (Cowork) on behalf of Tom
 - Files: `config.py`, `services/picks_scoring.py`, `services/picks_universe_service.py`,

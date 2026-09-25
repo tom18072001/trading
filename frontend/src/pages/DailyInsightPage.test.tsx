@@ -133,7 +133,15 @@ describe('PickTable', () => {
   ];
 
   it('shows empty-state when no picks', () => {
+    // The BUY list is the shared shortlist (SMA200 gate), not "BUY sectors":
+    // an empty list means nothing is in an uptrend, and the copy says so.
     render(<PickTable title="Top BUY" subtitle="x" kind="BUY" picks={[]} />);
+    expect(screen.getByText(/trên SMA200/i)).toBeInTheDocument();
+    expect(screen.queryByText(/không có ngành/i)).toBeNull();
+  });
+
+  it('keeps the sector wording for an empty SELL list', () => {
+    render(<PickTable title="SELL" subtitle="x" kind="SELL" picks={[]} />);
     expect(screen.getByText(/không có ngành/i)).toBeInTheDocument();
   });
 

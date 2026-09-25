@@ -54,7 +54,7 @@ from config import (
 from database.connection import SessionLocal
 from database.models import SectorConstituent, SectorSignal
 from services.picks_scoring import (
-    MIN_BUY_SCORE,
+    UNTRENDED_FLOOR,
     PickProfile,
     blended_rank_scores,
     compute_stop_target_rr,
@@ -360,6 +360,33 @@ def _rank_key(r: "TickerRow") -> tuple[float, str]:
     (`MIN_DV_20D`), which is where a liquidity requirement belongs.
     """
     return (-(r.rank_score if r.rank_score is not None else 0.0), -r.score, r.symbol)
+
+
+def long_shortlist(rows: Iterable["TickerRow"], n: int = 5, *,
+                   exclude: Iterable[str] = (),
+                   min_score: float | None = None) -> list["TickerRow"]:
+    """THE buy rule. Daily Insight, the 17:00 email and the 17:30 bulletin all
+    call this -- one rule, one implementation (review 2026-09-24 §2.4 found
+    three surfaces running three different buy rules, the 22.11 family).
+
+      admit  : `is_valid_buy` and `score > UNTRENDED_FLOOR` -- the SMA200 gate,
+               i.e. the uptrend is confirmed. Nothing else.
+      order  : `_rank_key` -- the rank blend of score and OBV trend (26.9).
+      exclude: symbols to leave out (the bulletin drops what Tom already holds).
+
+    No sector gate: the ranker's BUY/SELL has no out-of-sample edge (review
+    §4.2), and a list filtered by noise is a list ordered by noise.
+
+    `min_score` exists for ONE caller: the shadow log of the retired
+    MIN_BUY_SCORE rule (`daily_watch.service`), kept so the removal can be
+    audited out of sample. Production lists never pass it.
+    """
+    ex = set(exclude)
+    pool = [r for r in rows
+            if r.is_valid_buy and r.score > UNTRENDED_FLOOR and r.symbol not in ex
+            and (min_score is None or r.score >= min_score)]
+    pool.sort(key=_rank_key)
+    return pool[:n]
 
 
 def _compose_thesis(r: "TickerRow", action: str) -> str:
@@ -1004,63 +1031,27 @@ class PicksUniverseService:
     def _select_top(self, tickers: dict[str, TickerRow],
                     by_sector: dict[str, list[TickerRow]],
                     action: str, n: int, as_of: date) -> list["PickEntry"]:
-        """Pick top-N BUY (highest score in BUY/ACCUMULATE sectors, is_valid_buy)
-        or top-N SELL (lowest score in SELL sectors, or weakest momentum in
-        any sector when no SELL sector exists).
+        """Top-N BUY (`long_shortlist` over the whole universe) or top-N SELL
+        (lowest score in SELL sectors, or weakest score in any sector when no
+        SELL sector exists).
         """
         action_up = action.upper()
-        target_sectors = self._sectors_with_action(
-            as_of,
-            ("BUY", "ACCUMULATE") if action_up == "BUY" else ("SELL",),
-        )
-
-        candidates: list[TickerRow] = []
-        for sec in target_sectors:
-            candidates.extend(by_sector.get(sec, []))
-        # If no SELL sector today, fall back to weakest scored tickers
-        # across the whole universe — lets the report still surface risk.
-        if not candidates and action_up == "SELL":
-            candidates = list(tickers.values())
-
-        # BUY path: require is_valid_buy AND a score that clears MIN_BUY_SCORE;
-        # best score first (_rank_key).
-        # SELL path: pick weakest (score asc); is_valid_buy irrelevant.
-        #
-        # The score gate is not decoration. `is_valid_buy` only says the stop
-        # and target are geometrically sane -- it knows nothing about whether
-        # the name is worth owning. Under the old 0..7 integer score that was
-        # harmless because nothing scored below 0; under the 2026-09-16 score a
-        # negative number means "overbought inside an uptrend", which is exactly
-        # the name this ranking exists to avoid. Without this line the page
-        # would hand back a full five every day by padding with the very rows
-        # the rewrite is meant to demote. A short list is the honest answer on a
-        # day when nothing qualifies, and the empty state already exists.
         if action_up == "BUY":
-            filtered = [r for r in candidates
-                        if r.is_valid_buy and r.score >= MIN_BUY_SCORE]
-            filtered.sort(key=_rank_key)
-            # Top-up (2026-06-18): when the ranker flags few BUY/ACCUMULATE
-            # sectors, the BUY list starves (e.g. only 1 sector → 1-3 picks).
-            # Back-fill with the best-scored qualifying tickers from the WHOLE
-            # universe. These passed capability, validity AND the score gate;
-            # they are "next-best" ideas, not BUY-flagged sectors — the thesis
-            # text carries the metrics.
-            #
-            # 2026-09-16: this no longer guarantees a list of `n`. It widens the
-            # POOL, it does not lower the BAR, so a day on which nothing scores
-            # above MIN_BUY_SCORE returns fewer than n — or none. That is the
-            # intended behaviour; padding to a fixed length with names the
-            # ranking demotes is what §26.4 removed.
-            if len(filtered) < n:
-                seen = {r.symbol for r in filtered}
-                extra = [
-                    r for r in tickers.values()
-                    if r.is_valid_buy and r.score >= MIN_BUY_SCORE
-                    and r.symbol not in seen
-                ]
-                extra.sort(key=_rank_key)
-                filtered.extend(extra)
+            # 2026-09-25: the same rule the bulletin and the email use. It used
+            # to put BUY/ACCUMULATE-sector names first and gate on MIN_BUY_SCORE;
+            # the sector signal has no measured edge and the cutoff measured
+            # negative (review 2026-09-24 §2.2, §4.2). A day on which no name is
+            # above its SMA200 still returns an empty list -- that is the
+            # answer, and the empty state says what to do with the money.
+            filtered = long_shortlist(tickers.values(), n)
         else:
+            candidates: list[TickerRow] = []
+            for sec in self._sectors_with_action(as_of, ("SELL",)):
+                candidates.extend(by_sector.get(sec, []))
+            # If no SELL sector today, fall back to weakest scored tickers
+            # across the whole universe — lets the report still surface risk.
+            if not candidates:
+                candidates = list(tickers.values())
             filtered = list(candidates)
             # Weakest score first, symbol as the stable tie-break. No score
             # floor here on purpose: a SELL list exists to surface the weakest

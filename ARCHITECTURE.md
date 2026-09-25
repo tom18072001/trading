@@ -5,6 +5,18 @@
 > change must be logged in `MODIFICATION_LOG.md`.
 
 ## CHANGELOG
+- **2026-09-25 (2) — One buy rule on every surface; the 2.5 cutoff is gone.**
+  `picks_universe_service.long_shortlist` (SMA200 gate → `_rank_key`) is the buy
+  list for Daily Insight (`_select_top`), the 17:00 email (`snapshot.top_buys`
+  verbatim — no ranker gate, no ranker-only buys, no raw-score re-sort) and the
+  17:30 bulletin. Contract changes: the bulletin payload and
+  `data/watch/<date>.json` gain a top-level `shortlist_with_cutoff` (the list the
+  retired `MIN_BUY_SCORE` rule would have produced — audit only) and `marks`
+  now carries the close of **every** universe name, so `daily_watch/audit.py`
+  can score both rules against a NO GATE base; `shortlist_meta.min_buy_score` is
+  replaced by `rule` and `retired_min_buy_score`. `picks_scoring.MAX_5D_DROP_PCT`
+  was removed (measured ±0.01%/trade). The email's AVOID list is unchanged
+  (snapshot SELL ∪ ranker SELL sectors). No schema change. `CLAUDE.md` §26.4.
 - **2026-09-25 — 4 and 8 weeks are the only holding periods; the T+ mode and
   T+2 settlement are gone** (Tom: *"bỏ T+2, chỉ sử dụng 4 tuần và 8 tuần"*).
   One constant, `config.HOLD_SESSIONS = (20, 40)`, feeds the sell window, the
@@ -166,8 +178,8 @@
   blend of the per-row score and on-balance-volume trend. `_rank_key` reads
   `rank_score` and falls back to `score` when the pass has not run, so a row
   built outside the pipeline still sorts. The DISPLAYED score is unchanged,
-  which is deliberate: the score decides admission (`MIN_BUY_SCORE`), the
-  blend decides order. Callers must gate before ordering — with equal
+  which is deliberate: the score decides admission (`MIN_BUY_SCORE` then; the
+  SMA200 floor alone since 2026-09-25), the blend decides order. Callers must gate before ordering — with equal
   weights the blend can tie the best score to the worst. `TickerRow` also
   gained `obv_chg20`. See `CLAUDE.md` §26.9.
 - **2026-08-23 — Frontend defect pass + docs purge + repo reorg.** Seven measured

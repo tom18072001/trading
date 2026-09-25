@@ -532,13 +532,22 @@ function PickCard({ p, kind, alloc }: { p: any; kind: 'BUY' | 'SELL'; alloc: num
   );
 }
 
+/** Empty-state copy. The BUY list is the shared shortlist rule (SMA200 gate →
+ *  rank blend, 2026-09-25) — it no longer depends on any sector being BUY, so
+ *  "no BUY sector today" would be the wrong explanation for an empty list. */
+function emptyText(kind: 'BUY' | 'SELL'): string {
+  return kind === 'BUY'
+    ? 'Không mã nào trên SMA200 hôm nay — phần vốn định mua: ETF theo chỉ số thay vì tiền mặt.'
+    : 'Không có ngành nào ở trạng thái SELL hôm nay.';
+}
+
 function PickCards({ picks, kind, capital }: { picks: any[]; kind: 'BUY' | 'SELL'; capital: number }) {
   const convSum = picks.reduce((a, p) => a + convictionOf(p), 0) || 1;
   const deployable = capital * 0.5;
   if (!picks.length) {
     return (
       <div className="rounded-2xl bg-panel border border-line p-6 text-center text-[13px] text-lo italic">
-        Không có ngành nào ở trạng thái {kind === 'BUY' ? 'BUY/ACCUMULATE' : 'SELL'} hôm nay.
+        {emptyText(kind)}
       </div>
     );
   }
@@ -572,7 +581,7 @@ export function PickTable({ title, subtitle, kind, picks }: {
         <div className="section-label">{title}</div>
         <div className="text-[11px] text-lo mt-0.5">{subtitle}</div>
         <div className="mt-3 text-sm text-lo italic">
-          Không có ngành nào ở trạng thái {kind === 'BUY' ? 'BUY/ACCUMULATE' : 'SELL'} hôm nay.
+          {emptyText(kind)}
         </div>
       </div>
     );
