@@ -395,9 +395,9 @@ Run the two commands rather than trusting the numbers.
 
 | Suite | Count | Command |
 |---|---|---|
-| Backend (pytest) | 371 | `uv run pytest tests/` |
-| Frontend (vitest) | 13 | `cd frontend && npm test` |
-| **Total** | **384** | — |
+| Backend (pytest) | 450 | `uv run pytest tests/` |
+| Frontend (vitest) | 18 | `cd frontend && npm test` |
+| **Total** | **468** | — |
 > Vì sao từng bài test tồn tại — và 4 lần negative control bắt được test vô
 > dụng của chính tôi — ở [`docs/doctrine/19-testing-history.md`](docs/doctrine/19-testing-history.md).
 > Đọc nó trước khi xoá hoặc viết lại một bài test trông có vẻ thừa.
@@ -422,7 +422,7 @@ ghi `sector_flow_daily` **thiếu `close_idx`**, mà `close_idx` nuôi target ML
 giải phóng sau 30 phiên **có** đổi hành vi — chúng hiện thực §16.9, thứ chưa
 từng được thi hành.
 
-**Baseline ruff: 65.** Đo lại, đừng tin dòng này — một lần refactor có thể làm
+**Baseline ruff: 60.** Đo lại, đừng tin dòng này — một lần refactor có thể làm
 số này tăng mà không hỏng gì, hoặc giảm mà không sửa gì (§20.2).
 
 ### 20.3 Còn mở — cần một quyết định, không chỉ code

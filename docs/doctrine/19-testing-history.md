@@ -48,6 +48,27 @@
 > with names scoring −0.65 and −0.77. Invisible under the old 0..7 score, which
 > could not go negative.
 
+> 2026-09-25: backend **450** (+79 since 371), vitest **18** (+5) — the
+> changes that followed review 2026-09-24 (`MODIFICATION_LOG.md` 2026-09-25
+> (1)-(6)). Every new file was mutation-tested: each defect it guards was put
+> back, one at a time, and the suite had to go red for the right reason —
+> 11 mutations for `tests/test_review_20260924.py`, 8 for
+> `tests/test_repair_sector_data.py`, 3 for the exit walker in
+> `tests/test_bench_measurement.py`.
+>
+> **One of mine proved nothing, and the mutation run is what showed it.**
+> `test_signals_are_not_published_on_a_non_session` stayed green with the
+> weekend check deleted: its fixture has the §16.2 columns NULL, so
+> `predict_today()` refused first and `publish()` came back empty for that
+> reason, not the calendar. It now stubs the ranking, so the calendar is the
+> only thing left that can stop the publish. Same lesson as the ATR fixture
+> above — a test that can pass for two reasons tests neither.
+>
+> `tests/test_repair_sector_data.py` uses the LIVE aggregator
+> (`aggregate_sector`) as its oracle rather than numbers worked out by hand: a
+> repair that agrees with a hand calculation but not with the 16:00 job would
+> re-create the discontinuity it exists to remove.
+
 > 2026-08-26: +3 in `tests/test_database_schema.py`, backend **348** — migration
 > 12, dropping two tables that never had a writer. The load-bearing one is
 > `test_the_drop_survives_a_restart`, and it earns its place by exercising the

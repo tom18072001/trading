@@ -14,6 +14,18 @@
 
 ---
 
+## 2026-09-25 (7) — sổ sách: PATCHES, số test, lịch sử test
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `docs/PATCHES.md`, `CLAUDE.md` §19 (pytest 450, vitest 18) và §20 (ruff 60),
+  `docs/doctrine/19-testing-history.md`.
+- Reason: §15 và quy tắc của `docs/PATCHES.md` — plan xong thì chuyển xuống bảng dưới.
+- Summary: đóng ba plan — review 2026-09-24 (đã sửa theo §8, commit (1)-(6)), "Kéo khung giữ lên
+  8 tuần" (Tom chọn 4 và 8 tuần, mặc định ~40 phiên), "Ship ensemble ML" (không dựng, review §5).
+  Mở bốn: chạy `repair_sector_data.py` trên máy Tom; quyết slippage backtest ngành; đo ngoài mẫu
+  luật mua mới vs luật có ngưỡng; các mục tầng ngành ngoài §8. Lịch sử test ghi một test vô dụng
+  của chính tôi mà lượt đột biến bắt được. Skill `theo-doi-hang-ngay` cập nhật trên máy Tom nhưng
+  **không commit** — file đó có thay đổi chưa commit của Tom.
+
 ## 2026-09-25 (6) — `scripts/repair_sector_data.py`: sửa lịch sử ngành đã ghi sai, có backup và chạy thử
 - Author: Claude (Cowork) on behalf of Tom
 - Files: `scripts/repair_sector_data.py` (mới), `tests/test_repair_sector_data.py` (mới, 11 test).
