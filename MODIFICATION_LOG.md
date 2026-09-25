@@ -14,6 +14,59 @@
 
 ---
 
+## 2026-09-25 (5) — tầng ngành: job 16:00 tính feature dẫn trước, ATR đúng, close_idx nối chuỗi, regime không dựng từ rác, nhãn "chưa kiểm chứng"
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `analysis/flow_aggregation.py` (ATR, `chain_close_idx`), `services/sector_ingest_service.py`,
+  `services/fast_ingest.py` (`rebuild_leading_features` công khai, một bản duy nhất),
+  `scripts/fix_close_idx.py` (re-export), `main.py` (`--eod-rollup`, `--rotation-predict`, `--regime`),
+  `services/flow_feature_service.py`, `services/rotation_model_service.py`, `services/macro_service.py`,
+  `services/sector_signal_service.py`, `utils/clock.py` (`closed_today`), `analysis/regime.py`,
+  `analysis/verification.py` (mới), `api/routers/insight.py`, `generate_report.py`,
+  `report/report_template.html`, `frontend/src/pages/DailyInsightPage.tsx` (+ test),
+  `tests/test_review_20260924.py` (mới, 17 test), `tests/test_flow_aggregation.py`,
+  `tests/test_review_20260822.py`, `tests/test_sector_pipeline.py`, `tests/test_regime_confidence.py`,
+  `tests/conftest.py`, `CLAUDE.md` §8, §10, §16.14, §16.15, §25, `docs/doctrine/16-stealth-measurements.md`,
+  `docs/doctrine/25-regime-confidence.md` (§25.11 mới), `docs/reference/ALGORITHM.md`,
+  `docs/reference/GLOSSARY_VI.md`, `ARCHITECTURE.md`.
+- Reason: review 2026-09-24 §4.1 / §8 P0-1..4, P0-6 và các mục trung bình 8-11. Tom: *"theo báo cáo
+  sửa lại theo ý đó"*.
+- Summary:
+  - **P0-1** `main.py --eod-rollup` gọi `rebuild_leading_features()` sau rollup — trước đó chỉ đường
+    Refresh của UI tính, nên từ 2026-08-25 bảy cột §16.2 NULL trên cả 15 ngành và ranker (điền 0)
+    chấm trên số 0 suốt một tháng. `predict_today()` ném `FeaturesMissingError` khi một cột feature
+    đã lưu NULL toàn bộ ở ngày mới nhất; `--rotation-predict` thoát mã 2, `publish()` không publish.
+  - **P0-2** ATR ngành = `Σ atr·w / Σ w` (bản cũ chia n hai lần: 1/5 sự thật). **P0-4** `close_idx`
+    nối chuỗi từ `basket_return` ở rollup, `incremental_ingest` và backfill — tổng giá thô nhảy
+    +62% / −39% (STEEL 22-23/09) mỗi khi một mã không fetch được. Lịch sử sửa bằng
+    `scripts/repair_sector_data.py` (Nhóm F).
+  - **P0-3** VNINDEX ngoài 200-5.000 bị loại **từng giá trị** (`macro_service.plausible_vnindex`)
+    ở fetch ngày, carry-forward hằng giờ, `macro_vn_ret_5d` và benchmark RS. `classify_regime()`
+    chỉ fit trên chuỗi VNINDEX ngày; thiếu chuỗi (< 25 phiên) thì trả nhãn đã lưu, không ghi
+    — nhãn 2026-09-22 `risk_off 0,9961` dựng từ các dòng 1,82 của nhánh fallback. `model_version`
+    ghi `hmm` hay `heuristic` theo nhánh thật đã trả lời. `macro_vn_ret_5d` là lợi suất 5 phiên
+    (trước là 5 dòng hằng giờ).
+  - **P0-6** `analysis/verification.py`: ranker, regime, cổng stealth — ba thứ chưa có edge ngoài
+    mẫu. Email: bốn đoạn regime ra lệnh ("size full weight on ACCUMULATE", "no new BUYs, prefer
+    cash") thành mô tả + ghi chú; bảng Sector Direction / Stealth / mục tránh ghi "chưa kiểm
+    chứng"; Risk Notes bỏ "ATR stops", "4 ACCUMULATE + 3 BUY" và hai luật chưa hiện thực (FOL 0,5×,
+    ETF mask — §18.2/8, §18.1/2 còn mở); game plan bỏ stop/target và "giữ tiền mặt". Daily Insight:
+    gauge in câu `confidence_phrase()` từ API thay "Độ tin cậy 85%", bỏ chip "Tư thế tấn công/phòng
+    thủ"; ba ô đếm đổi thành "Ngành BUY / Ngành SELL / Ngành tích luỹ ngầm" + "Chưa kiểm chứng".
+    `confidence_phrase()` luôn kết thúc "chưa kiểm chứng ngoài mẫu" (calibration §25 là in-sample).
+  - §4.1/8 lọc bền theo chiều (BUY cần 3 phiên vào ròng, SELL 3 phiên rút ròng; 24/96 BUY cũ đi sau
+    3 phiên rút). §4.1/9 `up_down_vol_ratio` NULL = ngày toàn tăng → trần 1.000 ở cả train lẫn
+    predict (train bỏ 18% số dòng, predict điền 0 = "toàn giảm"). §4.1/10 tín hiệu mang
+    `model_run_id`. §4.1/11 `publish()` và `classify_regime()` bỏ qua ngày không có phiên
+    (`utils.clock.closed_today`, 14/62 ngày tín hiệu cũ là cuối tuần/lễ).
+  - Negative control: đưa từng lỗi trở lại (11 đột biến) — mỗi cái làm đỏ ít nhất một test đúng
+    lý do. Một test ban đầu vô dụng bị bắt theo cách này (test cuối tuần đi qua nhờ lỗi feature
+    NULL, không nhờ lịch) và đã viết lại. Chạy thử `generate_report.py` trên bản DB 2026-09-24,
+    không mạng, không email: HTML render đủ mục.
+- Follow-ups: chạy `scripts/repair_sector_data.py` ngoài giờ 9:00-17:30 (lịch sử `atr_pct`,
+  `close_idx`, `return_1d`, VNINDEX rác); ranker train lại đêm sau đó. Còn mở: §4.1/12 (stealth
+  `fillna(False)` và trang Stealth Watch dùng c3/c4/c5 khác scanner), §4.1/13 (`foreign_net` = 0 do
+  thiếu dữ liệu 01-03/2023), các mục "Thấp" của §4.1.
+
 ## 2026-09-25 (4) — sửa thước đo: base NO GATE mọi phiên, t Newey-West, danh mục cùng ngày với VNINDEX; bench thoát hết nhìn trước; panel giá không trộn hai cơ sở
 - Author: Claude (Cowork) on behalf of Tom
 - Files: `analysis/bench.py` (`nw_t`, `staggered_book`, `book_stats`, `judge`),

@@ -221,6 +221,15 @@ Anything worse than this means the thesis is still lagging — go back to featur
 
 ### 16.15 The breakout bar was 1.15%, not 8% — 2026-08-24 (5)
 
+> **2026-09-25 — the premise below is 5× off.** The "median daily ATR 0.57%"
+> this section is built on came from `analysis/flow_aggregation.py`, which
+> multiplied each constituent's ATR by `w = 1/n` and then divided the sum by n
+> again. The basket's real daily ATR is ~2.7%; with it, `atr_scaled` ≈ 35% and
+> is never reached. The unit argument (a daily ATR against a 40-session max)
+> still stands; every number in the tables below must be re-measured after
+> `scripts/repair_sector_data.py` recomputes `atr_pct` (review 2026-09-24
+> §4.1/3, fixed the same day).
+
 §25.10 suspected §16.4's `2 × atr_pct` of **scaling with the tape it measures**:
 ATR rises in choppy markets, so the bar would rise exactly when the moves
 clearing it shrink. `scripts/stealth_leadtime_experiment.py --breakout` now

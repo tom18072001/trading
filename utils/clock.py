@@ -54,6 +54,19 @@ def is_trading_day(d: date | None = None) -> bool:
     return d.isoformat() not in set(VN_MARKET_HOLIDAYS_2026)
 
 
+def closed_today() -> str | None:
+    """Today's date (ISO) if the exchange has no session today, else None.
+
+    The scheduled jobs are registered `-Daily` (CLAUDE.md §8), so they also run
+    on weekends and holidays; 14 of 62 published signal dates were such days,
+    each a copy of the last session under a new date (review 2026-09-24
+    §4.1/11). Publishers ask this before writing a dated row. One seam, so the
+    test suite pins the calendar in one place (`tests/conftest.py`).
+    """
+    d = today()
+    return None if is_trading_day(d) else d.isoformat()
+
+
 def previous_trading_day(d: date | None = None) -> date:
     """The most recent trading day strictly before `d`."""
     d = d or today()

@@ -76,15 +76,30 @@ def cmd_intraday() -> None:
 
 
 def cmd_eod_rollup() -> None:
+    """16:00: roll the intraday bars into `sector_flow_daily`, THEN recompute
+    the §16.2 leading features over it.
+
+    The second step only ran on the UI Refresh path until 2026-09-25, so every
+    scheduled row since 2026-08-25 had flow_z20..accumulation_age NULL on all
+    15 sectors, and the 16:45 ranker (which fills NULL with 0) scored zeros
+    (review 2026-09-24 §4.1/1). `predict_today` now also refuses to run on a
+    session whose feature column is NULL for every sector.
+    """
+    from services.fast_ingest import rebuild_leading_features
     with get_session() as s:
         n = SectorIngestService(s).rollup_to_daily()
         print(f"[main] sector_flow_daily rows: {n}")
+        m = rebuild_leading_features(s)
+        print(f"[main] leading features rebuilt on {m} rows")
 
 
 def cmd_regime() -> None:
     with get_session() as s:
         rec = RotationModelService(s).classify_regime()
-        print(f"[main] regime: {rec.regime_label} conf={rec.confidence}")
+        # classify_regime returns the last stored label, unchanged, when it
+        # refuses to publish (no session today, or no usable daily VNINDEX).
+        print(f"[main] regime ({rec.date or 'none stored'}, {rec.model_version}): "
+              f"{rec.regime_label} conf={rec.confidence}")
 
 
 def cmd_train() -> None:
@@ -94,8 +109,15 @@ def cmd_train() -> None:
 
 
 def cmd_rotation_predict() -> None:
+    from services.rotation_model_service import FeaturesMissingError
     with get_session() as s:
-        df = RotationModelService(s).predict_today()
+        try:
+            df = RotationModelService(s).predict_today()
+        except FeaturesMissingError as e:
+            # Exit non-zero so Task Scheduler's "Last Run Result" shows it; the
+            # 17:00 publish makes the same check and publishes nothing.
+            print(f"[main] rotation_predict REFUSED: {e}")
+            raise SystemExit(2) from None
         print(f"[main] rotation_predict: {len(df)} sector rows")
         if not df.empty:
             cols = [c for c in ("sector_code", "rank", "score") if c in df.columns]

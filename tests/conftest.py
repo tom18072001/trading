@@ -145,3 +145,12 @@ def macro_session(seeded_session):
         ))
     seeded_session.flush()
     return seeded_session
+
+
+@pytest.fixture(autouse=True)
+def _market_open_today(monkeypatch):
+    """Signals and the regime refuse to publish on a non-session (2026-09-25).
+    Pin the calendar so a suite run on a Sunday tests the same thing as one run
+    on a Tuesday; the tests of that refusal un-pin it on purpose."""
+    import utils.clock as clock
+    monkeypatch.setattr(clock, "closed_today", lambda: None)

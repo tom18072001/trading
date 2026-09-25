@@ -5,6 +5,34 @@
 > change must be logged in `MODIFICATION_LOG.md`.
 
 ## CHANGELOG
+- **2026-09-25 (5) — Sector layer: what the scheduled jobs publish, and the
+  label on it** (review 2026-09-24 §4.1, §8 P0). `main.py --eod-rollup` now
+  runs `fast_ingest.rebuild_leading_features()` after the rollup (the §16.2
+  columns were NULL on every scheduled row since 2026-08-25), and
+  `RotationModelService.predict_today()` raises `FeaturesMissingError` when a
+  stored feature column is NULL for every sector on the latest date —
+  `--rotation-predict` exits 2, `publish()` publishes nothing. Sector
+  `atr_pct` is `Σ atr·w / Σ w` (it was divided by n twice: 1/5 of the truth);
+  `close_idx` is chained from `basket_return` (`flow_aggregation.chain_close_idx`)
+  instead of a raw price sum that jumped when a constituent failed to fetch.
+  `classify_regime()` fits on the daily VNINDEX series only — no fallback to
+  the hourly `macro_anchors` rows — and returns the last stored label unchanged
+  when that series is short or the market is shut (`utils.clock.closed_today`,
+  also checked by `publish()`); `model_version` says `hmm` or `heuristic`.
+  VNINDEX values outside 200–5,000 are dropped per value
+  (`macro_service.plausible_vnindex`) in the fetch, the carry-forward and the
+  feature service; `macro_vn_ret_5d` is a 5-session return, not 5 hourly rows.
+  Persistence is directional (BUY needs 3 sessions of inflow, SELL of outflow);
+  signals carry `model_run_id`. Contract: `/api/insight/daily`
+  `market_context.regime` gains `phrase`, and `market_context` gains
+  `unverified` — the notes from the new `analysis/verification.py`, printed
+  beside every ranker, regime and stealth number in the email and on Daily
+  Insight. No schema change; the stored history is repaired by
+  `scripts/repair_sector_data.py`.
+- **2026-09-25 (4) — The bench's ruler.** `analysis/bench.py` gains `nw_t`,
+  `staggered_book`, `book_stats`; `judge()` reads `excess_nw_t`, `ic_nw_t`,
+  `q_spread_nw_t`, `book` and `vnindex` (a same-dates book) instead of a naive t
+  and a VNINDEX constant. Scripts only; nothing in production imports it.
 - **2026-09-25 (2) — One buy rule on every surface; the 2.5 cutoff is gone.**
   `picks_universe_service.long_shortlist` (SMA200 gate → `_rank_key`) is the buy
   list for Daily Insight (`_select_top`), the 17:00 email (`snapshot.top_buys`
@@ -601,20 +629,24 @@ FRED + stooq + SBV/exchangerate.host  → macro_service  → macro_anchors
 
 ### 6.3 Feature & Model
 ```
-sector_flow_daily + macro_anchors
-  → flow_feature_service (lags, rolling z-scores, regime one-hot)
+sector_flow_daily (+ §16.2 leading features, rebuilt by the 16:00 job)
+  + macro_anchors (plausible VNINDEX only)
+  → flow_feature_service (lags, rolling z-scores)
   → rotation_model_service
-      ├── HMM regime classify → sector_regime
-      └── LightGBM lambdarank → sector ranking
-  → sector_signal_service → sector_signals
+      ├── HMM regime classify ← daily VNINDEX (vnstock) only → sector_regime
+      └── LightGBM lambdarank → sector ranking (refuses a NULL feature column)
+  → sector_signal_service → sector_signals (trading days only, model_run_id)
 ```
+Every output of this chain is on the **unverified** list
+(`analysis/verification.py`): no out-of-sample edge yet (review 2026-09-24 §4.2).
 
 ### 6.4 Publication
 ```
 sector_signals  →  /api/sectors/ranking
                 →  picks_universe_service  (per-ticker picks from signals)
                 →  trader_agent "Minh"     (in-process claude_agent_sdk)
-                →  generate_report.py       (union(DailyInsight, Ranker) merge
+                →  generate_report.py       (BUY = long_shortlist, verbatim;
+                                            AVOID = snapshot SELL ∪ ranker SELL
                                             + Expert Trader Memo → HTML + PDF)
                 →  smtplib → Gmail (REPORT_EMAIL_TO, comma-separated list)
 ```
@@ -627,8 +659,14 @@ HTML/PDF and skips the send.
 ## 7. MODELS
 
 ### Regime classifier
-- hmmlearn `GaussianHMM`, 4 states {risk_on, risk_off, rotation, chop}
-- Inputs: VNINDEX returns (1d/5d/20d), USDVND %chg, Brent %chg, US10Y level, gold %chg
+- hmmlearn `GaussianHMM`, 4 states {risk_on, risk_off, rotation, chop}, named
+  by mean 1d return rank — "rotation" measures no sector dispersion
+- Inputs **as published**: the daily VNINDEX series only — 1d and 5d return,
+  20d vol. `_features()` would take USDVND/Brent/US10Y/gold, but
+  `classify_regime()` has passed only VNINDEX since 2026-06-19, and since
+  2026-09-25 it never falls back to the hourly `macro_anchors` table
+- **Unverified**: replayed as published, "holds 5 sessions" read 0.69-0.85
+  against a realised 0.28-0.58 (review 2026-09-24 §4.1/7)
 
 ### Sector ranker
 - LightGBM `LGBMRanker` (lambdarank), group = day
@@ -636,7 +674,11 @@ HTML/PDF and skips the send.
 - Optional second head = classifier "did this sector enter breakout within 15 sessions?" (§16.4). Two-stage: ranker sorts by expected return, classifier filters noise.
 - Training window: rolling 2y, monthly retrain (flow regimes change slowly — CLAUDE.md §16.4).
 - Features: flow metrics + 1/3/5d lags, z-scored breadth, RS vs VNINDEX, ATR%, regime one-hot, prior-day rank, and the §16.2 leading features (`flow_z20`, `flow_z60`, `foreign_streak`, `foreign_hit_20d`, `stealth_score`, `flow_price_divergence`).
-- Persistence filter: ≥3 sessions of consistent flow sign.
+- Persistence filter: ≥3 sessions of net flow **in the trade's direction**
+  (inflow for BUY, outflow for SELL) — it accepted any run of equal signs
+  until 2026-09-25.
+- **Unverified**: walk-forward IC −0.010, no year significant (review
+  2026-09-24 §4.2).
 
 ### Stealth detector (§16.1)
 - A **score, not a conjunction**: ≥ `STEALTH_MIN_CONDITIONS` of 5 (default 4)
@@ -674,7 +716,7 @@ is the single source of truth for registration.
 |---|---|---|---|---|
 | 1 | `macro_ingest` | `0 * * * *` | `main.py --macro` | `MacroService.ingest_now()` |
 | 2 | `sector_intraday_flow` | `*/15 9-15 * * 1-5` | `main.py --intraday` | `SectorIngestService.ingest_intraday_now()` |
-| 3 | `sector_eod_rollup` | `0 16 * * 1-5` | `main.py --eod-rollup` | `SectorIngestService.rollup_to_daily()` |
+| 3 | `sector_eod_rollup` | `0 16 * * 1-5` | `main.py --eod-rollup` | `SectorIngestService.rollup_to_daily()` + `rebuild_leading_features()` (2026-09-25) |
 | 4 | `regime_classify` | `30 16 * * 1-5` | `main.py --regime` | `RotationModelService.classify_regime()` |
 | 5 | `rotation_predict` | `45 16 * * 1-5` | `main.py --rotation-predict` | `RotationModelService.predict_today()` |
 | 6 | `sector_signal_publish` | `0 17 * * 1-5` | `main.py --publish` → `generate_report.py` | `SectorSignalService.publish()` + unified-picks email |

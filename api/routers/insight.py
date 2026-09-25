@@ -192,11 +192,17 @@ def insight_daily():
         )
     finally:
         sess.close()
+    from analysis import verification
+    from analysis.regime import confidence_phrase
+
     regime = (
         {
             "date": regime_row.date,
             "label": regime_row.regime_label,
             "confidence": round(float(regime_row.confidence or 0), 3),
+            # The one renderer of this number (§25.2) -- the page used to print
+            # "Độ tin cậy 85%", which is neither what it measures nor validated.
+            "phrase": confidence_phrase(regime_row.confidence),
         }
         if regime_row else None
     )
@@ -206,10 +212,14 @@ def insight_daily():
 
     market_context = {
         "regime": regime,
+        # SECTOR counts from the ranker / §16.1 gate -- not the ticker list.
         "stealth_count": stealth_count,
         "buy_count": buy_count,
         "sell_count": sell_count,
         "sectors_covered": len(sector_ctx),
+        # What none of the above has: an out-of-sample test (review 2026-09-24
+        # §8 P0-6). The page prints these beside the numbers.
+        "unverified": verification.as_dict(),
     }
 
     generated_at = pd.Timestamp.now(tz="Asia/Ho_Chi_Minh").isoformat()

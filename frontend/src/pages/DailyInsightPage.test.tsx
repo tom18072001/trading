@@ -17,6 +17,8 @@ import {
   fmtPct,
   AgentReport,
   PickTable,
+  RegimeGauge,
+  CountTile,
 } from './DailyInsightPage';
 
 // ---------------- formatters ----------------
@@ -210,5 +212,28 @@ describe('PickTable', () => {
     expect(screen.getByText(/Stop-out/i)).toBeInTheDocument();
     expect(screen.getByText(/^Score$/)).toBeInTheDocument();
     expect(screen.getByText(/ATR%/)).toBeInTheDocument();
+  });
+});
+
+// ---------------- unverified sector signals (2026-09-25) ----------------
+
+describe('RegimeGauge', () => {
+  it('prints the backend phrase and says the label is unverified', () => {
+    const phrase = '~72% khả năng giữ 5 phiên tới — chưa kiểm chứng ngoài mẫu';
+    render(<RegimeGauge label="risk_on" confidence={0.72} phrase={phrase} buy={3} sell={1} />);
+    expect(screen.getByText(phrase)).toBeInTheDocument();
+    expect(screen.getByText(/Chưa kiểm chứng/)).toBeInTheDocument();
+  });
+
+  it('no longer tells the reader to attack or defend', () => {
+    const { container } = render(<RegimeGauge label="risk_on" confidence={0.9} buy={3} sell={0} />);
+    expect(container.textContent).not.toMatch(/Tư thế|Độ tin cậy/);
+  });
+});
+
+describe('CountTile', () => {
+  it('marks a sector count as unverified when given a note', () => {
+    render(<CountTile n={3} label="Ngành BUY" tone="buy" note="ranker chưa kiểm chứng" />);
+    expect(screen.getByText('Chưa kiểm chứng')).toBeInTheDocument();
   });
 });

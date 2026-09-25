@@ -236,3 +236,29 @@ in choppy tape, which it does. But it means:
 - `CONF_HORIZON` should be re-measured when the panel grows; 900 bars split
   three ways is 300 per cell, and §25.9 now wants it split by vol as well.
 
+### 25.11 The calibration was in sample — 2026-09-25
+
+Review 2026-09-24 §4.1/7 replayed the label the way it is published — refit
+weekly on the history available that day, filtered posterior, VNINDEX from the
+price panel — instead of scoring one fit over the whole panel, which is what
+§25.2-25.9 measured:
+
+- "holds 5 sessions" read **0.69-0.85**; the label held **0.28-0.58**;
+- Brier skill against the base rate: **−0.94 / −0.42 / −0.24 / −0.05** by year —
+  negative every year;
+- the label changed **33.8 times per 250 sessions**; the worst 10% of refits
+  re-labelled 93% of history;
+- after a `risk_on` day VNINDEX's next 20 sessions were **1.55% worse** than
+  after other days (t −1.7) — long `risk_on` / short `risk_off` loses.
+
+So the §25.2 finding "the high end needs no hedge" holds only in sample.
+Shipped: `confidence_phrase()` ends every reading with "chưa kiểm chứng ngoài
+mẫu" (the low-end hedge stays — it points the right way), the label is on the
+`analysis/verification.py` list, and every surface that printed a regime
+instruction ("size full weight", "no new BUYs", "Tư thế tấn công") prints the
+note instead. `classify_regime()` no longer falls back to the hourly
+`macro_anchors` rows: 2026-09-22's `risk_off 0.9961` was fitted on 1.82s.
+
+Scripts and numbers: `docs/reviews/ALGO_REVIEW_2026-09-24.md` §4,
+`docs/reviews/algo_review_2026-09-24/`.
+

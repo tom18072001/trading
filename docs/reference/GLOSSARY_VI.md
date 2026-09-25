@@ -26,10 +26,13 @@ trung bình từ thấp lên cao:
 > **Ba nhãn đó chưa từng tồn tại trong code.** Ghi lại đây để ai đọc bản cũ
 > nhận ra, thay vì im lặng xoá.
 
-Trong `chop`: tương quan giữa các mã/ngành tăng cao, không có "edge" bền vững →
-**bạn** nên giảm size và chỉ vào khi tín hiệu chất lượng cao. Lưu ý đây là lời
-khuyên cho người đọc, **không phải hành vi của máy**: không có dòng code nào
-siết lệnh khi gặp `chop` — nhãn được publish và in ra báo cáo, chỉ vậy.
+**Nhãn regime chưa kiểm chứng (2026-09-25).** Mô hình chỉ đọc VNINDEX (lợi
+suất 1 và 5 phiên, biến động 20 phiên); tên nhãn là cách gọi bốn trạng thái
+xếp theo lợi suất, không phải phép đo tâm lý hay phân hoá ngành. Replay ngoài
+mẫu: sau ngày `risk_on`, VNINDEX 20 phiên tới còn **thấp hơn** các ngày khác —
+nên **đừng** tăng/giảm tỷ trọng theo nhãn. Danh sách mua không phụ thuộc nhãn.
+(Bản trước khuyên "trong `chop` thì giảm size" — lời khuyên đó không có phép đo
+nào đứng sau.)
 
 **Confidence 0.50**: **Không phải** "model chắc bao nhiêu %". Từ 2026-08-24
 (`CLAUDE.md` §25.2) nó là **xác suất nhãn regime này còn giữ trong 5 phiên tới**
@@ -40,9 +43,10 @@ model tự tin mà vì model **sập**: feature chưa chuẩn hoá nên 3/4 stat
 covariance, chỉ còn một state sống → posterior 1.0 theo định nghĩa.
 
 Đọc thế nào: dưới **0.55** thì con số này **nói quá** — đo trên 900 phiên, mức
-"0.49" thực tế chỉ giữ được ~0.37. Đầu cao thì khớp (0.895 dự báo / 0.906 thực).
-Câu chữ trên báo cáo do `analysis.regime.confidence_phrase()` sinh, ví dụ
-"~65% khả năng giữ 5 phiên tới".
+"0.49" thực tế chỉ giữ được ~0.37. "Đầu cao thì khớp (0.895 / 0.906)" chỉ đúng
+**trong mẫu**: replay đúng cách publish (2026-09-25) thì mức 0.69-0.85 thực tế
+chỉ giữ 0.28-0.58. Câu chữ trên báo cáo do `analysis.regime.confidence_phrase()`
+sinh, ví dụ "~65% khả năng giữ 5 phiên tới — chưa kiểm chứng ngoài mẫu".
 
 ---
 
@@ -163,7 +167,8 @@ càng "trưởng thành". Trước 2026-08-23 cột này bằng 0 ở mọi dòn
 - ▼ **DOWN** / **Lean DOWN** (nghiêng xuống)
 - • **Neutral**
 
-**Confidence**: High / Med / Low — độ tin cậy của bias
+**Confidence**: High / Med / Low — độ lớn của tổng điểm bias. Điểm đó tự chế,
+**chưa từng được đo** — High không có nghĩa là đúng thường xuyên hơn.
 
 **Action types**:
 
@@ -217,8 +222,9 @@ càng "trưởng thành". Trước 2026-08-23 cột này bằng 0 ở mọi dòn
 
 ## Tóm gọn triết lý báo cáo
 
-> Trong regime **`chop`** → không gồng lệnh, giảm size, chỉ vào khi tín hiệu
-> chất lượng cao. Đây là việc **bạn** làm; máy không tự siết (xem §1).
+> Nhãn regime, BUY/SELL ngành và stealth đều **chưa kiểm chứng** (2026-09-25,
+> `analysis/verification.py`) — đọc như mô tả tape, không đổi tỷ trọng theo
+> chúng. Danh sách mua là một luật riêng, đo được (xem §26.9 của `CLAUDE.md`).
 >
 > Với stealth, tính đến 2026-08-24: gate §16.1 **chưa thắng được base rate**
 > (§16.14), nên `ACCUMULATE` đọc như danh sách theo dõi. Điều kiện duy nhất từng

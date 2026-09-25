@@ -17,6 +17,10 @@ def test_feature_service_builds_panel(daily_panel):
 
 
 def test_rotation_predict_today(daily_panel):
+    # The scheduled order since 2026-09-25: rollup -> leading features -> predict.
+    # predict_today refuses a session whose feature columns were never computed.
+    from services.fast_ingest import rebuild_leading_features
+    rebuild_leading_features(daily_panel)
     df = RotationModelService(daily_panel).predict_today()
     if df.empty:
         pytest.skip("not enough rows")
@@ -26,6 +30,8 @@ def test_rotation_predict_today(daily_panel):
 
 
 def test_signal_publish_writes_rows(daily_panel):
+    from services.fast_ingest import rebuild_leading_features
+    rebuild_leading_features(daily_panel)
     svc = SectorSignalService(daily_panel)
     out = svc.publish()
     if out.empty:
@@ -55,6 +61,17 @@ def test_risk_stoploss_returns_list(daily_panel):
     assert isinstance(breaches, list)
 
 
-def test_regime_classify_fallback(macro_session):
+def test_regime_classify(macro_session, monkeypatch):
+    # The daily VNINDEX fetch is the ONLY input since 2026-09-25 (the hourly
+    # macro_anchors fallback is gone -- tests/test_review_20260924.py). Stub it:
+    # this test used to reach vnstock over the network, or not, by luck.
+    import numpy as np
+    import pandas as pd
+    import services.rotation_model_service as rms_mod
+
+    idx = pd.bdate_range("2025-01-02", periods=260)
+    px = 1250 * np.cumprod(1 + np.random.default_rng(4).normal(0.0003, 0.01, len(idx)))
+    monkeypatch.setattr(rms_mod, "fetch_vnindex_daily",
+                        lambda days=180: pd.Series(px, index=idx, name="vnindex"))
     rec = RotationModelService(macro_session).classify_regime()
     assert rec.regime_label in {"risk_on", "risk_off", "rotation", "chop"}

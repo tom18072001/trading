@@ -21,6 +21,29 @@ log = logging.getLogger(__name__)
 # since 2020). Anything below it is a wrong symbol, not a crash — which is
 # exactly how KBS's ~1.79 answer got written into 613 of 623 rows.
 VNINDEX_MIN_PLAUSIBLE = 200.0
+# ... nor near this one (all-time high ~1,900). The same band the backtest
+# benchmark applies (`backtest_service._load_benchmark`).
+VNINDEX_MAX_PLAUSIBLE = 5000.0
+
+
+def is_plausible_vnindex(v) -> bool:
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return False
+    return VNINDEX_MIN_PLAUSIBLE <= v <= VNINDEX_MAX_PLAUSIBLE
+
+
+def plausible_vnindex(values: pd.Series) -> pd.Series:
+    """`values` with every entry that cannot be an index level dropped.
+
+    Per value, not per series (review 2026-09-24 §4.1/4): a median check
+    passes a series that is mostly right and partly garbage, and one garbage
+    bar is enough to publish a regime label -- 2026-09-22's `risk_off 0.9961`
+    was fitted on rows of 1.82.
+    """
+    v = pd.to_numeric(values, errors="coerce")
+    return v[(v >= VNINDEX_MIN_PLAUSIBLE) & (v <= VNINDEX_MAX_PLAUSIBLE)]
 
 
 def fetch_vnindex_daily(days: int = 180) -> pd.Series:
@@ -48,10 +71,15 @@ def fetch_vnindex_daily(days: int = 180) -> pd.Series:
                 continue
             df = df.copy()
             df["time"] = pd.to_datetime(df["time"])
-            s = df.set_index("time")["close"].astype(float).sort_index()
-            if s.median() < VNINDEX_MIN_PLAUSIBLE:
-                log.warning("[macro] source %s returned a median of %.2f for VNINDEX — "
-                            "not an index level, ignoring", source or "default", s.median())
+            raw = df.set_index("time")["close"].sort_index()
+            s = plausible_vnindex(raw).astype(float)
+            dropped = int(raw.notna().sum()) - len(s)
+            if dropped:
+                log.warning("[macro] source %s: %d of %d VNINDEX bars are not an index "
+                            "level (outside %.0f-%.0f), dropped", source or "default",
+                            dropped, int(raw.notna().sum()),
+                            VNINDEX_MIN_PLAUSIBLE, VNINDEX_MAX_PLAUSIBLE)
+            if s.empty:
                 continue
             s.name = "vnindex"
             return s
@@ -91,10 +119,13 @@ class MacroService:
         given a range, so this is not a fix for a wrong source — it is a second
         chance when the first returns nothing.
 
-        ponytail: the 613 existing rows are left as-is. Nothing reads this
-        column — `classify_regime` overwrites `macro_df` with
-        `fetch_vnindex_daily()` before use — so a backfill would be tidying,
-        not repair. Backfill it if anything ever starts reading it.
+        2026-09-25 correction: "nothing reads this column" was wrong. When
+        `fetch_vnindex_daily()` failed, `classify_regime` fitted the HMM on
+        these rows -- 2026-09-22's `risk_off 0.9961` came from the 1.82s -- and
+        `flow_feature_service` reads them for `macro_vn_ret_5d` and the RS
+        benchmark (review 2026-09-24 §4.1/4). The regime no longer falls back
+        to this table, every reader filters with `plausible_vnindex()`, and
+        `scripts/repair_sector_data.py` NULLs the bad rows.
         """
         from datetime import timedelta
 
@@ -112,7 +143,7 @@ class MacroService:
                 )
                 if df is not None and not df.empty:
                     v = float(df["close"].iloc[-1])
-                    if v >= VNINDEX_MIN_PLAUSIBLE:
+                    if is_plausible_vnindex(v):
                         return v
                     log.warning("[macro] source %s returned %.2f for VNINDEX — "
                                 "not an index level, ignoring", source or "default", v)
@@ -166,9 +197,15 @@ class MacroService:
                 return fetched
             return getattr(prev, attr, None) if prev is not None else None
 
+        def _cf_vnindex(fetched: Optional[float]) -> Optional[float]:
+            # Carry forward only a value that could be an index level: the one
+            # bad read of 2026-04-16 was copied into 613 rows this way.
+            v = _cf(fetched, "vnindex")
+            return v if is_plausible_vnindex(v) else None
+
         row = MacroAnchor(
             time=datetime.utcnow(),
-            vnindex=_cf(self._fetch_vnindex(), "vnindex"),
+            vnindex=_cf_vnindex(self._fetch_vnindex()),
             usdvnd=_cf(self._fetch_yahoo("USDVND=X"), "usdvnd"),
             brent=_cf(self._fetch_yahoo("BZ=F"), "brent"),
             us10y=_cf(self._fetch_fred("DGS10"), "us10y"),

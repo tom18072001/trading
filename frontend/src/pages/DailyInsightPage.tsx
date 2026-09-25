@@ -71,15 +71,20 @@ const REGIME_VN: Record<string, string> = {
   risk_on: 'Risk-On', rotation: 'Luân chuyển', chop: 'Đi ngang', risk_off: 'Risk-Off',
 };
 
-function RegimeGauge({ label, confidence, buy, sell }: {
-  label: string; confidence: number; buy: number; sell: number;
+// 2026-09-25 (review 2026-09-24 §8 P0-6): the gauge printed "Độ tin cậy 85%"
+// and a "Tư thế tấn công / phòng thủ" chip -- an instruction hung on a label
+// with no out-of-sample edge (after a risk_on day VNINDEX did WORSE over the
+// next 20 sessions). It now prints the backend's phrase for the number (the
+// one renderer, analysis/regime.py) and says the label is unverified.
+export function RegimeGauge({ label, confidence, phrase, note, buy, sell }: {
+  label: string; confidence: number; phrase?: string; note?: string;
+  buy: number; sell: number;
 }) {
   const base = REGIME_BASE[label] ?? 0.5;
   const tilt = clamp(((buy - sell) / Math.max(buy + sell, 1)) * 0.15, -0.15, 0.15);
   const score = clamp(base + tilt, 0.05, 0.95);
   const needleDeg = 180 - score * 180; // 180°(left/red) → 0°(right/green)
   const n = polar(100, 100, 72, needleDeg);
-  const defensive = label === 'risk_off' || label === 'chop';
 
   return (
     <div className="flex flex-col items-center justify-center">
@@ -94,17 +99,14 @@ function RegimeGauge({ label, confidence, buy, sell }: {
         <div className="font-display text-[19px] font-bold text-hi leading-tight">
           {REGIME_VN[label] ?? (label || '—')}
         </div>
-        <div className="text-[11px] text-mid font-mono mt-0.5">
-          Độ tin cậy {((confidence ?? 0) * 100).toFixed(0)}%
+        <div className="text-[11px] text-mid mt-0.5 leading-snug">
+          {phrase ?? `~${((confidence ?? 0) * 100).toFixed(0)}% khả năng giữ nhãn`}
         </div>
         <div
-          className={`inline-block mt-2 px-2.5 py-1 rounded-md text-[10.5px] font-semibold ${
-            defensive
-              ? 'bg-warn/[0.12] text-warn border border-warn/30'
-              : 'bg-buy/[0.13] text-buy border border-buy/30'
-          }`}
+          className="inline-block mt-2 px-2.5 py-1 rounded-md text-[10.5px] font-semibold bg-warn/[0.12] text-warn border border-warn/30"
+          title={note}
         >
-          {defensive ? 'Tư thế phòng thủ' : 'Tư thế tấn công'}
+          Chưa kiểm chứng — không đổi tỷ trọng theo nhãn
         </div>
       </div>
     </div>
@@ -114,7 +116,9 @@ function RegimeGauge({ label, confidence, buy, sell }: {
 // ===================================================================
 //  Count tiles  (NÊN MUA / NÊN BÁN / TÍCH LUỸ NGẦM)
 // ===================================================================
-function CountTile({ n, label, tone }: { n: number; label: string; tone: 'buy' | 'sell' | 'warn' }) {
+export function CountTile({ n, label, tone, note }: {
+  n: number; label: string; tone: 'buy' | 'sell' | 'warn'; note?: string;
+}) {
   const map = {
     buy:  { c: 'text-buy',  wash: 'rgba(51,212,154,.10)' },
     sell: { c: 'text-sell', wash: 'rgba(255,93,115,.10)' },
@@ -127,6 +131,7 @@ function CountTile({ n, label, tone }: { n: number; label: string; tone: 'buy' |
     >
       <div className="section-label">{label}</div>
       <div className={`font-display text-[42px] font-bold leading-none mt-3 tabular ${map.c}`}>{n}</div>
+      {note && <div className="text-[10.5px] text-mid mt-2 leading-snug" title={note}>Chưa kiểm chứng</div>}
     </div>
   );
 }
@@ -985,14 +990,21 @@ export default function DailyInsightPage() {
             <RegimeGauge
               label={mc.regime?.label || 'chop'}
               confidence={mc.regime?.confidence ?? 0}
+              phrase={mc.regime?.phrase}
+              note={mc.unverified?.regime}
               buy={mc.buy_count ?? 0}
               sell={mc.sell_count ?? 0}
             />
           </div>
+          {/* SECTOR counts (ranker / §16.1 gate) -- "Nên mua" here read as the
+              ticker list, which is a different rule (2026-09-25). */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-[22px]">
-            <CountTile n={mc.buy_count ?? 0} label="Nên mua" tone="buy" />
-            <CountTile n={mc.sell_count ?? 0} label="Nên bán" tone="sell" />
-            <CountTile n={mc.stealth_count ?? 0} label="Tích luỹ ngầm" tone="warn" />
+            <CountTile n={mc.buy_count ?? 0} label="Ngành BUY" tone="buy"
+              note={mc.unverified?.ranker ?? 'chưa kiểm chứng'} />
+            <CountTile n={mc.sell_count ?? 0} label="Ngành SELL" tone="sell"
+              note={mc.unverified?.ranker ?? 'chưa kiểm chứng'} />
+            <CountTile n={mc.stealth_count ?? 0} label="Ngành tích luỹ ngầm" tone="warn"
+              note={mc.unverified?.stealth ?? 'chưa kiểm chứng'} />
           </div>
         </section>
       )}

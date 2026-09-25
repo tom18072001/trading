@@ -136,6 +136,7 @@ def main(argv: list[str] | None = None) -> None:
     # universe from vnstock HOSE Listing and computes indicators in-memory.
     from config import SECTORS  # noqa: E402
     from analysis.regime import confidence_phrase as conf_phrase  # noqa: E402
+    from analysis import verification as unverified  # noqa: E402
     from services.picks_universe_service import get_picks_universe  # noqa: E402
     _universe_snap = get_picks_universe().get_snapshot()
     print(f"[report] universe snapshot as_of={_universe_snap.as_of} tickers={len(_universe_snap.tickers)} "
@@ -393,18 +394,25 @@ def main(argv: list[str] | None = None) -> None:
                 f'<img class="chart-img-sm" src="data:image/png;base64,{b64}"></div>\n')
 
     # ========== NEW SECTION BUILDERS ==========
+    # 2026-09-25: these were four trading instructions ("size full weight on
+    # ACCUMULATE", "no new BUYs, prefer cash") hung on a label with no
+    # out-of-sample edge -- after a risk_on day VNINDEX did WORSE over the next
+    # 20 sessions (review 2026-09-24 §4.1/7) -- and they described inputs the
+    # model never sees: it reads VNINDEX only, no FX, breadth or foreign flow.
+    # Now they say what the label is, and `unverified.REGIME` what it is not.
     REGIME_TEXT = {
-        "risk_on":  "Risk-on regime: VNINDEX momentum + USD/VND stable + foreign flow persistent. Lean long the top-ranked inflow sectors, size full weight on ACCUMULATE triggers, trail stops loosely.",
-        "risk_off": "Risk-off regime: broad breadth damage, foreign selling, macro pressure (USD/VND weak or US10Y spiking). Cut gross exposure, no new BUYs, only defensive adds on oversold Dầu khí / Ngân hàng, prefer cash.",
-        "rotation": "Rotation regime: index grinding sideways, sector dispersion high. This is the stealth-hunter regime — trade the inflow/outflow divergence, not the index.",
-        "chop":     "Chop regime: no persistent edge, correlation elevated, reduce size, wait for a clean break of regime before new full entries. Stealth signals are most valuable here.",
+        "risk_on":  "Trạng thái HMM có lợi suất VNINDEX trung bình cao nhất (mô hình chỉ đọc VNINDEX).",
+        "rotation": "Trạng thái HMM có lợi suất VNINDEX trung bình cao thứ hai — tên 'rotation' là nhãn, mô hình không đo phân hoá ngành.",
+        "chop":     "Trạng thái HMM có lợi suất VNINDEX trung bình thấp thứ hai (mô hình chỉ đọc VNINDEX).",
+        "risk_off": "Trạng thái HMM có lợi suất VNINDEX trung bình thấp nhất (mô hình chỉ đọc VNINDEX).",
     }
 
     def build_regime_banner():
         lab = (regime.get("regime_label") or "chop").lower()
         klass = lab if lab in REGIME_TEXT else "chop"
         narrative = REGIME_TEXT.get(klass, REGIME_TEXT["chop"])
-        narrative = f"{conf_phrase(regime.get('confidence'))} • {narrative}"
+        narrative = (f"{conf_phrase(regime.get('confidence'))} • {narrative} "
+                     f"<b>{unverified.REGIME}</b> Danh sách mua không phụ thuộc nhãn này.")
         return klass, klass.upper().replace("_", "-"), narrative
 
     REGIME_CLASS, REGIME_LABEL, REGIME_NARRATIVE = build_regime_banner()
@@ -471,18 +479,19 @@ def main(argv: list[str] | None = None) -> None:
             )
         # stealth narrative
         stealth_sec = [c for c, d in flow_d.items() if (d.get("flow_z20") or 0) >= 1.0 and (d.get("foreign_hit_20d") or 0) >= 0.6]
+        # Two of the five §16.1 conditions -- a radar, not the gate (the gate's
+        # own output is `accumulation_age`, in the stealth table below).
         if stealth_sec:
             names = [code2name.get(c, c) for c in stealth_sec]
             parts.append(
-                f"<b>Stealth radar ({len(stealth_sec)} sector):</b> {', '.join(names)} — flow z20 ≥ +1.0 "
-                f"và foreign hit-rate ≥ 60% (doctrine §16.1). Đây là pha 'gốc': tiền vào âm thầm trước tin."
+                f"<b>Stealth radar ({len(stealth_sec)} ngành):</b> {', '.join(names)} — flow z20 ≥ +1,0 "
+                f"và foreign hit-rate ≥ 60% (2 trong 5 điều kiện §16.1). {unverified.STEALTH}"
             )
         else:
-            parts.append("Stealth radar: chưa sector nào đạt đủ 5 điều kiện §16.1 hôm nay — chờ tín hiệu trưởng thành, không fomo vào cành cao.")
-        # regime bridge
+            parts.append("Stealth radar: không ngành nào có flow z20 ≥ +1,0 và foreign hit-rate ≥ 60% hôm nay.")
+        # regime bridge -- a label, not an instruction (2026-09-25)
         parts.append(
-            f"Trong bối cảnh HMM regime = <b>{REGIME_LABEL}</b>, "
-            f"ưu tiên {('full-size ACCUMULATE trên top-rank' if REGIME_CLASS=='risk_on' else 'giảm gross exposure, chỉ cược vào stealth chất lượng' if REGIME_CLASS in ('risk_off','chop') else 'đánh cặp long-short theo divergence')}."
+            f"HMM regime = <b>{REGIME_LABEL}</b> ({unverified.TAG} — không đổi tỷ trọng theo nhãn này)."
         )
         return "<br><br>".join(parts)
 
@@ -587,13 +596,16 @@ def main(argv: list[str] | None = None) -> None:
             c3 = br is not None and br >= 0.4   # simplified "breadth rising"
             total = sum(1 for c in (c1,c2,c3) if c)
             if total == 0: continue
+            # 3 simplified conditions, not the §16.1 gate -- the gate's verdict
+            # is `accumulation_age` (column "Accum. Age"). Neither has an edge
+            # yet (§16.14), so neither is labelled as a buy (2026-09-25).
             if c1 and c2 and c3:
-                status, sclass = "GỐC (ACCUMULATE)", "tag tag-accum"
+                status, sclass = "3/3 — watchlist", "tag tag-accum"
                 count += 1
             elif total == 2:
-                status, sclass = "PRE-STEALTH (watch)", "tag tag-watch"
+                status, sclass = "2/3", "tag tag-watch"
             else:
-                status, sclass = "early signal", "tag tag-hold"
+                status, sclass = "1/3", "tag tag-hold"
             rows.append(
                 f"<tr><td class='sym'>{nm}</td>"
                 # 2026-08-22: z20 was the only column here without a None guard,
@@ -610,7 +622,7 @@ def main(argv: list[str] | None = None) -> None:
                 f"<td><span class='{sclass}'>{status}</span></td></tr>"
             )
         if not rows:
-            rows.append("<tr><td colspan='7' class='mut'>Không sector nào đạt tiêu chí stealth hôm nay. Giữ tiền, chờ tín hiệu.</td></tr>")
+            rows.append("<tr><td colspan='7' class='mut'>Không ngành nào đạt điều kiện nào trong 3 điều kiện hôm nay.</td></tr>")
         return "".join(rows), count
 
     STEALTH_ROWS, NUM_STEALTH = build_stealth_rows()
@@ -805,35 +817,38 @@ def main(argv: list[str] | None = None) -> None:
         "không phải tín hiệu bán. Mua ATO phiên sau, bán ATO ngày thoát. "
         "<b>Chi phí thật:</b> phí 0,15%/chiều + thuế bán 0,1% + trượt giá 0,3%/chiều "
         "≈ 1,00%/vòng — xoay vòng 20 phiên tốn ~12,6%/năm, 40 phiên ~6,3%/năm. "
-        "<b>Price band:</b> HOSE ±7%, HNX ±10%, UPCoM ±15%; nếu basket chạm trần, skip fill ngày đó. "
-        "<b>FOL:</b> các mã cạn room ngoại (room &lt; 3%) giảm trọng số foreign_net 0.5×. "
-        "<b>ATR stops:</b> mặc định 1.8×ATR20 cho BUY, 2.5×ATR20 cho ACCUMULATE (wider). "
-        "<b>Kill-switch:</b> nếu sector_risk_sentinel kích hoạt liên tiếp 3 lần trong phiên, "
-        "đặt cờ config.trading_halt = true — dừng toàn bộ ACCUMULATE mới. "
-        "<b>ETF rebalance mask:</b> zero-out foreign_net vào ngày HOSE/ETF review để tránh nhiễu. "
-        "<b>Max concurrent:</b> 4 ACCUMULATE + 3 BUY + 0 short cash (short chỉ qua VN30F1M)."
+        "<b>Không stop-loss</b> cho danh sách mua (Tom, §26.10): thoát theo cửa sổ 20-40 phiên; "
+        "range bán ở bản theo dõi 17:30 là tham chiếu, không phải lệnh. "
+        "<b>Price band:</b> HOSE ±7%, HNX ±10%, UPCoM ±15%; phiên chạm trần/sàn có thể không khớp. "
+        "<b>Kill-switch:</b> nút trên Daily Insight (hoặc TRADING_HALT=1) chuyển mọi tín hiệu ngành thành HOLD. "
+        f"<b>Tín hiệu ngành:</b> {unverified.RANKER} {unverified.STEALTH} "
+        "Short cash không làm được ở VN (chỉ qua VN30F1M)."
+        # 2026-09-25: removed "FOL: ... giảm trọng số 0.5×" and "ETF rebalance
+        # mask" -- §18.2/8 and §18.1/2 are still open, the system does neither --
+        # and "ATR stops 1.8×/2.5×" and "4 ACCUMULATE + 3 BUY", sizing rules
+        # §16.14 says not to trust and a stop Tom removed.
     )
 
     # ----- Next-session game plan -----
     def build_game_plan():
         items = []
-        # 1. Regime guidance
-        items.append(f"<li>Regime = <b>{REGIME_LABEL}</b>. {('Giữ nguyên exposure' if REGIME_CLASS=='risk_on' else 'Giảm gross, chỉ đánh stealth chất lượng' if REGIME_CLASS in ('risk_off','chop') else 'Đánh cặp long-short theo divergence')}.</li>")
-        # 2. Top BUY action
+        # 1. Regime -- a label, not guidance (2026-09-25)
+        items.append(f"<li>Regime = <b>{REGIME_LABEL}</b> ({unverified.TAG}) — không đổi tỷ trọng theo nhãn.</li>")
+        # 2. Top BUY -- the rule's #1, with its window, no stop (§26.10)
         if buys:
             b = buys[0]
-            stop, target, _ = compute_stop_target(b)
-            items.append(f"<li>BUY ưu tiên <b>{b['sym']}</b> ({b['sector']}): mua quanh {b['close']:,.0f}, stop {('{:,.0f}'.format(stop) if stop else 'BB lower')}, target {('{:,.0f}'.format(target) if target else 'BB upper')}. Size = 1× vol-target.</li>")
-        # 3. Stealth candidates
-        if NUM_STEALTH > 0:
-            items.append(f"<li>Thêm {NUM_STEALTH} stealth ACCUMULATE (size 1.5× vol-target, stop 2.5×ATR). Đây là mua gốc — chấp nhận đi ngang 2-4 tuần trước break.</li>")
+            items.append(f"<li>#1 theo luật chung: <b>{b['sym']}</b> ({b['sector']}), mua ATO quanh {b['close']:,.0f}, "
+                         f"giữ 20-40 phiên, bán ATO ngày thoát — không stop.</li>")
         else:
-            items.append("<li>Chưa có stealth nào đủ điều kiện — giữ tiền mặt, chờ z20 crossover.</li>")
+            items.append("<li>Không mã nào trên SMA200 — phần vốn định mua: ETF theo chỉ số thay vì tiền mặt.</li>")
+        # 3. Stealth -- a watchlist (§16.14)
+        if NUM_STEALTH > 0:
+            items.append(f"<li>{NUM_STEALTH} ngành đủ 3/3 điều kiện stealth rút gọn — watchlist, {unverified.TAG}, không phải lệnh.</li>")
         # 4. Exit items
         if sells:
             items.append(f"<li>Thoát / tránh: {', '.join(s['sym'] for s in sells[:5])}. Không bắt đáy cho đến khi breadth phục hồi.</li>")
         # 5. Risk oversight
-        items.append("<li>Kiểm tra kill-switch và cửa sổ bán của các vị thế trong sổ (bản theo dõi 17:30) trước 09:00 sáng mai. Đừng full-margin khi regime = chop.</li>")
+        items.append("<li>Kiểm tra kill-switch và cửa sổ bán của các vị thế trong sổ (bản theo dõi 17:30) trước 09:00 sáng mai.</li>")
         # 6. News radar
         items.append("<li>Mở News &amp; Catalyst section ngay đầu phiên, cross-check tin 48h trước khi đặt lệnh.</li>")
         return "".join(items)
@@ -1245,18 +1260,10 @@ def main(argv: list[str] | None = None) -> None:
 
         # Opening paragraph — market view.
         conf_txt = conf_phrase(regime_conf)
-        if regime_label == "risk_on":
-            stance = (f"Tape đang <b>risk-on</b> ({conf_txt}). Ưu tiên long theo dòng tiền, "
-                      "danh sách mua dùng như bình thường.")
-        elif regime_label == "risk_off":
-            stance = (f"Tape đang <b>risk-off</b> ({conf_txt}). Giảm gross exposure, "
-                      "ưu tiên bảo toàn vốn, vào danh sách mua với size nhỏ.")
-        elif regime_label == "rotation":
-            stance = (f"Tape đang <b>rotation</b> ({conf_txt}). Tránh VNINDEX beta trần, "
-                      "chơi spread giữa sector inflow và outflow.")
-        else:
-            stance = (f"Tape đang <b>chop</b> ({conf_txt}). Không có persistent edge; "
-                      "danh sách mua với 0.5× size.")
+        # One sentence for every label (2026-09-25): the four stances resized
+        # the buy list by a label with no out-of-sample edge (§4.1/7).
+        stance = (f"Regime HMM: <b>{regime_label}</b> ({conf_txt}). {unverified.REGIME} "
+                  "Danh sách mua giữ nguyên luật và cỡ lệnh ở mọi nhãn.")
 
         # Flow leaders / laggards.
         if sector_stats:
@@ -1332,7 +1339,7 @@ def main(argv: list[str] | None = None) -> None:
         body = (
             f"<p>{stance} {flow_bridge}</p>"
             f"<p>{consensus_line}</p>"
-            + ("".join(pick_blocks) if pick_blocks else "<p class='mut'>Hôm nay không có pick BUY nào đủ điều kiện — giữ tiền, chờ regime mới.</p>")
+            + ("".join(pick_blocks) if pick_blocks else "<p class='mut'>Không mã nào trên SMA200 hôm nay — phần vốn định mua: ETF theo chỉ số thay vì tiền mặt.</p>")
             + avoid_line
             + link_line
         )
@@ -1406,6 +1413,7 @@ def main(argv: list[str] | None = None) -> None:
         # AVOID block
         if UNIFIED_SELLS:
             lines.append("— NÊN TRÁNH / CẮT —")
+            lines.append(f"  ({unverified.RANKER})")
             for i, p in enumerate(UNIFIED_SELLS[:5], 1):
                 src_label, _ = SOURCE_LABELS.get(p["source"], (p["source"], ""))
                 lines.append(f"{i}. {p['symbol']} ({p['sector_name']}) — nguồn {src_label}")

@@ -100,12 +100,24 @@ def confidence_phrase(conf: float | None) -> str:
     the mean Brier (0.1464 vs 0.1540 isotonic, 0.1479 Platt) and each wins some
     folds. A calibrator that loses out of sample is a fitted layer that costs
     money, so this stays a sentence.
+
+    **2026-09-25 -- every level carries a caveat now, not only the low end.**
+    The calibration above was measured on a fit over the WHOLE panel, i.e. in
+    sample. Replayed the way the label is published (weekly refit, filtered
+    posterior), "holds 5 sessions" read 0.69-0.85 against a realised 0.28-0.58
+    and the Brier skill was negative in every year (review 2026-09-24
+    §4.1/7). The low-end hedge stays because it points the right way; the
+    suffix says the number has not been validated out of sample at all.
     """
     c = float(conf or 0.0)
     base = f"~{c:.0%} khả năng giữ {CONF_HORIZON} phiên tới"
     if c < 0.55:
-        return f"{base} (thang dưới thường lạc quan quá — thực tế còn thấp hơn)"
-    return base
+        base = f"{base} (thang dưới thường lạc quan quá — thực tế còn thấp hơn)"
+    return f"{base} — {UNVERIFIED_SUFFIX}"
+
+
+#: See `analysis/verification.py` -- the regime label is on that list.
+UNVERIFIED_SUFFIX = "chưa kiểm chứng ngoài mẫu"
 
 
 # Labels ordered by mean 1d return, ascending — index i is the i-th coldest

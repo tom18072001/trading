@@ -167,7 +167,10 @@ median), and the distribution guard (§18.5/22). All three are still on the
 
 ## 5. Regime classifier
 
-`regime_classify` job (16:30 §8). Gaussian HMM over macro + VNINDEX returns →
+`regime_classify` job (16:30 §8). Gaussian HMM over the **daily VNINDEX series
+only** (1d and 5d return, 20d vol — `classify_regime()` passes nothing else, and
+since 2026-09-25 it publishes nothing rather than fall back to the hourly
+`macro_anchors` rows, or on a day without a session) →
 one of exactly four labels — `analysis/regime.py:_LABELS_BY_RETURN` =
 `["risk_off", "chop", "rotation", "risk_on"]`, ordered by mean 1d return so the
 mapping stays deterministic across refits. The label plus confidence is written
@@ -177,8 +180,10 @@ to `sector_regime(date, regime_label, confidence)`.
 §25.2) it is **P(this label still holds in `CONF_HORIZON` = 5 sessions)** — the
 filtered posterior of the last bar, propagated through the transition matrix and
 summed over every state sharing the label. Live range 0.46–0.91. Below 0.55 it
-overstates survival, so `confidence_phrase()` appends a hedge there and nowhere
-else. Filtered (`predict_proba(X[:t+1])[-1]`), not smoothed, so yesterday's
+overstates survival, so `confidence_phrase()` appends a hedge there. **Every**
+reading also ends "chưa kiểm chứng ngoài mẫu" (2026-09-25): the calibration was
+measured in sample, and replayed as published 0.69-0.85 held 0.28-0.58
+(`CLAUDE.md` §25, review 2026-09-24 §4.1/7). Filtered (`predict_proba(X[:t+1])[-1]`), not smoothed, so yesterday's
 published label cannot change tonight (closes §20.3 P1-4).
 
 `fit()` **refuses a collapsed fit** (>1 empty state) and falls back rather than
@@ -229,10 +234,17 @@ the stealth events, and the regime label, then assigns per-sector actions:
 | Action     | Trigger                                              | Sizing                          | Stop           |
 |------------|------------------------------------------------------|---------------------------------|----------------|
 | ACCUMULATE | §16.1 gate latched                                   | 1.5× vol-target (§16.9)         | 2.5 × ATR20    |
-| BUY        | Ranker top-3 AND price confirming                     | 1.0× vol-target                 | 2.0 × ATR20    |
+| BUY        | Ranker top-`MAX_LONG_SECTORS` AND net **inflow** ≥ 3 sessions | 1.0× vol-target                 | 2.0 × ATR20    |
 | TRIM       | `return_20d > 90th pctile` AND `flow_z20` rolling over | cut half                        | move stop up   |
-| SELL       | `flow_z20 < 0` AND price still high                   | full exit                       | —              |
+| SELL       | Ranker bottom-`MAX_SHORT_SECTORS` AND net **outflow** ≥ 3 sessions (`ALLOW_SHORT_SIGNALS`) | full exit                       | —              |
 | HOLD       | default                                               | no change                       | —              |
+
+None of these actions has an out-of-sample edge (walk-forward IC −0.01, review
+2026-09-24 §4.2): they are on the `analysis/verification.py` list and printed
+"chưa kiểm chứng". Persistence is directional since 2026-09-25 — it accepted
+any run of equal signs, and 24 of 96 BUYs had followed three sessions of
+outflow. No signal is published on a day without a session, or when a stored
+feature column is NULL for every sector (`FeaturesMissingError`).
 
 **Sizing floor (§18.2/11).** Individual ATR sizing ignores that banks +
 brokers + realty move together. The planned fix routes every position through

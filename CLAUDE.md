@@ -58,18 +58,21 @@ Record-count impact vs legacy: **~98% reduction** (15 sectors × ~12 features vs
 | Job | Cron | Purpose |
 |---|---|---|
 | sector_intraday_flow | */15 9-15 * * 1-5 | Proxy OHLCV + foreign flow → `sector_flow_ts` |
-| sector_eod_rollup | 0 16 * * 1-5 | Daily rollup |
-| macro_ingest | 0 * * * * | Macro anchors hourly |
-| regime_classify | 30 16 * * 1-5 | HMM regime label |
+| sector_eod_rollup | 0 16 * * 1-5 | Daily rollup **+ §16.2 leading features** (2026-09-25 — trước đó chỉ đường Refresh của UI tính, nên từ 2026-08-25 ranker chấm trên số 0) |
+| macro_ingest | 0 * * * * | Macro anchors hourly (VNINDEX ngoài 200-5.000 bị bỏ, không carry-forward) |
+| regime_classify | 30 16 * * 1-5 | HMM regime label — **chỉ từ chuỗi VNINDEX ngày**; thiếu chuỗi hoặc không có phiên thì giữ nhãn cũ, không publish |
 | rotation_train | 0 2 * * * | Nightly LightGBM ranker retrain |
 | rotation_predict | 45 16 * * 1-5 | Next-day sector ranking |
-| sector_signal_publish | 0 17 * * 1-5 | Write signals + Gmail briefing |
+| sector_signal_publish | 0 17 * * 1-5 | Write signals + Gmail briefing — không publish ngày không có phiên, hay khi một cột feature NULL toàn bộ |
 | sector_risk_sentinel | */30 9-15 * * 1-5 | Stop-loss alerts on held sectors |
 | daily_watch | 30 17 * * 1-5 | **(2026-09-16)** Module `daily_watch/`: báo cáo sổ + đề xuất mua + đề xuất bán (cửa sổ 20-40 phiên + range tham chiếu, **không stop-loss**) → `report/watch_<date>.md` + kho `data/watch/<date>.json`. Theo dõi cả mã đang nắm **ngoài universe**. Không gửi email. Skill `.claude/skills/theo-doi-hang-ngay/` đọc output, **không** tự phân tích lại |
 
 > **2026-09-16 — task thứ 9, và một chi tiết đáng biết về 8 task cũ.** Trigger
 > của cả 8 job trên được đăng ký là `-Daily`, dù cột Cron ghi `1-5`; nên chúng
-> **có** chạy cuối tuần, vô hại vì không có phiên mới. `daily_watch` đăng ký
+> **có** chạy cuối tuần. *Không* vô hại như câu này từng viết: 14/62 ngày tín
+> hiệu ngành là cuối tuần/lễ, mỗi ngày một bản sao feature phiên trước dưới ngày
+> mới (review 2026-09-24 §4.1/11). Từ 2026-09-25 `publish()` và
+> `classify_regime()` hỏi `utils.clock.closed_today()` và bỏ qua ngày đó. `daily_watch` đăng ký
 > `-Weekly Mon..Fri` thật, vì Tom yêu cầu T2-T6 rõ ràng. Nó cũng là job duy nhất
 > chạy ở `RunLevel = Limited` — nó chỉ chạy python và ghi file, không cần đặc
 > quyền, và ở mức đó **đăng ký được mà không cần shell admin**
@@ -81,7 +84,7 @@ Primary: **vnstock** (proxy OHLCV, foreign flow, VNINDEX). Macro: FRED (US10Y), 
 ## 10. Models
 - **Regime classifier:** Gaussian HMM on macro + VNINDEX returns → {risk_on, risk_off, rotation, chop}
 - **Sector ranker:** LightGBM lambdarank, target = forward 5d sector return
-- **Persistence filter:** flow sign held ≥3 sessions
+- **Persistence filter:** net flow **cùng chiều với lệnh** ≥3 phiên — BUY cần vào ròng, SELL cần rút ròng (2026-09-25; trước đó chấp nhận mọi chuỗi cùng dấu, và 24/96 BUY đã đi sau 3 phiên rút ròng)
 - **Sizing:** vol-targeted, max 3 long / 2 short
 
 ## 11. Backtest Targets
@@ -276,7 +279,12 @@ sập nhanh hơn thị trường, nên regime giải thích mức, không giải
 > từng năm.
 >
 > Điều này **không** bác thesis §16 (dòng tiền VN đi trước tin ~1 tháng) — nó
-> bác **bản hiện thực này** của thesis. Ứng viên duy nhất từng thắng base rate
+> bác **bản hiện thực này** của thesis.
+>
+> **2026-09-25 — thi hành bằng nhãn, không bằng trí nhớ.** Ranker ngành, nhãn
+> regime và cổng stealth nằm trong `analysis/verification.py`; email và Daily
+> Insight in ghi chú "chưa kiểm chứng" từ đó cạnh mọi con số của chúng. Một
+> thứ thắng NO GATE từng năm thì xoá dòng của nó — nhãn đi theo. Ứng viên duy nhất từng thắng base rate
 > là `foreign_streak` (tính bền của mua ròng nước ngoài), đúng thứ §18.5/21 dự
 > đoán trên cơ sở khác.
 
@@ -292,6 +300,14 @@ thường" mà nhất quán với horizon.
 
 **Chỉ là bench đo, không ship vào scanner** — `analysis/stealth.py` không dùng
 định nghĩa breakout nào.
+
+> **ĐÍNH CHÍNH 2026-09-25 — tiền đề "ATR ngày trung vị 0,57%" sai 5 lần.**
+> `flow_aggregation` nhân ATR mỗi mã với `w = 1/n` rồi lại chia cho n: `atr_pct`
+> ngành là 1/5 ATR rổ thật (~2,7%). Với ATR thật, `atr_scaled` ≈ 35% và không bao
+> giờ chạm tới — mọi con số bar breakout ở mục này phải đo lại sau khi
+> `scripts/repair_sector_data.py` tính lại `atr_pct`. Hệ quả sống của cùng lỗi:
+> sentinel stop báo CRITICAL trên 21,7% số ngành-ngày thay vì 0,7%, và slippage
+> backtest chỉ còn mức sàn 0,3% (review 2026-09-24 §4.1/3).
 
 → [`docs/doctrine/16-stealth-measurements.md`](docs/doctrine/16-stealth-measurements.md)
 
@@ -568,6 +584,12 @@ là *chưa chấm được*, không phải trượt.
   (>1 state rỗng) và rơi về heuristic thay vì publish số 1,0 của nó.
 ### 25.2 Công thức — `confidence` nghĩa là gì
 
+- **ĐÍNH CHÍNH 2026-09-25 — mọi số calibration ở §25 là in-sample** (đo trên
+  fit toàn mẫu). Replay đúng cách publish (refit hằng tuần, filtered): "giữ nhãn
+  5 phiên" báo 0,69-0,85, thực tế 0,28-0,58; Brier skill **âm mọi năm**; sau
+  ngày `risk_on`, VNINDEX 20 phiên tới còn *thấp hơn* các ngày khác (review
+  2026-09-24 §4.1/7). `confidence_phrase()` nay luôn kết thúc bằng "chưa kiểm
+  chứng ngoài mẫu"; hedge đầu thấp giữ nguyên vì nó chỉ đúng chiều.
 - **`confidence` = P(nhãn này còn giữ sau `CONF_HORIZON` = 5 phiên)**, không
   phải state posterior. Đây là định nghĩa phải nói ra mỗi khi hiển thị —
   `analysis.regime.confidence_phrase()` là **renderer duy nhất**, và nó sống

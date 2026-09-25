@@ -107,7 +107,7 @@ def incremental_ingest(session: Session, progress_cb=None) -> dict:
 
     progress_cb(sector_code, step, total_steps) called for UI updates.
     """
-    from analysis.flow_aggregation import aggregate_sector
+    from analysis.flow_aggregation import aggregate_sector, chain_close_idx
     from sqlalchemy import func
 
     freshness = get_freshness(session)
@@ -197,6 +197,19 @@ def incremental_ingest(session: Session, progress_cb=None) -> dict:
 
         # 4) Aggregate & write each new date
         written = 0
+        # close_idx is chained from the last stored level (2026-09-25) --
+        # aggregate_sector's close_idx is a raw price sum that jumps whenever
+        # the set of constituents that fetched changes.
+        prev_row = (
+            session.query(SectorFlowDaily)
+            .filter(SectorFlowDaily.sector_code == code,
+                    SectorFlowDaily.date <= latest_date,
+                    SectorFlowDaily.close_idx.isnot(None),
+                    SectorFlowDaily.close_idx > 0)
+            .order_by(SectorFlowDaily.date.desc())
+            .first()
+        )
+        level = prev_row.close_idx if prev_row is not None else None
         for date_str in new_dates:
             # Slice constituents up to this date
             sliced = {}
@@ -240,7 +253,8 @@ def incremental_ingest(session: Session, progress_cb=None) -> dict:
             row.breadth_sma20 = agg.breadth_sma20
             row.breadth_sma50 = agg.breadth_sma50
             row.atr_pct = agg.atr_pct
-            row.close_idx = agg.close_idx
+            level = chain_close_idx(level, agg.basket_return)
+            row.close_idx = level
             row.return_1d = agg.basket_return
             written += 1
 
@@ -251,15 +265,24 @@ def incremental_ingest(session: Session, progress_cb=None) -> dict:
 
     # 5) Rebuild leading features for new rows
     if report["total_new_rows"] > 0:
-        _rebuild_leading_features_fast(session)
+        rebuild_leading_features(session)
 
     latest_after = session.query(func.max(SectorFlowDaily.date)).scalar()
     report["latest_date_after"] = latest_after
     return report
 
 
-def _rebuild_leading_features_fast(session: Session):
-    """Recompute flow_z20, foreign_hit_20d, stealth_score etc for all rows."""
+def rebuild_leading_features(session: Session) -> int:
+    """Recompute flow_z20, foreign_hit_20d, stealth_score etc for all rows.
+
+    The ONE implementation. It used to run only on the UI Refresh path, so the
+    scheduled 16:00 rollup wrote rows with these seven columns NULL -- on all
+    15 sectors, every session from 2026-08-25 -- and the ranker, which fills
+    NULL with 0, scored a month of zeros (review 2026-09-24 §4.1/1).
+    `main.py --eod-rollup` now calls it after the rollup; `scripts/
+    fix_close_idx.py` re-exports it instead of keeping a second copy.
+    Returns the number of rows written.
+    """
     from analysis.stealth import compute_leading_features
 
     rows = session.query(SectorFlowDaily).order_by(
@@ -277,6 +300,7 @@ def _rebuild_leading_features_fast(session: Session):
     feat = compute_leading_features(df)
     by_key = {(r.sector_code, r.date): r for r in rows}
 
+    n = 0
     for _, f in feat.iterrows():
         r = by_key.get((f["sector_code"], f["date"]))
         if r is None:
@@ -288,8 +312,14 @@ def _rebuild_leading_features_fast(session: Session):
         r.stealth_score = float(f["stealth_score"]) if pd.notna(f["stealth_score"]) else 0.0
         r.flow_price_divergence = float(f["flow_price_divergence"]) if pd.notna(f["flow_price_divergence"]) else 0.0
         r.accumulation_age = int(f["accumulation_age"])
+        n += 1
 
     session.commit()
+    return n
+
+
+# Old private name, still imported by `_audit/clean_fabricated.py`.
+_rebuild_leading_features_fast = rebuild_leading_features
 
 
 # ---------- Background job management ----------
