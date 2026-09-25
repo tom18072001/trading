@@ -14,6 +14,23 @@
 
 ---
 
+## 2026-09-25 (9) — xoá chi tiết sổ thật khỏi lịch sử chưa push, trước khi lên GitHub public
+- Author: Claude (Cowork) on behalf of Tom
+- Files: lịch sử của 21 commit chưa push (từ `origin/master`), trong 7 file: `MODIFICATION_LOG.md`,
+  `docs/PATCHES.md`, `daily_watch/holdings.py`, `daily_watch/sell_range.py`, `services/trading_state.py`,
+  `.claude/skills/theo-doi-hang-ngay/SKILL.md`, `docs/reviews/ALGO_REVIEW_2026-09-24.md`; và 4 commit
+  message. `docs/PATCHES.md` cập nhật hash mới.
+- Reason: Tom cho push, và chọn *"xoá khỏi lịch sử rồi push"* — repo public, mà 12 commit cũ chưa từng
+  push (16-17/09) ghi mã đang nắm, giá vào, lãi/lỗ, khối lượng, số vị thế và vốn của sổ thật.
+- Summary: 56 luật thay chuỗi chính xác (không regex theo mã, nên rổ ngành trong `config.py`, danh sách
+  ứng viên và phần phân tích khuyến nghị cũ PNJ/PLX — của hệ thống, không phải sổ — giữ nguyên) + 12
+  luật cho message, chạy bằng `git filter-branch` trên `origin/master..work`. Mỗi commit mới chỉ khác
+  commit cũ ở 7 file trên; tác giả và ngày giữ nguyên; 451 test pass ở đỉnh mới. Máy Tom: nhánh
+  `fix/2026-09-25-review` và `chore/2026-09-16-picks-scoring` trỏ sang lịch sử mới, `SKILL.md` chưa
+  commit giữ nguyên (chỉ thay đúng các dòng chứa chi tiết sổ). Hash cũ không còn trên nhánh nào.
+- Follow-ups: push từ máy Tom (`git push -u origin fix/2026-09-25-review`) — phiên cloud và VM không có
+  quyền ghi vào repo. Đừng `git push --all`: nhánh `backup/pre-filter-2026-08-23` chưa từng lên origin.
+
 ## 2026-09-25 (8) — slippage backtest ngành: 0,3%/chiều phẳng
 - Author: Claude (Cowork) on behalf of Tom
 - Files: `config.py` (`BACKTEST_SLIPPAGE_ATR_MULT` 0,5 → 0), `services/backtest_service.py` (chú thích),
