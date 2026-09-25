@@ -14,6 +14,36 @@
 
 ---
 
+## 2026-09-25 (6) — `scripts/repair_sector_data.py`: sửa lịch sử ngành đã ghi sai, có backup và chạy thử
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `scripts/repair_sector_data.py` (mới), `tests/test_repair_sector_data.py` (mới, 11 test).
+- Reason: review 2026-09-24 §8 P0-2/3/4 — code đã sửa ở (5), nhưng lịch sử trong DB vẫn là số của code
+  cũ. Tom: *"Script, anh chạy trên Windows"* — có backup và dry-run, thử trên bản sao trước.
+- Summary:
+  - Sửa đúng bốn thứ, không đụng thứ khác: `macro_anchors.vnindex` ngoài 200-5.000 → NULL;
+    `sector_flow_daily.atr_pct` → ATR rổ thật; `return_1d` → lợi suất rổ close-to-close;
+    `close_idx` → mức nối chuỗi từ `return_1d` trên lịch của price panel (phiên thiếu trong bảng
+    vẫn được tính); rồi `rebuild_leading_features()`. Nguồn: `data/price_panel.db` (chỉ đọc),
+    rổ `config.PROXY_BASKETS`, công thức của `analysis/flow_aggregation.py`; một bước > ±16%/phiên
+    là lệch cơ sở điều chỉnh, bị loại khỏi lợi suất và khỏi mọi cửa sổ ATR chứa nó.
+  - An toàn mặc định: không có `--apply` thì chỉ chạy thử (file DB giữ nguyên từng byte). `--apply`
+    từ chối trong 08:45-17:45 ngày giao dịch và khi price panel kết thúc trước phiên cuối của bảng
+    ngành; backup bằng SQLite backup API (đúng khi đang WAL) ra `<db>.bak-<thời điểm>-pre-repair`,
+    ghi trong một transaction; chạy lại cho cùng kết quả.
+  - Thử trên bản sao DB 2026-09-24 (cắt về 2026-09-15, ngày cuối của panel): 613 giá trị macro →
+    NULL; `atr_pct` trung vị 0,0057 → 0,0280; `return_1d` NULL 917 → 0; bước `close_idx` lớn nhất
+    240,6% → 9,0%, số bước > ±16% 11 → 0; chạy lần hai: 0 dòng đổi; backup trùng trạng thái trước
+    khi ghi; `return_1d` khớp panel sạch của review ở 99,1% số dòng (phần còn lại là các bước lệch
+    cơ sở bị loại). Sau đó train ranker (lightgbm, `decile_monotonic` −0,5 — vẫn không edge), publish
+    (15 tín hiệu, mang `model_run_id`), backtest chạy được.
+  - Test: giá trị ghi ra so với chính `aggregate_sector` của job 16:00 trên cùng giá; 8 đột biến
+    (ATR chia n hai lần, bỏ loại bước nhảy, nối chuỗi theo dòng bảng, dry-run có ghi, bỏ từng guard,
+    bỏ backup, bỏ rebuild) — mỗi cái làm đỏ ít nhất một test.
+- Follow-ups — **cần Tom quyết**: với ATR đúng, slippage backtest ngành `max(0,3%, 0,5×ATR%)`
+  (§18.2/9) thành ~1,4%/chiều thay vì sàn 0,3%. `flow_z` 2024-01 → 2026-09 trên bản sao đã sửa: khung
+  20 −58,4% (chi phí 66,1% vốn), khung 40 −18,6% (50,2%); với slippage phẳng 0,3%/chiều như bench mã:
+  −22,1% (26,2%) / +14,3% (16,9%); VNINDEX +60,0%. Giữ công thức doctrine hay dùng 0,3% phẳng.
+
 ## 2026-09-25 (5) — tầng ngành: job 16:00 tính feature dẫn trước, ATR đúng, close_idx nối chuỗi, regime không dựng từ rác, nhãn "chưa kiểm chứng"
 - Author: Claude (Cowork) on behalf of Tom
 - Files: `analysis/flow_aggregation.py` (ATR, `chain_close_idx`), `services/sector_ingest_service.py`,
