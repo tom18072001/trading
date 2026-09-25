@@ -14,6 +14,21 @@
 
 ---
 
+## 2026-09-25 (8) — slippage backtest ngành: 0,3%/chiều phẳng
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `config.py` (`BACKTEST_SLIPPAGE_ATR_MULT` 0,5 → 0), `services/backtest_service.py` (chú thích),
+  `analysis/bench.py` (chú thích), `frontend/src/pages/BacktestPage.tsx` (dòng giải thích),
+  `tests/test_backtest_controls.py` (+1), `CLAUDE.md` §18.2/9, §23, `docs/doctrine/23-backtest-controls.md`,
+  `docs/reference/ALGORITHM.md`, `docs/PATCHES.md`.
+- Reason: Tom, 2026-09-25 — *"chọn phương án trả về kết quả tốt hơn"* (follow-up của (6)).
+- Summary: `max(0,3%, 0,5×ATR%)` chưa từng rời mức sàn vì `atr_pct` ngành chỉ bằng 1/5 thật; sửa ATR xong
+  thì nó thành ~1,4%/chiều. Trên bản sao DB đã sửa, `flow_z` 2024-01 → 2026-09: khung 20 chi phí 66,1% vốn
+  (−58,4%) → 26,2% (−22,1%) ở 0,3% phẳng; khung 40: 50,2% (−18,6%) → 16,9% (+14,3%); VNINDEX +60,0%.
+  0,3%/chiều cũng là mức bench mã đã dùng, nên backtest ngành và bench mã nay cùng một mô hình trượt giá.
+  Lưu ý khi đọc: số đẹp hơn vì giả định rẻ hơn, không phải vì chiến lược tốt hơn — ở cả hai giả định,
+  chiến lược ngành thua VNINDEX. Với mã nhỏ trong rổ (ITD, POM, SAM, ...) 0,3% có thể lạc quan.
+  Test mới: `_slippage` bằng 0,3% ở mọi ATR và bằng slippage của bench; đưa hệ số về 0,5 thì test đỏ.
+
 ## 2026-09-25 (7) — sổ sách: PATCHES, số test, lịch sử test
 - Author: Claude (Cowork) on behalf of Tom
 - Files: `docs/PATCHES.md`, `CLAUDE.md` §19 (pytest 450, vitest 18) và §20 (ruff 60),

@@ -7,6 +7,16 @@
 
 ## 23. Backtest controls — and `flow_z` was `flow_raw` in disguise — 2026-08-23
 
+> **2026-09-25 — slippage is 0.3% per side, flat.** The `max(0.3%, 0.5×ATR%)`
+> below never left its floor: the sector `atr_pct` it read was 1/5 of the real
+> basket ATR (review 2026-09-24 §4.1/3). Fixed, the formula charged ~1.4% per
+> side; on the repaired 2026-09-24 database `flow_z` 2024-01 → 2026-09 paid 66.1%
+> of capital in costs at a 20-session hold (−58.4%) and 50.2% at 40 (−18.6%),
+> against 26.2% (−22.1%) and 16.9% (+14.3%) at a flat 0.3%. Tom chose the flat
+> figure — the one `analysis/bench.py` already charged the ticker rules — so
+> `config.BACKTEST_SLIPPAGE_ATR_MULT = 0`. VNINDEX did +60.0% over the same
+> window; neither assumption changes the verdict on the sector strategies.
+
 ### 23.1 What was unreachable
 `services/backtest_service.py` has modelled the whole of §18.2/7–10 since
 2026-08-22 — T+2 settlement, per-side broker fee, the 0.1% sell tax, slippage

@@ -332,7 +332,7 @@ thường" mà nhất quán với horizon.
 |---|---|---|
 | 7 | **[BLOCKER]** Chưa mô hình hoá thanh toán T+2 → `settlement_lag=2` | **bỏ 2026-09-25** — Tom: *"bỏ T+2, chỉ sử dụng 4 tuần và 8 tuần"*. Ở khung ≥ 20 phiên T+2 không bao giờ là ràng buộc; backtest tái cơ cấu theo `config.HOLD_SESSIONS` thay vì mỗi phiên |
 | 8 | **[BLOCKER]** Chưa kiểm room ngoại (FOL) — `foreign_net` về 0 vì hết room chứ không phải vì hết niềm tin. Room median < 3% → hạ trọng số signal 0,5× | mở |
-| 9 | **[BLOCKER]** Slippage + biên giá ±7% HOSE; bỏ fill khi rổ chạm trần/sàn | **đóng ở backtest** (§23) |
+| 9 | **[BLOCKER]** Slippage + biên giá ±7% HOSE; bỏ fill khi rổ chạm trần/sàn | **đóng ở backtest** (§23) — slippage 0,3%/chiều phẳng từ 2026-09-25 |
 | 10 | **[BLOCKER]** Thiếu dòng thuế + phí: `fee_bps=15`/chiều + `sell_tax_bps=10` | **đóng ở backtest** (§23) |
 | 11 | **[EDGE]** Vol-targeting dùng ATR ngành — phải dùng đóng góp biên vào vol **danh mục** (bank + broker + realty VN chạy cùng nhau) | mở |
 | 12 | **[EDGE]** Trần "3 long / 2 short" tuỳ tiện; **short cash ở VN là bất khả** — chỉ qua VN30F1M | `ALLOW_SHORT_SIGNALS` (§20.2 P1-5) |
@@ -395,9 +395,9 @@ Run the two commands rather than trusting the numbers.
 
 | Suite | Count | Command |
 |---|---|---|
-| Backend (pytest) | 450 | `uv run pytest tests/` |
+| Backend (pytest) | 451 | `uv run pytest tests/` |
 | Frontend (vitest) | 18 | `cd frontend && npm test` |
-| **Total** | **468** | — |
+| **Total** | **469** | — |
 > Vì sao từng bài test tồn tại — và 4 lần negative control bắt được test vô
 > dụng của chính tôi — ở [`docs/doctrine/19-testing-history.md`](docs/doctrine/19-testing-history.md).
 > Đọc nó trước khi xoá hoặc viết lại một bài test trông có vẻ thừa.
@@ -547,7 +547,12 @@ là *chưa chấm được*, không phải trượt.
 → Nguyên văn: [`docs/doctrine/23-backtest-controls.md`](docs/doctrine/23-backtest-controls.md)
 
 - **Chi phí đã mô hình hoá trong backtest engine**: phí mỗi chiều, thuế bán
-  0,1%, slippage `max(0,3%, 0,5×ATR%)`, biên ±7% HOSE. **§18.2/9, 10 đóng ở
+  0,1%, slippage **0,3%/chiều phẳng**, biên ±7% HOSE. Slippage từng là
+  `max(0,3%, 0,5×ATR%)`; khi ATR ngành được sửa (2026-09-25, trước đó chỉ bằng
+  1/5 thật nên số hạng ATR không bao giờ vượt sàn) công thức thành ~1,4%/chiều —
+  `flow_z` khung 20 tốn 66% vốn 2024-01→2026-09 thay vì 26%. **Tom chọn 0,3%
+  phẳng** (`BACKTEST_SLIPPAGE_ATR_MULT = 0`), cùng mô hình với bench mã. Chiến
+  lược ngành vẫn thua VNINDEX ở cả hai giả định (khung 20: −22,1% vs +60,0%). **§18.2/9, 10 đóng ở
   backtest**, còn mở ở `risk_service` — nơi sizing vị thế **không có** cost model.
   T+2 (§18.2/7) **bỏ 2026-09-25**: danh mục tái cơ cấu mỗi 20 hoặc 40 phiên
   (`config.HOLD_SESSIONS`), khớp ở phiên **sau** phiên công bố tín hiệu.

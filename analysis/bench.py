@@ -41,7 +41,8 @@ ROUND_TRIP = (2 * BACKTEST_FEE_BPS + BACKTEST_SELL_TAX_BPS) / 10_000.0
 # phải công thức `max(0,3%, 0,5×ATR%)`. Chú thích cũ ghi công thức, còn code chỉ
 # áp mức sàn (review 2026-09-24 §6). Cố ý: với mã ATR 3-4%/phiên, nguyên văn công
 # thức cho 1,5-2%/chiều, tức 3,6-4,3%/vòng — không thực tế cho lệnh nhỏ trên mã
-# đủ thanh khoản. Backtest ngành (`services/backtest_service.py`) mới áp đủ công thức.
+# đủ thanh khoản. Từ 2026-09-25 backtest ngành cũng phẳng 0,3%
+# (`config.BACKTEST_SLIPPAGE_ATR_MULT = 0`): một mô hình trượt giá cho cả hai.
 SLIPPAGE_PER_SIDE = BACKTEST_SLIPPAGE_MIN_PCT     # 0,3%/chiều, phẳng
 SLIPPAGE = 2 * SLIPPAGE_PER_SIDE                  # trả cả lúc vào lẫn lúc ra
 SLIPPAGE_BPS_PER_SIDE = SLIPPAGE_PER_SIDE * 10_000  # mặc định cho CLI --slippage-bps

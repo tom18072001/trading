@@ -309,3 +309,15 @@ def test_trade_log_rows_have_the_shape_the_client_types(client, seeded_session):
         assert ("alloc" in t) == (t["side"] == "BUY")
         assert ("proceeds" in t) == (t["side"] == "SELL")
         assert "ret" not in t
+
+
+def test_slippage_is_a_flat_three_tenths_per_side_like_the_ticker_bench():
+    """Tom, 2026-09-25. With the sector ATR fixed (it was 1/5 of the truth),
+    `max(0.3%, 0.5 x ATR%)` became ~1.4% per side -- 66% of capital in costs
+    for `flow_z` at a 20-session hold. One slippage model for the sector
+    backtest and the ticker bench now: 0.3% per fill, whatever the ATR."""
+    from analysis.bench import SLIPPAGE_PER_SIDE
+
+    for atr in (None, 0.0, 0.0057, 0.028, 0.08):
+        assert SectorBacktestService._slippage(atr) == pytest.approx(0.003)
+    assert SLIPPAGE_PER_SIDE == pytest.approx(0.003)

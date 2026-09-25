@@ -179,7 +179,7 @@ export default function BacktestPage() {
           </div>
         </div>
         <p className="text-[10.5px] text-lo leading-snug">
-          Trượt giá (max 0,3% / 0,5×ATR) và biên độ ±7% HOSE là cấu trúc thị trường, không sửa được ở đây —
+          Trượt giá (0,3% mỗi chiều, như bench mã) và biên độ ±7% HOSE là cấu trúc thị trường, không sửa được ở đây —
           chỉ phí và thuế là thoả thuận với môi giới. Danh mục được tái cơ cấu theo lịch khung giữ; lệnh
           khớp ở giá đóng phiên <b>sau</b> phiên công bố tín hiệu (tín hiệu ra lúc 17:00).
         </p>

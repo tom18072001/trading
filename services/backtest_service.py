@@ -15,7 +15,8 @@
 #            today's close. Signals go out at 17:00, after the close they are
 #            computed from, so filling at that close was look-ahead
 #            (review 2026-09-24 §4.1/6).
-#   §18.2/9  Slippage = max(0.3%, 0.5×ATR%) per fill, AND a ±7% HOSE price-band:
+#   §18.2/9  Slippage = 0.3% per fill, flat (the ATR multiplier is 0 since
+#            2026-09-25 -- config.BACKTEST_SLIPPAGE_ATR_MULT), AND a ±7% HOSE price-band:
 #            a sector that gapped to ceiling/floor that day cannot be filled.
 #   §18.2/10 Broker fee per side + a sell tax on proceeds (per-trade, not a flat
 #            daily constant).

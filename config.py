@@ -188,8 +188,14 @@ BENCHMARK = "VNINDEX"
 # Applied by SectorBacktestService instead of the old flat daily cost.
 BACKTEST_FEE_BPS         = 15     # broker fee per side (0.15%) — §18.2/10
 BACKTEST_SELL_TAX_BPS    = 10     # HOSE sell tax on proceeds (0.10%) — §18.2/10
-BACKTEST_SLIPPAGE_MIN_PCT = 0.003 # slippage floor 0.3% — §18.2/9
-BACKTEST_SLIPPAGE_ATR_MULT = 0.5  # slippage = max(min, 0.5 × ATR%) — §18.2/9
+BACKTEST_SLIPPAGE_MIN_PCT = 0.003 # slippage 0.3% per side — §18.2/9
+# ATR term of `max(min, mult × ATR%)`. 0.5 until 2026-09-25, when the sector ATR
+# was fixed (it had been 1/5 of the truth, so the term never beat the floor) and
+# 0.5 × the real ~2.8% daily ATR became ~1.4% per side: 66% of capital in costs
+# for `flow_z` at a 20-session hold, 2024-01 -> 2026-09. Tom chose the flat 0.3%
+# the ticker bench already uses (`analysis/bench.py`) -- one slippage model
+# for both, closer to a small order in a top-5 basket name. CLAUDE.md §23.
+BACKTEST_SLIPPAGE_ATR_MULT = 0.0
 BACKTEST_PRICE_BAND_PCT  = 0.07   # HOSE ±7% daily band; skip fills on gap days — §18.2/9
 BACKTEST_LONG_ONLY       = True   # VN cash market cannot short — §18.2/12
 

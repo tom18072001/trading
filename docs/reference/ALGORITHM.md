@@ -318,7 +318,8 @@ VNINDEX buy-and-hold. Baseline targets (`CLAUDE.md` §11):
 Trader-lens additions (§18.7):
 
 - **Net-of-cost Sharpe ≥ 0.8** — after fees (`fee_bps=15`/side),
-  sell tax (`sell_tax_bps=10`), slippage (`max(0.3%, 0.5 × ATR%)`), and ±7%
+  sell tax (`sell_tax_bps=10`), slippage (0.3% per side, flat since
+  2026-09-25 — it was `max(0.3%, 0.5 × ATR%)`), and ±7%
   price-band miss modeling, on a book re-cut every 20 or 40 sessions
   (`config.HOLD_SESSIONS`). The T+2 settlement lag was modelled until
   2026-09-25 and removed with the T+ mode — at a 20-session hold it cannot bind.
