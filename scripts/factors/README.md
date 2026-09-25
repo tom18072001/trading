@@ -39,10 +39,15 @@ uv run python scripts/ticker_alpha_bench.py --horizons 20 --verdict --only Z_ten
 
 Hai tiêu chí **bắt buộc**, trượt là loại:
 
-- **thắng base rate TỪNG NĂM** (§16.12) — gộp lại là thứ đã che được một 2026
-  ngang mức ngẫu nhiên. Một rule dương khi gộp mà âm một năm thì chưa là rule.
-- **quintile đơn điệu** (§18.7) — không đơn điệu nghĩa là model đang đoán.
+- **thắng base rate TỪNG NĂM** (§16.12) — base là **NO GATE**: mọi mã đủ thanh
+  khoản, mọi phiên có ≥ 30 mã như thế. Gộp lại là thứ đã che được một 2026 ngang
+  mức ngẫu nhiên. Một rule dương khi gộp mà âm một năm thì chưa là rule.
+- **quintile đơn điệu** (§18.7) — không đơn điệu nghĩa là model đang đoán. Đọc
+  kèm Q5−Q1 với t Newey-West.
 
-`VƯỢT TRẦN` nghĩa là quy năm hơn VNINDEX buy-and-hold (15,7% CAGR). Tính đến
-2026-09 **chưa rule nào đạt**, kể cả khi đã đạt hết các tiêu chí còn lại — xem
-§26.9.
+t trong bảng là **Newey-West lag h** (lợi suất h phiên đo mỗi ngày chồng nhau).
+`VƯỢT TRẦN` nghĩa là **danh mục staggered của rule** thắng VNINDEX mua & giữ trên
+**cùng các ngày**, cả lợi nhuận lẫn Sharpe — không còn so với hằng số 15,7%
+(2026-09-25). Tính đến 2026-09 **chưa rule nào đạt**; VNINDEX 2023-01 → 2026-09
+là 17,5%/năm, Sharpe 0,98 — xem §26.9. Luật đang ship chấm ở dòng
+`X_shipped_rule`, không phải `X_prop_obv`.

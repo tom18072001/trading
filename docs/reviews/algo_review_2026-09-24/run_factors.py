@@ -8,11 +8,10 @@ sys.path.insert(0, str(HERE.parents[2]))
 OUT = HERE / "out"
 OUT.mkdir(exist_ok=True)
 
-import json
-import sys
+import json  # noqa: E402
+import sys  # noqa: E402
 
 
-import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from picks_eval import (FACTORS, MIN_BUY_SCORE, MIN_DV, jt_portfolio, load_all, nw_t,  # noqa: E402

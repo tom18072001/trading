@@ -14,6 +14,45 @@
 
 ---
 
+## 2026-09-25 (4) — sửa thước đo: base NO GATE mọi phiên, t Newey-West, danh mục cùng ngày với VNINDEX; bench thoát hết nhìn trước; panel giá không trộn hai cơ sở
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `analysis/bench.py` (`nw_t`, `staggered_book`, `book_stats`, `judge`),
+  `scripts/ticker_alpha_bench.py` (`evaluate`, `X_shipped_rule`, `load_vnindex`, `--start`),
+  `scripts/tplus_strategy_bench.py` (`run_trail`, `run`, luật `shipped_rule_top5`),
+  `scripts/build_price_panel.py` (`fetched_symbols`, `seed_from_legacy`, `store_fetch`,
+  `band_violations`, `--refetch`), `tests/test_bench_measurement.py` (mới),
+  `tests/test_price_panel_builder.py` (mới), `docs/reviews/algo_review_2026-09-24/*.py` (chỉ lint),
+  `daily_watch/sell_range.py` (docstring), `scripts/factors/README.md`,
+  `CLAUDE.md` §16.12, §18.7, §26.9, §26.10, `docs/doctrine/26-ticker-picks.md` (§26.12 mới).
+- Reason: review 2026-09-24 §1, §3.2, §6 / §8 P1-7, P1-8, P1-10, P1-12 và §9 — bench cũ phóng
+  đại mọi factor có cổng, nên mọi quyết định lấy từ nó (kể cả "1/41 sống sót") đứng trên số sai.
+- Summary:
+  - `evaluate()`: base = NO GATE (mọi mã dv20 > sàn, mọi phiên có ≥ 30 mã như thế — ngưỡng áp
+    cho universe, không cho cross-section của factor; ngày factor không có mã là ngày tiền mặt).
+    Chọn top-k chỉ bằng thứ biết được lúc đóng cửa (bản cũ đòi mã phải còn giá h phiên sau —
+    nhìn trước). t của excess, IC, Q5−Q1 là Newey-West lag h. "Vượt VNINDEX" = danh mục staggered
+    (Jegadeesh-Titman, 1/(h+1) vốn mỗi phiên, 1,00%/vòng) so với VNINDEX cùng ngày, cả CAGR lẫn
+    Sharpe. `X_shipped_rule` chấm đúng luật đang ship (điểm production có sàn, blend trên cả
+    universe, rồi cổng) — `X_prop_obv` blend trong nhóm đã qua cổng, là một luật khác.
+  - Chạy lại toàn bộ (143 mã, 2023-01 → 2026-09): `X_shipped_rule` +0,69%/lệnh (NW t 1,55) /
+    +1,01% (1,91), danh mục 7,2% / 11,7%/năm, Sharpe 0,44 / 0,65; VNINDEX 17,5%, 0,98 — khớp
+    review tới chữ số thập phân. `--verdict`: **0/42** qua hai tiêu chí bắt buộc ở cả hai khung
+    (thước cũ: 1/41).
+  - `run_trail()`: băng tính từ đỉnh các phiên TRƯỚC (đỉnh cập nhật sau khi so giá thấp); phiên
+    mở dưới băng khớp ở giá mở ("gap"); `run()` cũng khớp gap ở giá mở. Giữ hết khung vẫn thắng
+    mọi băng, nhưng cái giá của băng nhỏ hơn 2-3 lần số cũ (§26.10 cập nhật).
+  - `build_price_panel.py`: legacy chỉ seed cho mã CHƯA từng fetch; một lần fetch xoá rồi ghi lại
+    toàn bộ khoảng của nó (INSERT OR IGNORE cũ để dòng legacy lấp đúng những ngày nguồn không
+    trả — SRC 19,20 ↔ 25,15); `band_violations()` báo |ret| > 16% mỗi phiên (không tính chỉ số)
+    cuối mỗi build; `--refetch` fetch lại những mã đó. Panel hiện tại còn 89 dòng vi phạm (70 là
+    SRC) — Tom chạy `--refetch` một lần (Nhóm F).
+  - Negative control: `evaluate()` cũ chấm một factor cổng 20 mã trên **0** phiên, và khi hạ sàn
+    thì excess so với base cùng cổng đúng bằng 0 (phần đóng góp của cổng bị xoá). Chọn cả
+    universe → excess đúng 0. 3 test cho bộ thoát (băng từ đỉnh các phiên trước; gap khớp ở giá
+    mở, cả `run_trail` lẫn `run`): đưa bộ thoát về logic cũ thì cả 3 đỏ. `trail_fix.py` (bản sửa
+    độc lập viết lúc review) nay cho cùng số với `run_trail` của repo.
+- Follow-ups: `--refetch` trên máy Tom; chạy lại `run_factors.py` sau khi panel sạch.
+
 ## 2026-09-25 (3) — `give_back` chỉ arm khi có ngày mua
 - Author: Claude (Cowork) on behalf of Tom
 - Files: `daily_watch/sell_range.py`, `daily_watch/service.py`, `daily_watch/README.md`,

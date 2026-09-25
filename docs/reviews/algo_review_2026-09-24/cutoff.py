@@ -8,8 +8,8 @@ OUT = HERE / "out"
 OUT.mkdir(exist_ok=True)
 
 
-import numpy as np, pandas as pd
-from picks_eval import *
+from picks_eval import (MIN_BUY_SCORE, MIN_DV, UNTRENDED_FLOOR, jt_portfolio, load_all,  # noqa: E402
+    nw_t, per_trade, perf, production_rank, production_score, topk)  # noqa: E402
 p, f, vn = load_all()
 elig = (f["dv20"] > MIN_DV) & f["sma50"].notna()
 sc = production_score(f).round(2)

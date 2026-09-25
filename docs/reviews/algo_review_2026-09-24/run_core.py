@@ -8,8 +8,8 @@ sys.path.insert(0, str(HERE.parents[2]))
 OUT = HERE / "out"
 OUT.mkdir(exist_ok=True)
 
-import json
-import sys
+import json  # noqa: E402
+import sys  # noqa: E402
 
 
 import pandas as pd  # noqa: E402

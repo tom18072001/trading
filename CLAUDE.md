@@ -245,6 +245,15 @@ không phải tín hiệu**, bất kể con số tuyệt đối đẹp đến đ
 **trong từng năm**, không gộp — gộp là thứ đã che được một 2026 ngang mức ngẫu
 nhiên.
 
+**NO GATE nghĩa là gì (2026-09-25):** mọi mã đủ thanh khoản, **mọi phiên** có
+≥ 30 mã như thế — một base chung cho mọi luật. **Cấm** so factor có cổng với base
+cũng có cổng (xoá luôn phần đóng góp của chính cái cổng), và **cấm** bỏ phiên theo
+bề rộng cross-section của chính factor (đúng các phiên thị trường yếu mà
+production vẫn ra danh sách). Hai lựa chọn đó cùng nhau đã lật năm 2023 của picks
+(review 2026-09-24 §1). Lợi suất h phiên đo mỗi ngày chồng nhau: t là Newey-West
+lag h. "Vượt VNINDEX" là danh mục staggered so với index **cùng ngày** — không
+phải quy năm số học so với một hằng số.
+
 → Bảng đo: [`docs/doctrine/16-stealth-measurements.md`](docs/doctrine/16-stealth-measurements.md)
 
 ### 16.13 The 2026 collapse is mostly the market
@@ -356,7 +365,7 @@ Ship order, blockers first:
 Current §16.11 targets are necessary but not sufficient. Add:
 - **Net-of-cost Sharpe ≥ 0.8** (after fees, taxes, slippage, price-band misses, on a 20- or 40-session book).
 - **Max adverse excursion on ACCUMULATE entries ≤ 6%** — if early entries routinely bleed more than that before working, the "root" claim is false.
-- **Decile monotonicity** of the ranker: mean forward 20d return must be monotone across score deciles on out-of-sample data. Non-monotone = model is guessing.
+- **Decile monotonicity** of the ranker: mean forward 20d return must be monotone across score deciles on out-of-sample data. Non-monotone = model is guessing. **Đọc kèm Q5−Q1 với t Newey-West** (2026-09-25): năm con số trung bình nhiễu rất dễ đổi thứ tự — ensemble ML chỉ đơn điệu ở 4/8 lần chạy, không năm nào đơn điệu (review 2026-09-24 §9).
 
 ### 18.8 Doctrine
 Any future change MUST (a) log a `MODIFICATION_LOG.md` entry referencing the §18 item number it resolves, and (b) update the relevant spec file under `specs/`. Closing a §18 item requires evidence (backtest diff, unit test, or data proof) — not just code.
@@ -650,6 +659,22 @@ mỗi chiều), chi phí xoay vòng mỗi năm: **T+3 → 58,8%** · T+10 17,6% 
 
 ### 26.9 Khung thời gian đáng giá gấp mười lần thuật toán
 
+> **ĐÍNH CHÍNH 2026-09-25 — thước đo dưới đây phóng đại edge; đọc khối này
+> trước.** Bench cũ so factor có cổng SMA200 với base cũng có cổng và bỏ các
+> phiên factor có dưới 30 mã; t coi cửa sổ chồng nhau là độc lập; "vượt VNINDEX"
+> so quy năm số học với hằng số 15,7%. Chấm lại đúng (base NO GATE mọi phiên,
+> NW t, danh mục staggered cùng ngày — `ticker_alpha_bench.py` nay làm đúng thế):
+> - **"1/41 sống sót" bị rút:** không luật nào dương đủ 4 năm, kể cả `X_prop_obv`.
+> - **Luật đang ship** (cổng SMA200 → blend, `X_shipped_rule`): excess +0,69%/lệnh
+>   (NW t 1,55) ở 20 phiên, +1,01% (t 1,91) ở 40; danh mục **7,2% / 11,7%/năm**,
+>   Sharpe 0,44 / 0,65, so với **VNINDEX 17,5%, Sharpe 0,98** cùng kỳ 2023-01 →
+>   2026-09. Số 5,9% / 11,7% cũ là quy năm số học của luật có ngưỡng 2,5 (danh
+>   mục thật của nó: 2,7% / 9,3%).
+> - **"Trên 40 phiên không factor nào sống sót" bị rút:** danh mục đi ngang sau
+>   ~40 phiên (60: 10,6%, 120: 10,9%) — giữ lâu hơn không thêm gì đo được, và đó là
+>   lý do 40 là mặc định (Tom 2026-09-25: chỉ dùng khung 4 và 8 tuần).
+> → Bảng đầy đủ: `docs/reviews/ALGO_REVIEW_2026-09-24.md` §1-§3.
+
 Base rate **không xếp hạng**, quy năm: T+3 **−40,6%** · T+10 −4,9% · T+15
 **+1,3%** (hoà phí) · T+20 +4,7% · T+40 +10,2%.
 
@@ -714,20 +739,24 @@ lượng vị thế đã chặn đuôi rồi.
 >
 > **Range bán trượt cũng được đo, và nó cũng thua.** Câu hỏi tự nhiên là liệu
 > một băng neo ở *đỉnh* có tốt hơn một stop neo ở *giá vào* không.
-> `scripts/tplus_strategy_bench.py --trail` chấm 7 hình học trên 3.446 lệnh,
-> luật vào lệnh đang ship, chi phí 1,00%/vòng, khung 40 phiên:
+> `scripts/tplus_strategy_bench.py --trail` chấm 7 hình học, chi phí 1,00%/vòng,
+> khung 40 phiên. **Đo lại 2026-09-25** sau khi sửa hai lỗi nhìn trước của bench
+> (đỉnh cập nhật bằng giá đóng trước khi so giá thấp cùng phiên; phiên mở dưới
+> băng vẫn khớp ở băng — review 2026-09-24 §3.2); cột "bản lỗi" là số cũ:
 >
-> | hình học thoát | mean%/lệnh | excess | 2026 |
+> | hình học thoát | luật cũ, bản lỗi | luật cũ, sửa | **luật ship, sửa** |
 > |---|---|---|---|
-> | **KHÔNG stop, giữ hết khung** | **+1,77** | **+0,59** | +1,25 |
-> | range nhả 3,5×ATR | +1,07 | +0,49 | +1,05 |
-> | chỉ gãy trend thì bán | +0,87 | +0,37 | +1,08 |
-> | range nhả 2,5×ATR | +0,18 | +0,18 | +0,46 |
-> | range nhả 1,5×ATR | −1,29 | +0,09 | +0,04 |
+> | **KHÔNG stop, giữ hết khung** | +1,77 | +1,77 | **+2,23** |
+> | range nhả 3,5×ATR | +1,07 | +1,14 | +1,54 |
+> | chỉ gãy trend thì bán | +0,87 | +0,88 | +1,21 |
+> | range nhả 2,5×ATR | +0,18 | +0,87 | +1,26 |
+> | range nhả 1,5×ATR | −1,29 | +0,45 | +0,70 |
 >
-> **Giữ hết khung thắng mọi biến thể, và càng chặt càng tệ — đơn điệu.** Cùng
-> kết quả ở khung 20. Kết luận tổng quát hơn cả hai lần quyết định: **một luật
-> thoát bằng mức giá, dù neo ở đâu, vẫn là một cái stop và vẫn tốn tiền.**
+> **Giữ hết khung vẫn thắng, và càng chặt càng thấp — nhưng cái giá của băng nhỏ
+> hơn 2-3 lần con số cũ.** Cùng chiều ở khung 20. Như một danh mục thật,
+> `give_back` 3,5×ATR tốn ~0,7 điểm %/năm nếu tiền bán ra đặt vào index. Kết luận
+> tổng quát vẫn đứng: **một luật thoát bằng mức giá, dù neo ở đâu, vẫn tốn tiền**
+> — ít hơn đã tưởng.
 >
 > Nên `sell_range.py` tách bạch hai thứ và chỉ gọi **một** trong hai là luật:
 > `sell_from`/`sell_by` (giữ 20-40 phiên — **luật đo được**) và

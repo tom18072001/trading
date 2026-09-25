@@ -4,20 +4,27 @@ Thay cho stop-loss, bỏ ngày 2026-09-16 theo quyết định của Tom (§26.1
 
 ## Cái gì được đo, cái gì không — đọc trước khi tin con số nào
 
-`scripts/tplus_strategy_bench.py --trail` chấm 7 hình học thoát trên 3.446 lệnh,
-luật vào lệnh đang ship, chi phí 1,00%/vòng:
+`scripts/tplus_strategy_bench.py --trail` chấm 7 hình học thoát, luật vào lệnh
+đang ship (`shipped_rule_top5`, 4.382 lệnh từ 2023), chi phí 1,00%/vòng. Đo lại
+2026-09-25 sau khi sửa hai lỗi nhìn trước của bench (đỉnh cập nhật bằng giá đóng
+TRƯỚC khi so giá thấp cùng phiên; phiên mở dưới băng vẫn khớp ở băng — review
+2026-09-24 §3.2):
 
-    khung 40 phiên            mean%    excess   theo năm
-    KHÔNG stop, giữ hết khung  +1,77    +0,59    24:+0,59  25:+1,25  26:+1,25
-    range nhả 3,5xATR          +1,07    +0,49    24:+0,92  25:+1,15  26:+1,05
-    chỉ gãy trend thì bán      +0,87    +0,37
-    range nhả 2,5xATR          +0,18    +0,18
-    range nhả 1,5xATR          −1,29    +0,09
+    khung 40 phiên              mean%/lệnh  giữ TB   theo năm (excess vs ngẫu nhiên)
+    KHÔNG stop, giữ hết khung     +2,23      40,0    23:−0,24 24:+0,69 25:+1,92 26:+1,03
+    range nhả 2,5×ATR, arm 2,0    +1,66      33,5
+    range nhả 3,5×ATR             +1,54      33,9
+    range nhả 2,5×ATR             +1,26      30,0
+    chỉ gãy trend thì bán         +1,21      26,8
+    range nhả 1,5×ATR             +0,70      24,0
 
-**Giữ hết khung thắng mọi biến thể range, và càng chặt càng tệ — đơn điệu.**
-Cùng kết quả ở khung 20. Nói thẳng: một luật thoát bằng mức giá, dù neo ở đỉnh
-thay vì ở giá vào, vẫn là một cái stop và vẫn tốn tiền. §26.10 đã đo điều đó cho
-stop neo ở giá vào; đây là cùng kết luận cho băng neo ở đỉnh.
+**Giữ hết khung vẫn cho lợi nhuận/lệnh cao nhất, và càng chặt càng thấp** — cùng
+chiều ở khung 20 (+0,66 so với +0,43 / +0,31 / +0,07 cho băng 3,5 / 2,5 / 1,5).
+Nhưng cái giá của băng nhỏ hơn 2-3 lần con số cũ (bản lỗi: băng 1,5×ATR −1,29,
+băng 2,5×ATR +0,18 trên luật cũ). Đo như một danh mục thật (review §3.2):
+`give_back` 3,5×ATR tốn ~0,7 điểm %/năm nếu tiền bán ra đặt vào index, và giữ hết
+khung có Sharpe tốt nhất. Một luật thoát bằng mức giá, dù neo ở đỉnh thay vì ở
+giá vào, vẫn tốn tiền — chỉ ít hơn đã tưởng.
 
 Nên module này tách bạch hai thứ, và chỉ MỘT trong hai là luật đo được:
 
@@ -30,9 +37,10 @@ Nên module này tách bạch hai thứ, và chỉ MỘT trong hai là luật đ
     vào vùng nào trong cửa sổ. Thoát tự động tại `band_lo` đã được đo và **thua**
     việc giữ hết khung.
 
-`give_back` là ngoại lệ có bằng chứng: 3,5×ATR dưới đỉnh là băng **ít tốn nhất**
-trong các băng đo được (+1,07 so với +1,77 của không-băng). Nếu Tom vẫn muốn một
-mức cơ học thì đó là mức ít hại nhất — không phải mức tốt.
+`give_back` 3,5×ATR dưới đỉnh là băng **ít tốn nhất** trong các băng neo 1×ATR
+đo được (+1,54 so với +2,23 của không-băng ở khung 40). Nó được báo như **tin về
+luận điểm**, không phải lệnh bán; nếu Tom vẫn muốn một mức cơ học thì đó là mức ít
+hại nhất — không phải mức tốt.
 """
 from __future__ import annotations
 

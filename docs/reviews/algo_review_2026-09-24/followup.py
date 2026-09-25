@@ -8,8 +8,11 @@ OUT = HERE / "out"
 OUT.mkdir(exist_ok=True)
 
 
-import numpy as np, pandas as pd
-from picks_eval import *
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+from picks_eval import (MIN_BUY_SCORE, MIN_DV, TOTAL_COST, UNTRENDED_FLOOR,  # noqa: E402
+    jt_portfolio, load_all, nw_t, per_trade, perf, production_rank, production_score,
+    topk, vn_daily)  # noqa: E402
 p, f, vn = load_all()
 elig = (f["dv20"] > MIN_DV) & f["sma50"].notna()
 sc = production_score(f).round(2)
@@ -18,7 +21,7 @@ up = sc > UNTRENDED_FLOOR                       # SMA200 gate only
 ship = topk(rk.where((sc >= MIN_BUY_SCORE) & elig), 5, tiebreak=sc)
 gate_only = topk(rk.where(up & elig), 5, tiebreak=sc)
 FIRST = pd.Timestamp("2022-10-24")               # first day the shipped rule can pick
-O, C = p["open"], p["close"]
+O, C = p["open"], p["close"]  # noqa: E741
 
 def jt_empty_to_index(sel, h, cost=TOTAL_COST):
     """1/n across available picks; a tranche with NO pick buys VNINDEX (same cost)."""

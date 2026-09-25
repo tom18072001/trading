@@ -8,8 +8,10 @@ OUT = HERE / "out"
 OUT.mkdir(exist_ok=True)
 
 
-import numpy as np, pandas as pd
-from picks_eval import *
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+from picks_eval import (MIN_BUY_SCORE, MIN_DV, jt_portfolio, load_all, per_trade, perf,  # noqa: E402
+    production_rank, production_score, topk)  # noqa: E402
 p, f, vn = load_all()
 elig = (f["dv20"] > MIN_DV) & f["sma50"].notna()
 # 1. selecting everything must give exactly zero excess vs NO GATE

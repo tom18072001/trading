@@ -53,20 +53,74 @@ def universe() -> list[str]:
     return sorted(s for s in syms if len(s) == 3 and s.isalnum())
 
 
-def seed_from_legacy(con: sqlite3.Connection) -> int:
-    """Copy _legacy_stock_prices in wholesale -- it is free and covers 2022-2026-04."""
-    src = sqlite3.connect(ROOT / "vnstock_market.db")
+def fetched_symbols(con: sqlite3.Connection) -> set[str]:
+    """Symbols the live source has already delivered a history for."""
+    return {s for (s,) in con.execute("SELECT symbol FROM fetch_log WHERE status='ok'")}
+
+
+def seed_from_legacy(con: sqlite3.Connection, src_db: Path | None = None) -> int:
+    """Copy _legacy_stock_prices in -- free, and covers 2022-2026-04 -- but ONLY
+    for symbols the live source has not delivered yet.
+
+    It used to run on every build with INSERT OR IGNORE, so on every date the
+    fresh source had no row for (a session with no match on an illiquid name)
+    the legacy row -- adjusted on a DIFFERENT basis -- came back and stayed.
+    Review 2026-09-24 §6: 145 such rows in 8 symbols, SRC alternating 19.20 <->
+    25.15. Harmless there only because all 8 sit under the liquidity floor.
+    """
+    src = sqlite3.connect(src_db or (ROOT / "vnstock_market.db"))
     rows = src.execute(
         "SELECT symbol, time, open, high, low, close, volume FROM _legacy_stock_prices"
     ).fetchall()
     src.close()
+    done = fetched_symbols(con)
     clean = [(s.strip().upper(), str(t)[:10], o, hi, lo, c, v)
-             for (s, t, o, hi, lo, c, v) in rows if c and c > 0]
+             for (s, t, o, hi, lo, c, v) in rows
+             if c and c > 0 and s.strip().upper() not in done]
     con.executemany(
         "INSERT OR IGNORE INTO prices(symbol,time,open,high,low,close,volume) "
         "VALUES (?,?,?,?,?,?,?)", clean)
     con.commit()
     return len(clean)
+
+
+def store_fetch(con: sqlite3.Connection, sym: str, recs: list[tuple],
+                start: str, end: str) -> None:
+    """Replace `sym`'s rows in [start, end] with exactly what the source sent.
+
+    Delete-then-insert, not INSERT OR REPLACE: a date the source does NOT return
+    inside the span it was asked for is a date with no trading, and a row left
+    there from an earlier load (legacy, other adjustment basis) is wrong.
+    """
+    con.execute("DELETE FROM prices WHERE symbol=? AND time>=? AND time<=?",
+                (sym, start, end))
+    con.executemany(
+        "INSERT OR REPLACE INTO prices(symbol,time,open,high,low,close,volume) "
+        "VALUES (?,?,?,?,?,?,?)", recs)
+
+
+#: Largest one-session move a listed VN stock can make: UPCoM's ±15% band, plus
+#: slack for the rounding of a price step. Anything beyond it is not a price —
+#: it is two adjustment bases, a split, or a bad print.
+MAX_DAILY_MOVE = 0.16
+
+
+def band_violations(con: sqlite3.Connection, limit: float = MAX_DAILY_MOVE) -> list[tuple]:
+    """(symbol, time, return) for every close-to-close move beyond `limit`.
+
+    Not every hit is an error -- a corporate action with no price adjustment
+    also lands here -- but a panel with many is a panel mixing bases.
+    """
+    out = []
+    prev: dict[str, float] = {}
+    for sym, t, c in con.execute("SELECT symbol, time, close FROM prices "
+                                 "WHERE close > 0 AND symbol NOT LIKE '^%' "
+                                 "ORDER BY symbol, time"):
+        pc = prev.get(sym)
+        if pc and abs(c / pc - 1.0) > limit:
+            out.append((sym, t, c / pc - 1.0))
+        prev[sym] = c
+    return out
 
 
 def fetch_symbol(sym: str, start: str, end: str):
@@ -82,7 +136,11 @@ def main() -> int:
     ap.add_argument("--end", default=date.today().isoformat())
     ap.add_argument("--limit", type=int, default=0, help="max symbols to fetch this run")
     ap.add_argument("--seed-only", action="store_true")
+    ap.add_argument("--refetch", default="",
+                    help="comma-separated symbols to re-fetch over the whole span, "
+                         "replacing every stored row (repairs mixed-basis history)")
     args = ap.parse_args()
+    refetch = {x.strip().upper() for x in args.refetch.split(",") if x.strip()}
 
     PANEL_DB.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(PANEL_DB)
@@ -106,7 +164,8 @@ def main() -> int:
         # 21 names wide before 2025 -- too narrow a cross-section to rank in.
         # A symbol whose history STARTS late needs the head fetched as well,
         # so fetch the whole span whenever either end is missing.
-        needs_head = (not lo) or lo > (date.fromisoformat(args.start) + timedelta(days=200)).isoformat()
+        needs_head = ((not lo) or lo > (date.fromisoformat(args.start) + timedelta(days=200)).isoformat()
+                      or s in refetch)
         needs_tail = (not hi) or hi < args.end
         if not (needs_head or needs_tail):
             continue
@@ -132,9 +191,7 @@ def main() -> int:
                          float(rec.get("high") or 0), float(rec.get("low") or 0),
                          float(rec["close"]), float(rec.get("volume") or 0))
                         for _, rec in df.iterrows() if rec.get("close")]
-                con.executemany(
-                    "INSERT OR REPLACE INTO prices(symbol,time,open,high,low,close,volume) "
-                    "VALUES (?,?,?,?,?,?,?)", recs)
+                store_fetch(con, s, recs, start, args.end)
                 con.execute("INSERT OR REPLACE INTO fetch_log VALUES (?,?,?,?)",
                             (s, date.today().isoformat(), len(recs), "ok"))
                 ok += 1
@@ -150,6 +207,12 @@ def main() -> int:
 
     print(con.execute("SELECT COUNT(*), COUNT(DISTINCT symbol), MIN(time), MAX(time) "
                       "FROM prices").fetchone())
+    bad = band_violations(con)
+    if bad:
+        syms = sorted({b[0] for b in bad})
+        print(f"WARNING: {len(bad)} close-to-close moves beyond ±{MAX_DAILY_MOVE:.0%} "
+              f"in {len(syms)} symbols — mixed adjustment bases or corporate actions. "
+              f"Repair with --refetch {','.join(syms[:12])}")
     return 0
 
 

@@ -494,3 +494,57 @@ universe name into `data/watch/<date>.json`; `daily_watch/audit.py --hold
 in-sample prediction is **+0.39 / +0.44 points per trade** for the rule now
 running. A few months of that log is the first evidence about this decision
 that was not also used to make it.
+
+### 26.12 The ruler, corrected — 2026-09-25
+
+Review 2026-09-24 §1 re-graded every picks rule and found the bench overstating
+them; §8 P1 asked for the bench itself to be fixed so the next decision is made
+on the right number. Done in `analysis/bench.py` + `scripts/ticker_alpha_bench.py`:
+
+| | before | after |
+|---|---|---|
+| base rate | the factor's own cross-section (a gated factor vs a gated base) | NO GATE: every name with dv20 > floor, same session |
+| sessions scored | only those with ≥ 30 names in the FACTOR's cross-section | every session with ≥ 30 liquid names; a factor with no pick that day is a cash day |
+| selection | top-k among names that still had a price h sessions later | top-k among what is known at the close; missing returns dropped when scored |
+| t-stat | IC t over overlapping windows as if independent | Newey-West, lag h, for excess, IC and Q5−Q1 |
+| vs VNINDEX | arithmetic annualisation vs the constant 15.7% | staggered book vs VNINDEX buy & hold on the same dates |
+| the shipped rule | `X_prop_obv` (blend among gated names only) | `X_shipped_rule` (production score with floor, blend over the whole universe, then the gate) |
+
+Negative controls kept in `tests/test_bench_measurement.py`: selecting
+everything gives excess exactly 0; the old `evaluate()` scores a 20-name gated
+factor on **no** session and, with the floor lowered, reports its excess
+against the gated base as exactly 0 — the gate's own contribution erased.
+
+Re-run on the panel (143 names, 2023-01 → 2026-09): `X_shipped_rule` +0.69%
+(NW t 1.55) / +1.01% (1.91), book 7.2% / 11.7%, Sharpe 0.44 / 0.65; VNINDEX
+17.5%, 0.98 — the review's numbers to the decimal. `--verdict` now passes
+**0 of the 42** factors on the two necessary criteria (every year + monotone
+quintiles), at 20 sessions and at 40; the old ruler passed 1 of 41.
+
+**The exit bench** (`tplus_strategy_bench.run_trail`) raised the peak with bar
+k's close before comparing bar k's low with the band, and filled a session that
+opened below the band at the band. Fixed (and gap fills added to the fixed
+target/stop walker too). Entry rule as shipped (`shipped_rule_top5`), mean
+%/trade, 1.00% round trip:
+
+| exit | 20 sessions | 40 sessions |
+|---|---|---|
+| no stop, hold the window | **+0.66** | **+2.23** |
+| band 2.5×ATR, arm 2.0 | +0.45 | +1.66 |
+| band 3.5×ATR | +0.43 | +1.54 |
+| band 2.5×ATR | +0.31 | +1.26 |
+| trend break only | +0.33 | +1.21 |
+| band 2.5×ATR + trend | +0.23 | +0.99 |
+| band 1.5×ATR | +0.07 | +0.70 |
+
+Same entry rule as §26.10 (`swing_prop_obv_top5`), 40 sessions, buggy → fixed:
+band 3.5 +1.07 → +1.14, band 2.5 +0.18 → +0.87, band 1.5 −1.29 → +0.45; no stop
++1.77 unchanged. Direction of §26.10 holds; the price of a band was 2-3× overstated.
+
+**The panel** (`scripts/build_price_panel.py`) re-seeded legacy rows on every
+build, so dates the live source left empty kept a row on another adjustment
+basis. Legacy now seeds only symbols the source has never delivered, a fetch
+replaces its whole span (delete-then-insert), `band_violations()` reports every
+close-to-close move beyond ±16% at the end of a build, and `--refetch SYM,...`
+rebuilds a symbol's history. On the 2026-09-15 panel: 89 such moves, 70 of them
+SRC.

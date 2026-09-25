@@ -9,15 +9,14 @@ sys.path.insert(0, str(HERE.parents[2]))
 OUT = HERE / "out"
 OUT.mkdir(exist_ok=True)
 
-import json
-import sys
+import json  # noqa: E402
+import sys  # noqa: E402
 
 
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-from picks_eval import (MIN_BUY_SCORE, MIN_DV, TOTAL_COST, constituents,  # noqa: E402
-                        jt_portfolio, load_all, nw_t, perf, production_rank,
+from picks_eval import (MIN_BUY_SCORE, MIN_DV, TOTAL_COST, jt_portfolio, load_all, nw_t, perf, production_rank,  # noqa: E402
                         production_score, topk, vn_daily)
 
 START = "2023-01-01"
@@ -26,7 +25,7 @@ sc = production_score(f)
 elig = (f["dv20"] > MIN_DV) & f["sma50"].notna()
 rk = production_rank(sc, f["obv_chg20"], elig)
 ship = topk(rk.where((sc >= MIN_BUY_SCORE) & elig), 5, tiebreak=sc)
-O, C = p["open"], p["close"]
+O, C = p["open"], p["close"]  # noqa: E741
 res = {}
 
 # ---------------------------------------------------------------- 1. timing

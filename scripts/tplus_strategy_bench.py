@@ -135,6 +135,14 @@ def _(f):
     return s.rank(axis=1, ascending=False) <= 3
 
 
+@rule("shipped_rule_top5")
+def _(f):
+    """THE BUY RULE AS SHIPPED since 2026-09-25 (`long_shortlist`): SMA200 gate,
+    then the production rank blend over the whole liquid universe. Top 5."""
+    from scripts.ticker_alpha_bench import FACTORS
+    return FACTORS["X_shipped_rule"](f).rank(axis=1, ascending=False) <= 5
+
+
 @rule("swing_prop_obv_top5")
 def _(f):
     """2-4 week candidate: the shipped score blended with on-balance-volume
@@ -207,12 +215,16 @@ def run(entries: pd.DataFrame, f: dict, p: dict, *, target_atr: float,
             stp = entry * (1 - stop_atr * a)
             held, px, why = max_hold, CL[i + max_hold, j], "time"
             for k in range(1, max_hold + 1):
-                bar_hi, bar_lo = HI[i + k, j], LO[i + k, j]
+                bar_hi, bar_lo, bar_op = HI[i + k, j], LO[i + k, j], OP[i + k, j]
                 if np.isfinite(bar_lo) and bar_lo <= stp:  # stop first: no intrabar path
-                    held, px, why = k, stp, "stop"
+                    # A session that OPENS through the level fills at the open,
+                    # not at the level (2026-09-25, same fix as run_trail).
+                    gap = np.isfinite(bar_op) and bar_op <= stp
+                    held, px, why = k, (bar_op if gap else stp), "stop"
                     break
                 if np.isfinite(bar_hi) and bar_hi >= tgt:
-                    held, px, why = k, tgt, "target"
+                    gap = np.isfinite(bar_op) and bar_op >= tgt
+                    held, px, why = k, (bar_op if gap else tgt), "target"
                     break
             if not np.isfinite(px):
                 continue
@@ -249,7 +261,7 @@ def summarise(t: pd.DataFrame, label: str, years: float) -> dict:
         "held": t["held"].mean(),
         "tgt": (t["exit"] == "target").mean(),
         "stp": (t["exit"] == "stop").mean(),
-        "exit_band": (t["exit"].isin(["band", "trend"])).mean(),
+        "exit_band": (t["exit"].isin(["band", "gap", "trend"])).mean(),
         "total": t["ret"].sum() * 100,
         "by_year": t.groupby(t["date"].dt.year)["ret"].mean() * 100,
     }
@@ -276,6 +288,17 @@ def summarise(t: pd.DataFrame, label: str, years: float) -> dict:
 def run_trail(entries, f, p, *, lo_atr: float, max_hold: int, min_dv: float,
               cost: float, arm_atr: float = 1.0, trend_exit: bool = False,
               ) -> pd.DataFrame:
+    """Walk each trade with a trailing band anchored at the peak CLOSE.
+
+    Fixed 2026-09-25 (review 2026-09-24 §3.2), two look-aheads that made every
+    band look 2-3x more expensive than it is, the tight ones most of all:
+      - the peak was raised with bar k's CLOSE before bar k's LOW was compared
+        with the band -- a strong session lifted the band, then "touched" it
+        with a low printed earlier in that same session. The band on bar k is
+        now set by the closes up to k-1 only, and the peak moves after;
+      - a session that OPENED below the band was filled at the band. It is
+        filled at the open now ("gap").
+    """
     op, lo, cl = p["open"], p["low"], p["close"]
     atr = f["atr_pct"] / 100.0
     sma20 = f["sma20"]
@@ -299,13 +322,16 @@ def run_trail(entries, f, p, *, lo_atr: float, max_hold: int, min_dv: float,
             peak, armed = entry, False
             held, px, why = max_hold, CL[i + max_hold, j], "time"
             for k in range(1, max_hold + 1):
-                c, low_k = CL[i + k, j], LO[i + k, j]
-                if np.isfinite(c):
-                    peak = max(peak, c)
+                c, low_k, open_k = CL[i + k, j], LO[i + k, j], OP[i + k, j]
+                # Band and arming from the PRIOR closes: bar k's close is not
+                # known when its low prints.
                 if peak >= arm_at:
                     armed = True
                 if armed:
                     band_lo = peak * (1 - lo_atr * a)
+                    if np.isfinite(open_k) and open_k <= band_lo:
+                        held, px, why = k, open_k, "gap"   # opened through it
+                        break
                     if np.isfinite(low_k) and low_k <= band_lo:
                         held, px, why = k, band_lo, "band"
                         break
@@ -315,6 +341,8 @@ def run_trail(entries, f, p, *, lo_atr: float, max_hold: int, min_dv: float,
                             and c < S20[i + k, j]:
                         held, px, why = k, c, "trend"
                         break
+                if np.isfinite(c):
+                    peak = max(peak, c)
             if not np.isfinite(px):
                 continue
             out.append((dates[i], syms[j], entry, px / entry - 1 - cost, held, why))

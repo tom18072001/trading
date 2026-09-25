@@ -26,8 +26,10 @@ ROOT = Path(__file__).resolve().parents[3]   # docs/reviews/<this>/ -> repo root
 sys.path.insert(0, str(ROOT))
 
 from analysis.bench import TOTAL_COST  # noqa: E402
-from scripts.ticker_alpha_bench import FACTORS, build_features, load_panel  # noqa: E402
-from services.picks_scoring import (  # noqa: E402
+# FACTORS and MIN_BUY_SCORE are re-exported: the other scripts in this folder
+# import them from here.
+from scripts.ticker_alpha_bench import FACTORS, build_features, load_panel  # noqa: E402, F401
+from services.picks_scoring import (  # noqa: E402, F401
     MIN_BUY_SCORE, SCORE_CONST, UNTRENDED_FLOOR, W_ABOVE_SMA50, W_OVERSOLD_DIV,
     W_PULLBACK_CLIP, W_RANK_OBV, W_RANK_SCORE, W_WIDE_ATR_PEN, WIDE_ATR_PCT,
 )
@@ -189,7 +191,7 @@ def jt_portfolio(sel: pd.DataFrame, p, vn, h: int, cost: float = TOTAL_COST,
     position early at the NEXT open (production acts on an after-close alert);
     freed capital is parked in cash or VNINDEX until the tranche slot ends.
     """
-    O = p["open"].values
+    O = p["open"].values  # noqa: E741
     C = p["close"].values
     S = sel.values
     VC = vn["close"].values
@@ -216,7 +218,7 @@ def jt_portfolio(sel: pd.DataFrame, p, vn, h: int, cost: float = TOTAL_COST,
                 s_ = pd.Series(path).ffill().fillna(1.0).values
                 path = s_
             if exit_rule is not None:
-                for k in range(0, len(path) - 1):
+                for k in range(len(path) - 1):
                     if exit_rule(j, i0, i0 + k, C[i0:i0 + k + 1, j], e, f):
                         # sell at next open
                         xo = O[i0 + k + 1, j]

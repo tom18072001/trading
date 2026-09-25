@@ -49,11 +49,14 @@ from config import HOLD_SESSIONS  # noqa: E402
 from analysis.bench import (  # noqa: E402
     FACTORS,
     TOTAL_COST,
+    book_stats,
     cost_banner,
     factor_meta,
     judge,
     load_plugins,
+    nw_t,
     register,
+    staggered_book,
 )
 
 HORIZONS = HOLD_SESSIONS
@@ -77,6 +80,24 @@ def load_panel(min_history: int = 260) -> dict[str, pd.DataFrame]:
     for col in ("open", "high", "low", "close", "volume"):
         out[col] = df.pivot(index="time", columns="symbol", values=col).sort_index()
     return out
+
+
+def load_vnindex(index: pd.DatetimeIndex) -> pd.Series | None:
+    """^VNINDEX close from the same panel, on the panel's calendar.
+
+    The benchmark must share the panel's dates, which is why build_price_panel
+    stores the index there (`macro_anchors` has no VNINDEX before 2026-04-09
+    and 613 rows of ~1.82 after it — review 2026-09-24 §4.1/4).
+    """
+    con = sqlite3.connect(PANEL_DB)
+    df = pd.read_sql("SELECT time, close FROM prices WHERE symbol='^VNINDEX' "
+                     "AND close > 200 ORDER BY time", con, parse_dates=["time"])
+    con.close()
+    if df.empty:
+        return None
+    vn = df.set_index("time")["close"]
+    vn = vn[~vn.index.duplicated(keep="last")].reindex(index).ffill(limit=5)
+    return vn if vn.notna().mean() > 0.9 else None
 
 
 # ============================== indicators ===================================
@@ -490,6 +511,65 @@ def _(f):
     return out
 
 
+#: Production's liquidity floor in panel units: MIN_DV_20D_VND = 5bn VND/day,
+#: and the panel's close is in thousand VND. A factor does not see --min-dv, so
+#: the shipped rule's universe is pinned here, at the bench default.
+SHIPPED_MIN_DV = 5e6
+
+
+def _production_score(f):
+    """`score_ticker` exactly as production computes it for the WHOLE universe:
+    the −20 floor instead of NaN for names below SMA200, the pullback term
+    dropped (not NaN) when ATR is missing, rounded to 2 dp."""
+    from services.picks_scoring import (
+        SCORE_CONST, UNTRENDED_FLOOR, W_ABOVE_SMA50, W_OVERSOLD_DIV,
+        W_PULLBACK_CLIP, W_WIDE_ATR_PEN, WIDE_ATR_PCT,
+    )
+    atr = (f["atr_pct"] / 100.0).replace(0, np.nan)
+    s = SCORE_CONST + (50.0 - f["rsi2"]) / W_OVERSOLD_DIV
+    s = s + (-f["ret1"] / atr).clip(-W_PULLBACK_CLIP, W_PULLBACK_CLIP).fillna(0.0)
+    s = s + W_ABOVE_SMA50 * (f["close"] > f["sma50"]).astype(float)
+    s = s - W_WIDE_ATR_PEN * (f["atr_pct"] > WIDE_ATR_PCT).astype(float)
+    up = (f["close"] > f["sma200"]) & f["sma200"].notna()
+    s = s.where(up, np.minimum(s, UNTRENDED_FLOOR))
+    return s.where(f["sma50"].notna()).round(2)
+
+
+@register("X_shipped_rule")
+def _(f):
+    """THE BUY RULE AS SHIPPED (2026-09-25, `long_shortlist`): production score
+    with the floor over every liquid name, the rank blend over that SAME
+    universe (Stage E), and only then the SMA200 gate. Top-k of this is the
+    list Daily Insight, the email and the bulletin print.
+
+    `X_prop_obv` is not this: it blends only among gated names, a different
+    cross-section, worth ~0.2 points per trade (review 2026-09-24 §2.2). Grade
+    the product by this row, not that one.
+    """
+    from services.picks_scoring import UNTRENDED_FLOOR, blended_rank_scores
+
+    score = _production_score(f)
+    universe = (f["dv20"] > SHIPPED_MIN_DV) & score.notna()
+    obv = f["obv_chg20"]
+    out = pd.DataFrame(np.nan, index=score.index, columns=score.columns)
+    cols_all = list(score.columns)
+    for i in range(len(score)):
+        live = universe.iloc[i].to_numpy()
+        if live.sum() < 2:
+            continue
+        js = np.flatnonzero(live)
+        srow, orow = score.iloc[i].to_numpy(), obv.iloc[i].to_numpy()
+        blended = blended_rank_scores(
+            [float(srow[j]) for j in js],
+            [(None if np.isnan(orow[j]) else float(orow[j])) for j in js])
+        out.iloc[i, js] = np.round(blended, 4)
+    assert list(out.columns) == cols_all
+    # `_rank_key` breaks a rank tie on the score, then the symbol. A nudge far
+    # below the 4-dp rounding of the blend does the same inside nlargest().
+    out = out + score.rank(axis=1, pct=True) * 1e-9
+    return out.where(score > UNTRENDED_FLOOR)
+
+
 @register("X_swing_4wk")
 def _(f):
     """Candidate for a 2-4 week shortlist: money-flow persistence (OBV), a size
@@ -530,53 +610,110 @@ def _(f):
 NQ = 5  # quintiles -- 18.7 wants monotonicity across score buckets
 
 
-def evaluate(scores, f, p, topk, min_dv, horizons=HORIZONS, min_names=30) -> dict:
+#: Chấm từ đây: năm đầu tiên mọi factor có cổng SMA200 đã có đủ lịch sử, và là
+#: mốc review 2026-09-24 dùng. Chọn mã vẫn chạy từ đầu panel để danh mục đã vào
+#: đủ vốn khi đồng hồ bắt đầu đếm.
+START = "2023-01-01"
+
+#: Sàn bề rộng THỊ TRƯỜNG, không phải của factor: một phiên có dưới chừng này mã
+#: đủ thanh khoản không phải bài toán xếp hạng ("top 5 của 21" là 1/4 thị trường).
+#: Bản cũ áp sàn cho cross-section CỦA FACTOR, nên factor có cổng mất 109/898
+#: phiên từ 2023 — đúng các phiên thị trường yếu mà production vẫn ra danh sách
+#: (review §1: một mình lựa chọn đó cùng base có cổng lật được năm 2023).
+MIN_UNIVERSE = 30
+
+
+def evaluate(scores, f, p, topk, min_dv, horizons=HORIZONS, min_names=MIN_UNIVERSE,
+             vn: pd.Series | None = None, start: str | None = START) -> dict:
+    """Chấm một bảng điểm theo thước đo của review 2026-09-24 §1.
+
+      base    NO GATE: mọi mã có dv20 > min_dv và có lợi suất tới, cùng phiên —
+              một base cho MỌI factor. Base có cổng xoá luôn phần đóng góp của
+              chính cái cổng (§16.12 định nghĩa NO GATE là toàn panel).
+      phiên   mọi phiên có ≥ `min_names` mã đủ thanh khoản. Phiên factor không
+              chọn được mã nào là phiên tiền mặt của danh mục, không bị bỏ đi.
+      t       Newey-West, lag = h, cho excess, IC và Q5−Q1 — lợi suất h phiên đo
+              mỗi ngày chồng lên nhau.
+      danh mục staggered (Jegadeesh-Titman) trên top-k, chi phí 1,00%/vòng, so
+              với VNINDEX mua & giữ trên CÙNG các ngày (`vn`).
+    """
     o, c = p["open"], p["close"]
-    elig = (f["dv20"] > min_dv) & scores.notna() & o.shift(-1).notna()
-    s = scores.where(elig)
     entry = o.shift(-1)
+    # Only what is known at the close of the signal day: liquidity, and the
+    # factor. Neither tomorrow's open nor the h-session return may decide which
+    # names are CHOSEN -- the first draft picked top-k among names that still
+    # had a price h sessions later, a quiet look-ahead that lifted the book by
+    # ~0.5 point a year. Returns that turn out missing are dropped when SCORED.
+    universe = f["dv20"] > min_dv
+    s = scores.where(universe)
     dates = s.index
+    t0 = pd.Timestamp(start) if start else dates[0]
+    col_ix = {name: k for k, name in enumerate(s.columns)}
 
     out = {}
     for h in horizons:
         fwd = c.shift(-(1 + h)) / entry - 1.0
         rows, ics, quints = [], [], []
-        for i in range(len(dates) - (h + 2)):
-            row_s, row_f = s.iloc[i], fwd.iloc[i]
-            m = row_s.notna() & row_f.notna()
-            # A cross-section narrower than this is not a ranking problem.
-            # The panel is only ~21 names wide before 2025; letting those days
-            # through means "top 5 of 21", which is a quarter of the market.
-            if m.sum() < min_names:
+        sel = np.zeros(s.shape, dtype=bool)
+        # Every session to the end of the panel: the book keeps opening tranches
+        # after the last session that can still be SCORED (fwd is NaN there, so
+        # the statistics skip it on their own).
+        for i in range(len(dates) - 1):
+            row_f = fwd.iloc[i]
+            row_s = s.iloc[i]
+            live = row_s.notna()
+            top = row_s[live].nlargest(topk).index if live.any() else []
+            # The book trades every session the rule produces a list, as
+            # production does -- the width floor below is for the STATISTICS.
+            for name in top:
+                sel[i, col_ix[name]] = True
+            u = universe.iloc[i] & row_f.notna()
+            if u.sum() < min_names or dates[i] < t0:
                 continue
-            ics.append(row_s[m].rank().corr(row_f[m].rank()))
-            top = row_s[m].nlargest(topk).index
-            rows.append((dates[i], row_f[top].mean(), row_f[m].mean(),
-                         float((row_f[top] > 0).mean())))
-            q = pd.qcut(row_s[m].rank(method="first"), NQ, labels=False)
-            quints.append(row_f[m].groupby(q).mean())
+            base = row_f[u].mean()
+            got = row_f[top].dropna() if len(top) else row_f.iloc[:0]
+            if got.empty:
+                rows.append((dates[i], np.nan, base, np.nan))
+                continue
+            rows.append((dates[i], got.mean(), base, float((got > 0).mean())))
+            m = live & row_f.notna()
+            if m.sum() >= 10:
+                ics.append((dates[i], row_s[m].rank().corr(row_f[m].rank())))
+            if m.sum() >= 2 * NQ:
+                q = pd.qcut(row_s[m].rank(method="first"), NQ, labels=False)
+                quints.append(row_f[m].groupby(q).mean().rename(dates[i]))
         if not rows:
             continue
         d = pd.DataFrame(rows, columns=["date", "pick", "base", "hit"]).set_index("date")
+        picked = d.dropna(subset=["pick"])
+        if picked.empty:
+            continue
+        ex = picked["pick"] - picked["base"]
         qdf = pd.DataFrame(quints)
-        ic = float(np.nanmean(ics))
-        sd = float(np.nanstd(ics))
-        out[h] = {
-            "n_days": len(d),
-            "pick_gross": d["pick"].mean(),
+        ic_s = pd.Series(dict(ics), dtype=float)
+        res = {
+            "n_days": len(picked),
+            "n_sessions": len(d),
+            "pick_gross": picked["pick"].mean(),
             "base_gross": d["base"].mean(),
-            "excess": d["pick"].mean() - d["base"].mean(),
-            "pick_net": d["pick"].mean() - TOTAL_COST,
-            "hit": d["hit"].mean(),
-            "ic": ic,
-            "ic_t": ic / (sd / np.sqrt(len(ics))) if sd > 0 and len(ics) > 2 else np.nan,
-            "quintiles": qdf.mean(),
-            "by_year": d.groupby(d.index.year).apply(
-                lambda g: pd.Series({"excess": g["pick"].mean() - g["base"].mean(),
-                                     "n": float(len(g))})),
+            "excess": ex.mean(),
+            "excess_nw_t": nw_t(ex, h),
+            "pick_net": picked["pick"].mean() - TOTAL_COST,
+            "hit": picked["hit"].mean(),
+            "ic": float(ic_s.mean()) if len(ic_s) else float("nan"),
+            "ic_nw_t": nw_t(ic_s, h),
+            "quintiles": qdf.mean() if len(qdf) else pd.Series([np.nan] * NQ),
+            "q_spread_nw_t": nw_t(qdf.iloc[:, -1] - qdf.iloc[:, 0], h) if len(qdf) else float("nan"),
+            "by_year": ex.groupby(ex.index.year).apply(
+                lambda g: pd.Series({"excess": g.mean(), "n": float(len(g))})).unstack(),
         }
+        if vn is not None:
+            book = staggered_book(pd.DataFrame(sel, index=dates, columns=s.columns),
+                                  o, c, h)
+            res["book"] = book_stats(book, start)
+            res["vnindex"] = book_stats(vn.pct_change(), start)
+        out[h] = res
     return out
-
 
 
 def _print_verdicts(names, results, horizons) -> None:
@@ -585,20 +722,22 @@ def _print_verdicts(names, results, horizons) -> None:
     Đây là phần "AI native": một phiên sau chỉ cần đọc cột cuối, không phải nhớ
     §16.12 và §18.7 nói gì.
     """
-    from analysis.bench import (VNINDEX_CAGR, cost_drag_per_year,
-                                rebalances_per_year)
+    from analysis.bench import cost_drag_per_year, rebalances_per_year
     for h in horizons:
         rows = [(n, judge(n, h, results[n][h])) for n in sorted(names)
                 if results[n].get(h)]
         if not rows:
             continue
+        vni = next((results[n][h].get("vnindex") for n, _ in rows
+                    if results[n][h].get("vnindex")), None) or {}
         print(f"\n{'=' * 104}")
         print(f"PHÁN QUYẾT, thoát +{h} phiên   "
               f"({rebalances_per_year(h):.1f} vòng/năm, "
               f"phí ăn {cost_drag_per_year(h)*100:.1f}%/năm, "
-              f"trần VNINDEX {VNINDEX_CAGR*100:.1f}%/năm)")
+              f"VNINDEX cùng ngày {vni.get('cagr', float('nan'))*100:.1f}%/năm "
+              f"Sharpe {vni.get('sharpe', float('nan')):.2f})")
         print("=" * 104)
-        print(f"{'factor':26s} {'quy năm':>9s}  {'phán quyết':<14s} lý do trượt")
+        print(f"{'factor':26s} {'danh mục':>9s}  {'phán quyết':<14s} lý do trượt")
         for n, v in sorted(rows, key=lambda t: -t[1].annualised_net):
             print(f"{n:26s} {v.annualised_net*100:>+8.1f}%  {v.label:<14s} "
                   f"{'' if v.label == 'VƯỢT TRẦN' else v.reason}")
@@ -610,10 +749,10 @@ def _print_verdicts(names, results, horizons) -> None:
 
 def _write_json(path, names, results, horizons, args) -> None:
     import json
-    from analysis.bench import TOTAL_COST, VNINDEX_CAGR
+    from analysis.bench import TOTAL_COST
     out = {
-        "config": {"topk": args.topk, "min_dv": args.min_dv,
-                   "total_cost": TOTAL_COST, "vnindex_cagr": VNINDEX_CAGR,
+        "config": {"topk": args.topk, "min_dv": args.min_dv, "start": args.start,
+                   "total_cost": TOTAL_COST, "base": "NO GATE, every session",
                    "horizons": list(horizons)},
         "factors": {},
     }
@@ -627,9 +766,12 @@ def _write_json(path, names, results, horizons, args) -> None:
                 continue
             v = judge(n, h, r)
             out["factors"][n]["horizons"][str(h)] = {
-                "excess": r["excess"], "net_per_trade": r["pick_net"],
-                "annualised": v.annualised_net, "ic": r["ic"], "ic_t": r["ic_t"],
-                "hit": r["hit"], "n_days": r["n_days"],
+                "excess": r["excess"], "excess_nw_t": r["excess_nw_t"],
+                "net_per_trade": r["pick_net"],
+                "book": r.get("book"), "vnindex": r.get("vnindex"),
+                "ic": r["ic"], "ic_nw_t": r["ic_nw_t"],
+                "q_spread_nw_t": r["q_spread_nw_t"],
+                "hit": r["hit"], "n_days": r["n_days"], "n_sessions": r["n_sessions"],
                 "quintiles": [float(x) for x in r["quintiles"]],
                 "by_year": {str(int(y)): float(r["by_year"].loc[y, "excess"])
                             for y in r["by_year"].index},
@@ -653,6 +795,8 @@ def main() -> int:
                     help="ghi kết quả ra JSON để so được giữa các lần chạy")
     ap.add_argument("--no-plugins", action="store_true",
                     help="bỏ qua scripts/factors/")
+    ap.add_argument("--start", default=START,
+                    help="chấm từ ngày này (chọn mã vẫn chạy từ đầu panel)")
     args = ap.parse_args()
 
     if not args.no_plugins:
@@ -674,36 +818,45 @@ def main() -> int:
           f"({p['close'].index.min().date()} .. {p['close'].index.max().date()})")
     print(cost_banner())
     f = build_features(p)
+    vn = load_vnindex(p["close"].index)
+    if vn is None:
+        print("KHÔNG có ^VNINDEX trong panel — cột danh mục/VNINDEX sẽ trống. "
+              "Chạy scripts/build_price_panel.py.", file=sys.stderr)
 
     names = [n for n in FACTORS if not args.only or n in args.only.split(",")]
-    results = {n: evaluate(FACTORS[n](f), f, p, args.topk, args.min_dv, horizons)
+    results = {n: evaluate(FACTORS[n](f), f, p, args.topk, args.min_dv, horizons,
+                           vn=vn, start=args.start)
                for n in sorted(names)}
 
     for h in horizons:
-        print(f"\n{'=' * 104}")
+        print(f"\n{'=' * 116}")
         print(f"EXIT +{h} SESSIONS AFTER ENTRY   (entry = next open, top-{args.topk}, "
-              f"min dv {args.min_dv:,.0f})")
-        print("=" * 104)
-        print(f"{'factor':26s} {'gross%':>8s} {'net%':>8s} {'BASE%':>8s} "
-              f"{'excess%':>9s} {'hit':>6s} {'IC':>8s} {'IC_t':>7s} {'days':>6s}")
-        printed_base = False
+              f"min dv {args.min_dv:,.0f}, from {args.start}; base = NO GATE, every session)")
+        print("=" * 116)
+        print(f"{'factor':26s} {'gross%':>8s} {'net%':>8s} {'excess%':>9s} {'NW t':>6s} "
+              f"{'hit':>6s} {'IC':>8s} {'IC t':>6s} {'days':>6s} {'book/yr':>8s} {'Sharpe':>7s}")
         rows = []
         for n in sorted(names):
             r = results[n].get(h)
-            if not r:
-                continue
-            if not printed_base:
-                print(f"{'BASE RATE (no ranking)':26s} {r['base_gross']*100:>8.2f} "
-                      f"{r['base_gross']*100 - TOTAL_COST*100:>8.2f} "
-                      f"{r['base_gross']*100:>8.2f} {0.0:>+9.2f} {'':>6s} {'':>8s} "
-                      f"{'':>7s} {r['n_days']:>6d}")
-                printed_base = True
-            rows.append((r["excess"], n, r))
+            if r:
+                rows.append((r["excess"], n, r))
+        if rows:
+            r0 = rows[0][2]
+            vni = r0.get("vnindex") or {}
+            print(f"{'BASE: NO GATE':26s} {r0['base_gross']*100:>8.2f} "
+                  f"{r0['base_gross']*100 - TOTAL_COST*100:>8.2f} {0.0:>+9.2f} "
+                  f"{'':>6s} {'':>6s} {'':>8s} {'':>6s} {r0['n_sessions']:>6d}")
+            print(f"{'VNINDEX buy & hold':26s} {'':>8s} {'':>8s} {'':>9s} {'':>6s} "
+                  f"{'':>6s} {'':>8s} {'':>6s} {'':>6s} "
+                  f"{vni.get('cagr', float('nan'))*100:>+7.1f}% "
+                  f"{vni.get('sharpe', float('nan')):>7.2f}")
         for _, n, r in sorted(rows, key=lambda t: -t[0]):
+            bk = r.get("book") or {}
             print(f"{n:26s} {r['pick_gross']*100:>8.2f} {r['pick_net']*100:>8.2f} "
-                  f"{r['base_gross']*100:>8.2f} {r['excess']*100:>+9.2f} "
-                  f"{r['hit']:>6.2f} {r['ic']:>+8.4f} {r['ic_t']:>+7.2f} "
-                  f"{r['n_days']:>6d}")
+                  f"{r['excess']*100:>+9.2f} {r['excess_nw_t']:>+6.2f} "
+                  f"{r['hit']:>6.2f} {r['ic']:>+8.4f} {r['ic_nw_t']:>+6.2f} "
+                  f"{r['n_days']:>6d} {bk.get('cagr', float('nan'))*100:>+7.1f}% "
+                  f"{bk.get('sharpe', float('nan')):>7.2f}")
 
     h0 = horizons[0]
     print(f"\n{'=' * 104}")

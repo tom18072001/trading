@@ -8,8 +8,9 @@ OUT = HERE / "out"
 OUT.mkdir(exist_ok=True)
 
 
-import numpy as np, pandas as pd
-from picks_eval import *
+import pandas as pd  # noqa: E402
+from picks_eval import (FACTORS, MIN_BUY_SCORE, MIN_DV, load_all, nw_t, per_trade,  # noqa: E402
+    production_rank, production_score, topk)  # noqa: E402
 p, f, vn = load_all()
 elig = (f["dv20"] > MIN_DV) & f["sma50"].notna()
 xpo = FACTORS["X_prop_obv"](f)

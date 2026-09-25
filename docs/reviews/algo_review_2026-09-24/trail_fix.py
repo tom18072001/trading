@@ -8,9 +8,10 @@ OUT = HERE / "out"
 OUT.mkdir(exist_ok=True)
 
 
-import numpy as np, pandas as pd
-from picks_eval import load_all, FACTORS, MIN_DV, TOTAL_COST
-from scripts.tplus_strategy_bench import run_trail, run, RULES
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+from picks_eval import load_all, MIN_DV, TOTAL_COST  # noqa: E402
+from scripts.tplus_strategy_bench import run_trail, run, RULES  # noqa: E402
 p, f, vn = load_all()
 ent = RULES["swing_prop_obv_top5"](f).fillna(False).astype(bool)
 ent.loc[ent.index < pd.Timestamp("2023-01-01")] = False
@@ -43,12 +44,15 @@ def run_trail_fixed(entries, lo_atr, max_hold, arm_atr=1.0):
                 out.append((p["close"].index[i], px / e - 1 - TOTAL_COST, held, why))
     return pd.DataFrame(out, columns=["date", "ret", "held", "exit"])
 
+def per_sess(t):
+    return t.ret.mean() / t.held.mean() * 252 * 100
+
+
 for h in (20, 40):
     t0 = run(ent, f, p, target_atr=99, stop_atr=99, max_hold=h, min_dv=MIN_DV, cost=TOTAL_COST)
     for lo_a in (3.5, 2.5):
         a = run_trail(ent, f, p, lo_atr=lo_a, max_hold=h, min_dv=MIN_DV, cost=TOTAL_COST, arm_atr=1.0)
         b = run_trail_fixed(ent, lo_a, h)
-        per_sess = lambda t: t.ret.mean() / t.held.mean() * 252 * 100
         print(f"h={h} band {lo_a}xATR | repo bench: mean {a.ret.mean()*100:+.2f}%/trade, held {a.held.mean():.1f}, "
               f"~{per_sess(a):+.1f}%/yr per-session | FIXED: mean {b.ret.mean()*100:+.2f}%/trade, held {b.held.mean():.1f}, "
               f"~{per_sess(b):+.1f}%/yr, gap exits {(b.exit=='gap').mean()*100:.1f}%")
