@@ -10,6 +10,10 @@ from __future__ import annotations
 import pytest
 
 from services.picks_scoring import (
+    MIN_BUY_SCORE,
+    UNTRENDED_FLOOR,
+    WIDE_ATR_PCT,
+    W_WIDE_ATR_PEN,
     MIN_RR,
     MIN_STOP_PCT,
     MIN_UPSIDE_PCT,
@@ -23,37 +27,104 @@ from services.picks_scoring import (
 # -------------------- score_ticker --------------------
 
 
-def test_score_ticker_all_fields_missing_returns_zero():
-    # When every indicator is None the score is trivially 0 (neutral), not a crash.
-    assert score_ticker({}) == 0
+def test_an_empty_row_is_floored_not_crashed_and_not_neutral():
+    """No inputs at all must not read as an average candidate.
+
+    The rule this replaced returned 0 for `{}` -- the same number a genuinely
+    middling stock got -- so a name with no data could outrank a real one that
+    happened to score slightly negative. With no SMA200 there is no confirmed
+    uptrend, so the gate floors it.
+    """
+    assert score_ticker({}) == UNTRENDED_FLOOR
 
 
-def test_score_ticker_strong_bullish_setup():
-    row = {
-        "rsi_14": 58,            # +2 (50..70 range)
-        "macd_hist": 0.15,       # +1
-        "price_to_sma_20": 0.02, # +1 (above SMA20)
-        "price_to_sma_50": 0.04, # +1 (above SMA50)
-        "adx_14": 28,            # +1 (trend strength)
-        "volume_ratio_20": 1.4,  # +2 (volume surge)
-    }
-    # 2 + 1 + 1 + 1 + 1 + 2 = 8
-    assert score_ticker(row) == 8
+def test_the_gate_floors_a_downtrend_however_oversold_it_is():
+    """A falling knife is the failure mode un-gated mean reversion has.
+
+    RSI(2) of 2 is as oversold as the oscillator goes, and it still must not
+    outrank a mildly oversold name in a confirmed uptrend.
+    """
+    knife = {"close": 10.0, "rsi_2": 2.0, "ret_1d": -6.0, "atr_pct": 2.0,
+             "price_to_sma_50": -0.08, "price_to_sma_200": -0.20}
+    healthy = {"close": 10.0, "rsi_2": 40.0, "ret_1d": -0.5, "atr_pct": 2.0,
+               "price_to_sma_50": 0.03, "price_to_sma_200": 0.10}
+    assert score_ticker(knife) == UNTRENDED_FLOOR
+    assert score_ticker(healthy) > score_ticker(knife)
 
 
-def test_score_ticker_overbought_penalised():
-    row = {"rsi_14": 78}       # > 70 → -1
-    assert score_ticker(row) == -1
+def test_a_gated_name_can_never_sink_to_the_floor():
+    """The floor must sit clear of the worst reachable gated score.
+
+    -1 const, -5 oversold, -2 pullback, -1.5 ATR = -9.5, so a floor of -9 would
+    have let the worst trending name rank BELOW an untrended one -- the exact
+    inversion the gate exists to prevent.
+    """
+    worst = {"close": 10.0, "rsi_2": 100.0, "ret_1d": 99.0, "atr_pct": 9.0,
+             "price_to_sma_50": -0.01, "price_to_sma_200": 0.01}
+    assert score_ticker(worst) > UNTRENDED_FLOOR
 
 
-def test_score_ticker_oversold_credited():
-    row = {"rsi_14": 25}       # < 30 → +1 (contrarian long setup)
-    assert score_ticker(row) == 1
+def test_oversold_beats_extended_which_is_the_whole_point_of_the_rewrite():
+    """The direction the old rule had backwards.
+
+    The old score paid +2 for RSI(14) between 50 and 70 and +2 more for a
+    volume surge, so it ranked the extended name top. Measured over 1,168
+    sessions that ranking was worse than random (CLAUDE.md 26.2).
+    """
+    pulled_back = {"close": 10.0, "rsi_2": 8.0, "ret_1d": -2.0, "atr_pct": 2.0,
+                   "price_to_sma_50": 0.02, "price_to_sma_200": 0.08}
+    extended = {"close": 10.0, "rsi_2": 95.0, "ret_1d": 3.0, "atr_pct": 2.0,
+                "price_to_sma_50": 0.02, "price_to_sma_200": 0.08}
+    assert score_ticker(pulled_back) > score_ticker(extended)
 
 
-def test_score_ticker_low_volume_penalised():
-    row = {"volume_ratio_20": 0.5}
-    assert score_ticker(row) == -1
+def test_the_pullback_term_is_measured_in_the_stock_own_atr():
+    """A 2% drop is a big move for a bank and a quiet day for a broker.
+
+    Both rows fall 2% with identical oscillator readings; only ATR differs.
+    The quiet name must score higher, or the term is just a return and the
+    cross-section is back to comparing incomparable scales.
+    """
+    quiet = {"close": 10.0, "rsi_2": 20.0, "ret_1d": -2.0, "atr_pct": 1.0,
+             "price_to_sma_50": 0.02, "price_to_sma_200": 0.08}
+    wild = {"close": 10.0, "rsi_2": 20.0, "ret_1d": -2.0, "atr_pct": 3.0,
+            "price_to_sma_50": 0.02, "price_to_sma_200": 0.08}
+    assert score_ticker(quiet) > score_ticker(wild)
+
+
+def test_the_pullback_term_is_clipped_so_one_crash_cannot_dominate():
+    """Without the clip, a -20% day outscores every other term combined."""
+    crash = {"close": 10.0, "rsi_2": 50.0, "ret_1d": -20.0, "atr_pct": 2.0,
+             "price_to_sma_50": 0.02, "price_to_sma_200": 0.08}
+    dip = {"close": 10.0, "rsi_2": 50.0, "ret_1d": -4.0, "atr_pct": 2.0,
+           "price_to_sma_50": 0.02, "price_to_sma_200": 0.08}
+    assert score_ticker(crash) == score_ticker(dip)   # both clipped at 2 ATRs
+
+
+def test_a_wide_atr_name_is_penalised():
+    """The term that carries 2026 -- see the docstring in picks_scoring."""
+    base = {"close": 10.0, "rsi_2": 30.0, "ret_1d": 0.0, "atr_pct": 2.0,
+            "price_to_sma_50": 0.02, "price_to_sma_200": 0.08}
+    wild = dict(base, atr_pct=WIDE_ATR_PCT + 0.1)
+    assert score_ticker(wild) == pytest.approx(score_ticker(base) - W_WIDE_ATR_PEN, abs=0.01)
+
+
+def test_missing_atr_does_not_silently_zero_the_pullback_term():
+    """No ATR means the pullback cannot be expressed in ATRs, so it is dropped
+    rather than divided by zero -- and dropping it must not raise."""
+    row = {"close": 10.0, "rsi_2": 30.0, "ret_1d": -2.0, "atr_pct": None,
+           "price_to_sma_50": 0.02, "price_to_sma_200": 0.08}
+    assert isinstance(score_ticker(row), float)
+
+
+def test_the_retired_cutoff_still_admits_a_normal_shortlist_name():
+    """MIN_BUY_SCORE is no longer a gate (2026-09-25) — it survives only to
+    shadow-log the list the old rule would have produced. That log is only a
+    comparison if the old rule still behaves as it did: a mildly oversold name
+    in an uptrend clears it."""
+    ordinary = {"close": 10.0, "rsi_2": 25.0, "ret_1d": -1.0, "atr_pct": 2.0,
+                "price_to_sma_50": 0.02, "price_to_sma_200": 0.08}
+    assert score_ticker(ordinary) >= MIN_BUY_SCORE
 
 
 # -------------------- compute_stop_target_rr --------------------
@@ -87,18 +158,27 @@ def test_compute_stop_target_zero_close_returns_error():
     assert stop is None and target is None and rr is None
 
 
-def test_compute_stop_target_tplus_vs_swing_profile():
-    """TPLUS uses tighter ATR multipliers → tighter stop, smaller target."""
+def test_swing_is_the_only_profile_and_its_geometry_is_unchanged():
+    """TPLUS (1.0x stop / 2.0x target, 3-5 sessions) was removed with the T+
+    mode on 2026-09-25. SWING must still be 1.8x ATR below and 2.5x ATR above:
+    `is_valid_long_pick` screens on it, so a silent change would change which
+    names reach the shortlist."""
+    assert [m.name for m in PickProfile] == ["SWING"]
     p = {"close": 100.0, "atr_pct": 3.0, "bb_upper": None, "bb_lower": None}
-    s_swing, t_swing, rr_swing, _ = compute_stop_target_rr(p, PickProfile.SWING)
-    s_tplus, t_tplus, rr_tplus, _ = compute_stop_target_rr(p, PickProfile.TPLUS)
-    # SWING = 1.8× ATR stop, 2.5× ATR target
-    # TPLUS = 1.0× ATR stop, 2.0× ATR target
-    # Both stops must be below close; TPLUS stop is CLOSER to close.
-    assert s_swing < s_tplus < p["close"]
-    # Both targets above close; SWING target is FURTHER from close.
-    assert t_tplus < t_swing
-    assert t_tplus > p["close"]
+    stop, target, rr, _ = compute_stop_target_rr(p, PickProfile.SWING)
+    assert stop == pytest.approx(100.0 * (1 - 1.8 * 0.03))            # 94.6
+    # 2.5x ATR gives 107.5, then MIN_RR 1.5 stretches it to 100 + 1.5 * 5.4
+    assert target == pytest.approx(108.1) and rr == pytest.approx(1.5)
+
+
+def test_the_horizon_note_names_4_and_8_weeks_and_no_t_plus():
+    """Every BUY card prints this sentence; 26.3 found the card had never
+    stated a horizon and was closed on a three-day clock because of it."""
+    from config import HOLD_SESSIONS
+    from services.picks_scoring import horizon_note
+    txt = horizon_note()
+    assert f"{HOLD_SESSIONS[0]}-{HOLD_SESSIONS[1]} phiên" in txt
+    assert "T+" not in txt
 
 
 def test_compute_stop_target_accepts_fractional_atr_input():

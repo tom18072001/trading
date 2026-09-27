@@ -10,9 +10,29 @@
 
 ## 1. Khung thị trường & Chế độ (Regime)
 
-**HMM Regime = CHOP**: HMM (Hidden Markov Model) là mô hình thống kê dùng để phân loại trạng thái thị trường. **CHOP** = thị trường đi ngang/giật cục, không có xu hướng rõ. Trong CHOP: tương quan giữa các mã/ngành tăng cao, không có "edge" bền vững → khuyến nghị giảm size, chỉ vào lệnh khi có tín hiệu chất lượng cao.
+**HMM Regime**: HMM (Hidden Markov Model) là mô hình thống kê phân loại trạng
+thái thị trường. Hệ thống có **đúng bốn nhãn, không hơn** — nguồn:
+`analysis/regime.py`, hằng số `_LABELS_BY_RETURN`, xếp theo lợi suất 1 ngày
+trung bình từ thấp lên cao:
 
-Các regime khác thường thấy: `TREND_UP`, `TREND_DOWN`, `RISK_OFF`.
+| nhãn | nghĩa |
+|---|---|
+| `risk_off` | thị trường né rủi ro — tiền rút khỏi cổ phiếu |
+| `chop` | đi ngang / giật cục, không xu hướng rõ |
+| `rotation` | tiền không rút, chỉ **đổi ngành** — đúng chế độ hệ thống này săn |
+| `risk_on` | thị trường ưa rủi ro — tiền vào cổ phiếu |
+
+> Trước 2026-08-25 mục này còn ghi thêm `TREND_UP`, `TREND_DOWN`, `RISK_OFF`.
+> **Ba nhãn đó chưa từng tồn tại trong code.** Ghi lại đây để ai đọc bản cũ
+> nhận ra, thay vì im lặng xoá.
+
+**Nhãn regime chưa kiểm chứng (2026-09-25).** Mô hình chỉ đọc VNINDEX (lợi
+suất 1 và 5 phiên, biến động 20 phiên); tên nhãn là cách gọi bốn trạng thái
+xếp theo lợi suất, không phải phép đo tâm lý hay phân hoá ngành. Replay ngoài
+mẫu: sau ngày `risk_on`, VNINDEX 20 phiên tới còn **thấp hơn** các ngày khác —
+nên **đừng** tăng/giảm tỷ trọng theo nhãn. Danh sách mua không phụ thuộc nhãn.
+(Bản trước khuyên "trong `chop` thì giảm size" — lời khuyên đó không có phép đo
+nào đứng sau.)
 
 **Confidence 0.50**: **Không phải** "model chắc bao nhiêu %". Từ 2026-08-24
 (`CLAUDE.md` §25.2) nó là **xác suất nhãn regime này còn giữ trong 5 phiên tới**
@@ -23,9 +43,10 @@ model tự tin mà vì model **sập**: feature chưa chuẩn hoá nên 3/4 stat
 covariance, chỉ còn một state sống → posterior 1.0 theo định nghĩa.
 
 Đọc thế nào: dưới **0.55** thì con số này **nói quá** — đo trên 900 phiên, mức
-"0.49" thực tế chỉ giữ được ~0.37. Đầu cao thì khớp (0.895 dự báo / 0.906 thực).
-Câu chữ trên báo cáo do `analysis.regime.confidence_phrase()` sinh, ví dụ
-"~65% khả năng giữ 5 phiên tới".
+"0.49" thực tế chỉ giữ được ~0.37. "Đầu cao thì khớp (0.895 / 0.906)" chỉ đúng
+**trong mẫu**: replay đúng cách publish (2026-09-25) thì mức 0.69-0.85 thực tế
+chỉ giữ 0.28-0.58. Câu chữ trên báo cáo do `analysis.regime.confidence_phrase()`
+sinh, ví dụ "~65% khả năng giữ 5 phiên tới — chưa kiểm chứng ngoài mẫu".
 
 ---
 
@@ -146,7 +167,8 @@ càng "trưởng thành". Trước 2026-08-23 cột này bằng 0 ở mọi dòn
 - ▼ **DOWN** / **Lean DOWN** (nghiêng xuống)
 - • **Neutral**
 
-**Confidence**: High / Med / Low — độ tin cậy của bias
+**Confidence**: High / Med / Low — độ lớn của tổng điểm bias. Điểm đó tự chế,
+**chưa từng được đo** — High không có nghĩa là đúng thường xuyên hơn.
 
 **Action types**:
 
@@ -164,7 +186,7 @@ càng "trưởng thành". Trước 2026-08-23 cột này bằng 0 ở mọi dòn
 
 | Thuật ngữ | Giải thích |
 |---|---|
-| **T+2 Settlement** | Mua hôm nay, bán được sau **2 phiên giao dịch** (không phải 2 ngày dương lịch — nghỉ lễ và cuối tuần không tính). Backtest khoá vốn đúng 2 phiên (§18.2/7); sổ lệnh trả `sellable_on` tính qua `utils/clock.next_trading_day` nên đã trừ lịch nghỉ HOSE. §18 gọi là "T+2.5" vì tiền về trong ngày T+2 chứ không phải đầu phiên |
+| **Khung giữ 4-8 tuần** | Hệ thống chỉ dùng hai khung: **20 phiên (4 tuần) và 40 phiên (8 tuần)** — `config.HOLD_SESSIONS`. Mặc định giữ tới ~40 phiên; phiên 20 mở cửa sổ bán, không phải tín hiệu bán. Đếm bằng **phiên giao dịch** (`utils/clock.next_trading_day`, đã trừ lịch nghỉ HOSE), không phải ngày dương lịch. Chế độ T+ (3-5 phiên) và luật T+2 trong backtest đã bỏ ngày 2026-09-25: ở khung ≥ 20 phiên, T+2 không bao giờ là ràng buộc |
 | **Fees** | 15bps phí + 10bps thuế = ~40bps round-trip (1bp = 0.01%) |
 | **Price band** | Biên độ giá: HOSE ±7%, HNX ±10%, UPCoM ±15%. Chạm trần → skip fill |
 | **ATR stops** | Stop loss = giá - 1.8×ATR20 (BUY) hoặc 2.5×ATR20 (ACCUMULATE) |
@@ -200,8 +222,9 @@ càng "trưởng thành". Trước 2026-08-23 cột này bằng 0 ở mọi dòn
 
 ## Tóm gọn triết lý báo cáo
 
-> Trong **CHOP regime** → không gồng lệnh, giảm size, chỉ vào khi tín hiệu chất
-> lượng cao.
+> Nhãn regime, BUY/SELL ngành và stealth đều **chưa kiểm chứng** (2026-09-25,
+> `analysis/verification.py`) — đọc như mô tả tape, không đổi tỷ trọng theo
+> chúng. Danh sách mua là một luật riêng, đo được (xem §26.9 của `CLAUDE.md`).
 >
 > Với stealth, tính đến 2026-08-24: gate §16.1 **chưa thắng được base rate**
 > (§16.14), nên `ACCUMULATE` đọc như danh sách theo dõi. Điều kiện duy nhất từng

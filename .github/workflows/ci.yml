@@ -50,6 +50,13 @@ jobs:
         # §20.2); making them fatal today would block every PR on a backlog
         # nobody agreed to clear this week. Flip this off once the count is 0.
 
+      # `scripts/smoketest.py` is deliberately NOT run here. It checks the
+      # artefacts a real install carries — a trained ranker, a picks snapshot,
+      # a DB with recent rows — none of which exist in a clean checkout, so in
+      # CI it would fail for the one reason that is not a defect. It is the
+      # local counterpart to this job: CI proves the repo installs, the
+      # smoketest proves the machine works.
+
       - name: Tests
         run: uv run pytest tests/ -q
         env:

@@ -14,6 +14,1347 @@
 
 ---
 
+## 2026-09-25 (9) — xoá chi tiết sổ thật khỏi lịch sử chưa push, trước khi lên GitHub public
+- Author: Claude (Cowork) on behalf of Tom
+- Files: lịch sử của 21 commit chưa push (từ `origin/master`), trong 7 file: `MODIFICATION_LOG.md`,
+  `docs/PATCHES.md`, `daily_watch/holdings.py`, `daily_watch/sell_range.py`, `services/trading_state.py`,
+  `.claude/skills/theo-doi-hang-ngay/SKILL.md`, `docs/reviews/ALGO_REVIEW_2026-09-24.md`; và 4 commit
+  message. `docs/PATCHES.md` cập nhật hash mới.
+- Reason: Tom cho push, và chọn *"xoá khỏi lịch sử rồi push"* — repo public, mà 12 commit cũ chưa từng
+  push (16-17/09) ghi mã đang nắm, giá vào, lãi/lỗ, khối lượng, số vị thế và vốn của sổ thật.
+- Summary: 56 luật thay chuỗi chính xác (không regex theo mã, nên rổ ngành trong `config.py`, danh sách
+  ứng viên và phần phân tích khuyến nghị cũ PNJ/PLX — của hệ thống, không phải sổ — giữ nguyên) + 12
+  luật cho message, chạy bằng `git filter-branch` trên `origin/master..work`. Mỗi commit mới chỉ khác
+  commit cũ ở 7 file trên; tác giả và ngày giữ nguyên; 451 test pass ở đỉnh mới. Máy Tom: nhánh
+  `fix/2026-09-25-review` và `chore/2026-09-16-picks-scoring` trỏ sang lịch sử mới, `SKILL.md` chưa
+  commit giữ nguyên (chỉ thay đúng các dòng chứa chi tiết sổ). Hash cũ không còn trên nhánh nào.
+- Follow-ups: push từ máy Tom (`git push -u origin fix/2026-09-25-review`) — phiên cloud và VM không có
+  quyền ghi vào repo. Đừng `git push --all`: nhánh `backup/pre-filter-2026-08-23` chưa từng lên origin.
+
+## 2026-09-25 (8) — slippage backtest ngành: 0,3%/chiều phẳng
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `config.py` (`BACKTEST_SLIPPAGE_ATR_MULT` 0,5 → 0), `services/backtest_service.py` (chú thích),
+  `analysis/bench.py` (chú thích), `frontend/src/pages/BacktestPage.tsx` (dòng giải thích),
+  `tests/test_backtest_controls.py` (+1), `CLAUDE.md` §18.2/9, §23, `docs/doctrine/23-backtest-controls.md`,
+  `docs/reference/ALGORITHM.md`, `docs/PATCHES.md`.
+- Reason: Tom, 2026-09-25 — *"chọn phương án trả về kết quả tốt hơn"* (follow-up của (6)).
+- Summary: `max(0,3%, 0,5×ATR%)` chưa từng rời mức sàn vì `atr_pct` ngành chỉ bằng 1/5 thật; sửa ATR xong
+  thì nó thành ~1,4%/chiều. Trên bản sao DB đã sửa, `flow_z` 2024-01 → 2026-09: khung 20 chi phí 66,1% vốn
+  (−58,4%) → 26,2% (−22,1%) ở 0,3% phẳng; khung 40: 50,2% (−18,6%) → 16,9% (+14,3%); VNINDEX +60,0%.
+  0,3%/chiều cũng là mức bench mã đã dùng, nên backtest ngành và bench mã nay cùng một mô hình trượt giá.
+  Lưu ý khi đọc: số đẹp hơn vì giả định rẻ hơn, không phải vì chiến lược tốt hơn — ở cả hai giả định,
+  chiến lược ngành thua VNINDEX. Với mã nhỏ trong rổ (ITD, POM, SAM, ...) 0,3% có thể lạc quan.
+  Test mới: `_slippage` bằng 0,3% ở mọi ATR và bằng slippage của bench; đưa hệ số về 0,5 thì test đỏ.
+
+## 2026-09-25 (7) — sổ sách: PATCHES, số test, lịch sử test
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `docs/PATCHES.md`, `CLAUDE.md` §19 (pytest 450, vitest 18) và §20 (ruff 60),
+  `docs/doctrine/19-testing-history.md`.
+- Reason: §15 và quy tắc của `docs/PATCHES.md` — plan xong thì chuyển xuống bảng dưới.
+- Summary: đóng ba plan — review 2026-09-24 (đã sửa theo §8, commit (1)-(6)), "Kéo khung giữ lên
+  8 tuần" (Tom chọn 4 và 8 tuần, mặc định ~40 phiên), "Ship ensemble ML" (không dựng, review §5).
+  Mở bốn: chạy `repair_sector_data.py` trên máy Tom; quyết slippage backtest ngành; đo ngoài mẫu
+  luật mua mới vs luật có ngưỡng; các mục tầng ngành ngoài §8. Lịch sử test ghi một test vô dụng
+  của chính tôi mà lượt đột biến bắt được. Skill `theo-doi-hang-ngay` cập nhật trên máy Tom nhưng
+  **không commit** — file đó có thay đổi chưa commit của Tom.
+
+## 2026-09-25 (6) — `scripts/repair_sector_data.py`: sửa lịch sử ngành đã ghi sai, có backup và chạy thử
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `scripts/repair_sector_data.py` (mới), `tests/test_repair_sector_data.py` (mới, 11 test).
+- Reason: review 2026-09-24 §8 P0-2/3/4 — code đã sửa ở (5), nhưng lịch sử trong DB vẫn là số của code
+  cũ. Tom: *"Script, anh chạy trên Windows"* — có backup và dry-run, thử trên bản sao trước.
+- Summary:
+  - Sửa đúng bốn thứ, không đụng thứ khác: `macro_anchors.vnindex` ngoài 200-5.000 → NULL;
+    `sector_flow_daily.atr_pct` → ATR rổ thật; `return_1d` → lợi suất rổ close-to-close;
+    `close_idx` → mức nối chuỗi từ `return_1d` trên lịch của price panel (phiên thiếu trong bảng
+    vẫn được tính); rồi `rebuild_leading_features()`. Nguồn: `data/price_panel.db` (chỉ đọc),
+    rổ `config.PROXY_BASKETS`, công thức của `analysis/flow_aggregation.py`; một bước > ±16%/phiên
+    là lệch cơ sở điều chỉnh, bị loại khỏi lợi suất và khỏi mọi cửa sổ ATR chứa nó.
+  - An toàn mặc định: không có `--apply` thì chỉ chạy thử (file DB giữ nguyên từng byte). `--apply`
+    từ chối trong 08:45-17:45 ngày giao dịch và khi price panel kết thúc trước phiên cuối của bảng
+    ngành; backup bằng SQLite backup API (đúng khi đang WAL) ra `<db>.bak-<thời điểm>-pre-repair`,
+    ghi trong một transaction; chạy lại cho cùng kết quả.
+  - Thử trên bản sao DB 2026-09-24 (cắt về 2026-09-15, ngày cuối của panel): 613 giá trị macro →
+    NULL; `atr_pct` trung vị 0,0057 → 0,0280; `return_1d` NULL 917 → 0; bước `close_idx` lớn nhất
+    240,6% → 9,0%, số bước > ±16% 11 → 0; chạy lần hai: 0 dòng đổi; backup trùng trạng thái trước
+    khi ghi; `return_1d` khớp panel sạch của review ở 99,1% số dòng (phần còn lại là các bước lệch
+    cơ sở bị loại). Sau đó train ranker (lightgbm, `decile_monotonic` −0,5 — vẫn không edge), publish
+    (15 tín hiệu, mang `model_run_id`), backtest chạy được.
+  - Test: giá trị ghi ra so với chính `aggregate_sector` của job 16:00 trên cùng giá; 8 đột biến
+    (ATR chia n hai lần, bỏ loại bước nhảy, nối chuỗi theo dòng bảng, dry-run có ghi, bỏ từng guard,
+    bỏ backup, bỏ rebuild) — mỗi cái làm đỏ ít nhất một test.
+- Follow-ups — **cần Tom quyết**: với ATR đúng, slippage backtest ngành `max(0,3%, 0,5×ATR%)`
+  (§18.2/9) thành ~1,4%/chiều thay vì sàn 0,3%. `flow_z` 2024-01 → 2026-09 trên bản sao đã sửa: khung
+  20 −58,4% (chi phí 66,1% vốn), khung 40 −18,6% (50,2%); với slippage phẳng 0,3%/chiều như bench mã:
+  −22,1% (26,2%) / +14,3% (16,9%); VNINDEX +60,0%. Giữ công thức doctrine hay dùng 0,3% phẳng.
+
+## 2026-09-25 (5) — tầng ngành: job 16:00 tính feature dẫn trước, ATR đúng, close_idx nối chuỗi, regime không dựng từ rác, nhãn "chưa kiểm chứng"
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `analysis/flow_aggregation.py` (ATR, `chain_close_idx`), `services/sector_ingest_service.py`,
+  `services/fast_ingest.py` (`rebuild_leading_features` công khai, một bản duy nhất),
+  `scripts/fix_close_idx.py` (re-export), `main.py` (`--eod-rollup`, `--rotation-predict`, `--regime`),
+  `services/flow_feature_service.py`, `services/rotation_model_service.py`, `services/macro_service.py`,
+  `services/sector_signal_service.py`, `utils/clock.py` (`closed_today`), `analysis/regime.py`,
+  `analysis/verification.py` (mới), `api/routers/insight.py`, `generate_report.py`,
+  `report/report_template.html`, `frontend/src/pages/DailyInsightPage.tsx` (+ test),
+  `tests/test_review_20260924.py` (mới, 17 test), `tests/test_flow_aggregation.py`,
+  `tests/test_review_20260822.py`, `tests/test_sector_pipeline.py`, `tests/test_regime_confidence.py`,
+  `tests/conftest.py`, `CLAUDE.md` §8, §10, §16.14, §16.15, §25, `docs/doctrine/16-stealth-measurements.md`,
+  `docs/doctrine/25-regime-confidence.md` (§25.11 mới), `docs/reference/ALGORITHM.md`,
+  `docs/reference/GLOSSARY_VI.md`, `ARCHITECTURE.md`.
+- Reason: review 2026-09-24 §4.1 / §8 P0-1..4, P0-6 và các mục trung bình 8-11. Tom: *"theo báo cáo
+  sửa lại theo ý đó"*.
+- Summary:
+  - **P0-1** `main.py --eod-rollup` gọi `rebuild_leading_features()` sau rollup — trước đó chỉ đường
+    Refresh của UI tính, nên từ 2026-08-25 bảy cột §16.2 NULL trên cả 15 ngành và ranker (điền 0)
+    chấm trên số 0 suốt một tháng. `predict_today()` ném `FeaturesMissingError` khi một cột feature
+    đã lưu NULL toàn bộ ở ngày mới nhất; `--rotation-predict` thoát mã 2, `publish()` không publish.
+  - **P0-2** ATR ngành = `Σ atr·w / Σ w` (bản cũ chia n hai lần: 1/5 sự thật). **P0-4** `close_idx`
+    nối chuỗi từ `basket_return` ở rollup, `incremental_ingest` và backfill — tổng giá thô nhảy
+    +62% / −39% (STEEL 22-23/09) mỗi khi một mã không fetch được. Lịch sử sửa bằng
+    `scripts/repair_sector_data.py` (Nhóm F).
+  - **P0-3** VNINDEX ngoài 200-5.000 bị loại **từng giá trị** (`macro_service.plausible_vnindex`)
+    ở fetch ngày, carry-forward hằng giờ, `macro_vn_ret_5d` và benchmark RS. `classify_regime()`
+    chỉ fit trên chuỗi VNINDEX ngày; thiếu chuỗi (< 25 phiên) thì trả nhãn đã lưu, không ghi
+    — nhãn 2026-09-22 `risk_off 0,9961` dựng từ các dòng 1,82 của nhánh fallback. `model_version`
+    ghi `hmm` hay `heuristic` theo nhánh thật đã trả lời. `macro_vn_ret_5d` là lợi suất 5 phiên
+    (trước là 5 dòng hằng giờ).
+  - **P0-6** `analysis/verification.py`: ranker, regime, cổng stealth — ba thứ chưa có edge ngoài
+    mẫu. Email: bốn đoạn regime ra lệnh ("size full weight on ACCUMULATE", "no new BUYs, prefer
+    cash") thành mô tả + ghi chú; bảng Sector Direction / Stealth / mục tránh ghi "chưa kiểm
+    chứng"; Risk Notes bỏ "ATR stops", "4 ACCUMULATE + 3 BUY" và hai luật chưa hiện thực (FOL 0,5×,
+    ETF mask — §18.2/8, §18.1/2 còn mở); game plan bỏ stop/target và "giữ tiền mặt". Daily Insight:
+    gauge in câu `confidence_phrase()` từ API thay "Độ tin cậy 85%", bỏ chip "Tư thế tấn công/phòng
+    thủ"; ba ô đếm đổi thành "Ngành BUY / Ngành SELL / Ngành tích luỹ ngầm" + "Chưa kiểm chứng".
+    `confidence_phrase()` luôn kết thúc "chưa kiểm chứng ngoài mẫu" (calibration §25 là in-sample).
+  - §4.1/8 lọc bền theo chiều (BUY cần 3 phiên vào ròng, SELL 3 phiên rút ròng; 24/96 BUY cũ đi sau
+    3 phiên rút). §4.1/9 `up_down_vol_ratio` NULL = ngày toàn tăng → trần 1.000 ở cả train lẫn
+    predict (train bỏ 18% số dòng, predict điền 0 = "toàn giảm"). §4.1/10 tín hiệu mang
+    `model_run_id`. §4.1/11 `publish()` và `classify_regime()` bỏ qua ngày không có phiên
+    (`utils.clock.closed_today`, 14/62 ngày tín hiệu cũ là cuối tuần/lễ).
+  - Negative control: đưa từng lỗi trở lại (11 đột biến) — mỗi cái làm đỏ ít nhất một test đúng
+    lý do. Một test ban đầu vô dụng bị bắt theo cách này (test cuối tuần đi qua nhờ lỗi feature
+    NULL, không nhờ lịch) và đã viết lại. Chạy thử `generate_report.py` trên bản DB 2026-09-24,
+    không mạng, không email: HTML render đủ mục.
+- Follow-ups: chạy `scripts/repair_sector_data.py` ngoài giờ 9:00-17:30 (lịch sử `atr_pct`,
+  `close_idx`, `return_1d`, VNINDEX rác); ranker train lại đêm sau đó. Còn mở: §4.1/12 (stealth
+  `fillna(False)` và trang Stealth Watch dùng c3/c4/c5 khác scanner), §4.1/13 (`foreign_net` = 0 do
+  thiếu dữ liệu 01-03/2023), các mục "Thấp" của §4.1.
+
+## 2026-09-25 (4) — sửa thước đo: base NO GATE mọi phiên, t Newey-West, danh mục cùng ngày với VNINDEX; bench thoát hết nhìn trước; panel giá không trộn hai cơ sở
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `analysis/bench.py` (`nw_t`, `staggered_book`, `book_stats`, `judge`),
+  `scripts/ticker_alpha_bench.py` (`evaluate`, `X_shipped_rule`, `load_vnindex`, `--start`),
+  `scripts/tplus_strategy_bench.py` (`run_trail`, `run`, luật `shipped_rule_top5`),
+  `scripts/build_price_panel.py` (`fetched_symbols`, `seed_from_legacy`, `store_fetch`,
+  `band_violations`, `--refetch`), `tests/test_bench_measurement.py` (mới),
+  `tests/test_price_panel_builder.py` (mới), `docs/reviews/algo_review_2026-09-24/*.py` (chỉ lint),
+  `daily_watch/sell_range.py` (docstring), `scripts/factors/README.md`,
+  `CLAUDE.md` §16.12, §18.7, §26.9, §26.10, `docs/doctrine/26-ticker-picks.md` (§26.12 mới).
+- Reason: review 2026-09-24 §1, §3.2, §6 / §8 P1-7, P1-8, P1-10, P1-12 và §9 — bench cũ phóng
+  đại mọi factor có cổng, nên mọi quyết định lấy từ nó (kể cả "1/41 sống sót") đứng trên số sai.
+- Summary:
+  - `evaluate()`: base = NO GATE (mọi mã dv20 > sàn, mọi phiên có ≥ 30 mã như thế — ngưỡng áp
+    cho universe, không cho cross-section của factor; ngày factor không có mã là ngày tiền mặt).
+    Chọn top-k chỉ bằng thứ biết được lúc đóng cửa (bản cũ đòi mã phải còn giá h phiên sau —
+    nhìn trước). t của excess, IC, Q5−Q1 là Newey-West lag h. "Vượt VNINDEX" = danh mục staggered
+    (Jegadeesh-Titman, 1/(h+1) vốn mỗi phiên, 1,00%/vòng) so với VNINDEX cùng ngày, cả CAGR lẫn
+    Sharpe. `X_shipped_rule` chấm đúng luật đang ship (điểm production có sàn, blend trên cả
+    universe, rồi cổng) — `X_prop_obv` blend trong nhóm đã qua cổng, là một luật khác.
+  - Chạy lại toàn bộ (143 mã, 2023-01 → 2026-09): `X_shipped_rule` +0,69%/lệnh (NW t 1,55) /
+    +1,01% (1,91), danh mục 7,2% / 11,7%/năm, Sharpe 0,44 / 0,65; VNINDEX 17,5%, 0,98 — khớp
+    review tới chữ số thập phân. `--verdict`: **0/42** qua hai tiêu chí bắt buộc ở cả hai khung
+    (thước cũ: 1/41).
+  - `run_trail()`: băng tính từ đỉnh các phiên TRƯỚC (đỉnh cập nhật sau khi so giá thấp); phiên
+    mở dưới băng khớp ở giá mở ("gap"); `run()` cũng khớp gap ở giá mở. Giữ hết khung vẫn thắng
+    mọi băng, nhưng cái giá của băng nhỏ hơn 2-3 lần số cũ (§26.10 cập nhật).
+  - `build_price_panel.py`: legacy chỉ seed cho mã CHƯA từng fetch; một lần fetch xoá rồi ghi lại
+    toàn bộ khoảng của nó (INSERT OR IGNORE cũ để dòng legacy lấp đúng những ngày nguồn không
+    trả — SRC 19,20 ↔ 25,15); `band_violations()` báo |ret| > 16% mỗi phiên (không tính chỉ số)
+    cuối mỗi build; `--refetch` fetch lại những mã đó. Panel hiện tại còn 89 dòng vi phạm (70 là
+    SRC) — Tom chạy `--refetch` một lần (Nhóm F).
+  - Negative control: `evaluate()` cũ chấm một factor cổng 20 mã trên **0** phiên, và khi hạ sàn
+    thì excess so với base cùng cổng đúng bằng 0 (phần đóng góp của cổng bị xoá). Chọn cả
+    universe → excess đúng 0. 3 test cho bộ thoát (băng từ đỉnh các phiên trước; gap khớp ở giá
+    mở, cả `run_trail` lẫn `run`): đưa bộ thoát về logic cũ thì cả 3 đỏ. `trail_fix.py` (bản sửa
+    độc lập viết lúc review) nay cho cùng số với `run_trail` của repo.
+- Follow-ups: `--refetch` trên máy Tom; chạy lại `run_factors.py` sau khi panel sạch.
+
+## 2026-09-25 (3) — `give_back` chỉ arm khi có ngày mua
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `daily_watch/sell_range.py`, `daily_watch/service.py`, `daily_watch/README.md`,
+  `tests/test_sell_range.py` (mới — module này chưa từng có test riêng).
+- Reason: review 2026-09-24 §3.2 / §8 P1-9. `armed = peak ≥ entry × (1 + ARM×ATR)` không xét
+  `peak_basis`: thiếu ngày mua thì `peak` là đỉnh ~30 phiên gần nhất, có thể có TRƯỚC lúc mua,
+  và bản tin 2026-09-23 báo "NHẢ QUÁ SÂU" cho đúng một vị thế như vậy (đỉnh cao hơn giá vào ~11%).
+- Summary: `armed` thêm điều kiện `peak_basis == "since_entry"`; ghi chú cho vị thế thiếu ngày
+  mua nói rõ không báo "nhả quá sâu" và vì sao; bản tin mục 2 liệt kê cả hai thứ bị thiếu.
+  Range (`band_lo`/`band_hi`) vẫn tính — nó là tính chất của mã, không của lệnh.
+  8 test mới; negative control: trên `sell_range.py` cũ, 2 test thiếu-ngày-mua đỏ đúng lý do,
+  và test "tăng nhẹ không arm" giữ nguyên để chứng minh ngày mua không phải điều kiện duy nhất.
+- Follow-ups: nhập ngày mua (ước lượng cũng được) cho các vị thế còn thiếu (review §8 P2-18).
+
+## 2026-09-25 (2) — một luật mua cho mọi bề mặt; bỏ ngưỡng `MIN_BUY_SCORE` 2,5, giữ cổng SMA200
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `services/picks_universe_service.py` (`long_shortlist` mới, `_select_top`),
+  `services/picks_scoring.py`, `daily_watch/service.py`, `daily_watch/audit.py`,
+  `generate_report.py`, `report/report_template.html`, `scripts/audit_past_picks.py`,
+  `frontend/src/pages/DailyInsightPage.tsx` (+ test), `tests/test_shortlist_rule.py` (mới),
+  `tests/test_picks_ranking.py`, `tests/test_picks_scoring.py`,
+  `docs/reviews/algo_review_2026-09-24/drop5.py` (mới), `CLAUDE.md` §2, §26.4,
+  `docs/doctrine/26-ticker-picks.md` (§26.11 mới), `ARCHITECTURE.md`,
+  `specs/picks_universe.md`, `daily_watch/README.md`.
+- Reason: Tom, 2026-09-25 — *"bỏ ngay, giữ cổng SMA200"*; review 2026-09-24 §2.2 (ngưỡng tốn
+  −0,39 / −0,44%/lệnh ở 20 / 40 phiên) và §8 P0-6 (ba bề mặt, ba luật mua; email lọc mua bằng
+  tín hiệu ngành không có edge).
+- Summary:
+  - `long_shortlist(rows, n, exclude=, min_score=)`: `is_valid_buy` + `score > UNTRENDED_FLOOR`
+    (cổng SMA200) → `_rank_key` → top-n. Daily Insight (`_select_top`, bỏ ưu tiên ngành
+    BUY/ACCUMULATE), email (`snapshot.top_buys` nguyên văn — bỏ cổng ngành, ngưỡng 2,5, chặn
+    −12%/5 phiên, xếp theo điểm thô, bên "Ranker" và việc sắp lại theo điểm thô của
+    `merge_pick_sources`) và bản tin 17:30 cùng gọi nó. Danh sách WATCH của email = các mã
+    kế tiếp trong cùng thứ tự. Ranker chỉ còn chọn ngành cho danh sách TRÁNH.
+  - `MIN_BUY_SCORE` không còn là cổng; chỉ dùng để ghi danh sách luật cũ LẼ RA cho ra vào kho
+    (`shortlist_with_cutoff`, cấp cao nhất của payload). `marks` nay có giá đóng của cả
+    universe, và `daily_watch/audit.py` chấm luật đang chạy vs luật cũ vs base NO GATE, cùng
+    ngày — phép đo ngoài mẫu đầu tiên cho quyết định này. `MAX_5D_DROP_PCT` bỏ: đo trên luật
+    mới +0,008%/lệnh (t +0,24) ở 20 phiên, −0,008% (t −0,17) ở 40 (`drop5.py`).
+  - Bản tin mục 5 viết lại: số danh mục thật của luật đang chạy (7,2% / 11,7%/năm, Sharpe
+    0,44 / 0,65) cạnh VNINDEX cùng kỳ (17,5%, Sharpe 0,98) thay cho 5,9% / 11,7% (quy năm số
+    học) và 15,7% / 0,91; giữ mặc định tới ~40 phiên; mua ATO, bán ATO; `give_back` là tin;
+    lõi-vệ tinh. Mục 3: danh sách rỗng → ETF chỉ số. Email và thẻ Daily Insight: rỗng =
+    "không mã nào trên SMA200", không còn "không có ngành BUY".
+  - Chạy thử trên snapshot 2026-09-24 của máy Tom: luật mới BSR, NTP, QNS, VIC, TCB (13 mã
+    qua cổng); luật cũ BSR, NTP, VIC, GMD, BVH.
+  - Test: pytest 383 → 394; vitest 14 → 15. Negative control: đổi cổng thành `score ≥ 2,5`
+    → 6 test đỏ; đưa lại ưu tiên ngành vào `_select_top` → 2 test đỏ.
+- Follow-ups: vài tháng log `shortlist_with_cutoff` rồi chạy `daily_watch/audit.py --hold 20/40`.
+
+## 2026-09-25 (1) — 4 tuần và 8 tuần là hai khung giữ duy nhất: bỏ chế độ T+ và luật T+2 trong backtest
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `config.py`, `services/picks_scoring.py`, `services/picks_universe_service.py`,
+  `services/backtest_service.py`, `services/trader_agent.py`, `api/routers/insight.py`,
+  `api/routers/sectors_backtest.py`, `api/routers/state.py`, `api/schemas.py`,
+  `daily_watch/positions.py`, `daily_watch/sell_range.py`, `daily_watch/service.py`,
+  `generate_report.py`, `report/report_template.html`, `utils/clock.py`,
+  `analysis/bench.py`, `scripts/{ticker_alpha_bench,tplus_strategy_bench,picks_portfolio_sim,
+  ticker_ranker_experiment,audit_past_picks}.py`, `frontend/src/{api/client.ts,
+  components/KillSwitch.tsx,pages/BacktestPage.tsx,pages/DailyInsightPage.tsx}`, tests
+  (`test_backtest_controls`, `test_fixes_20260618`, `test_picks_scoring`,
+  `test_position_track`, `DailyInsightPage.test.tsx`), `CLAUDE.md` §18.2/7, §18.6, §18.7,
+  §23, `ARCHITECTURE.md`, `specs/picks_universe.md`, `docs/reference/{ALGORITHM,GLOSSARY_VI}.md`.
+- Reason: Tom, 2026-09-25 — *"bỏ t+2 chỉ sử dụng 4 tuần và 8 tuần"*; chọn "bỏ cả luật T+2
+  trong backtest". Review 2026-09-24 §3.1: danh mục lãi tăng dốc tới ~40 phiên rồi đi ngang;
+  ở khung ≥ 20 phiên T+2 không bao giờ là ràng buộc.
+- Summary:
+  - Một hằng số `config.HOLD_SESSIONS = (20, 40)` cho cửa sổ bán, bản tin, bench và backtest.
+    `picks_scoring.hold_window(as_of)` đổi nó thành `sell_from`/`sell_by` (đếm phiên, trừ lễ);
+    `PickEntry` mang hai trường này; thẻ Daily Insight thay ô T0..T+3 bằng Mua → +20 → +40.
+  - Bỏ `PickProfile.TPLUS`, `PROFILE_HORIZON_SESSIONS`, nhánh "T+3-5" của `/api/insight/daily`
+    (dựng thẻ từ ngành BUY của ranker bằng hình học TPLUS khi snapshot rỗng) và 7 schema T+3
+    không ai dùng trong `api/schemas.py`. Thesis thẻ mua không còn in stop/target (sổ không có
+    stop từ §26.10) mà in khung giữ: mua ATO phiên sau, giữ tới ~40 phiên, bán ATO.
+  - Sổ vị thế bỏ `sellable_on` (T+2); bảng vị thế hiện cửa sổ `sell_from→sell_by`. Ghi chú
+    "trong cửa sổ bán" nói rõ mặc định giữ tới ~40 phiên, phiên 20 không phải tín hiệu bán.
+  - Backtest ngành: `settlement_lag` → `hold_sessions ∈ {20, 40}`; tái cơ cấu ở phiên 1 rồi mỗi
+    `hold` phiên thay vì mỗi phiên (§23.5: 844 lệnh/năm); quyết định từ dữ liệu phiên TRƯỚC, khớp
+    giá đóng phiên sau (tín hiệu ra 17:00); giữ tín hiệu gần nhất khi phiên không có dòng mới (cũ:
+    bán hết); VNINDEX ngoài 200-5.000 bị loại từng dòng, phủ < 90% phiên thì thử `^VNINDEX` của
+    price panel rồi mới về TB ngành. Trên bản DB 2026-09-24, `flow_z` 2024-01→2026-09: 163 lệnh
+    (khung 20) / 81 (khung 40); benchmark VNINDEX +60,0% thay vì trung bình ngành.
+  - Bench/research: `ticker_alpha_bench` từ chối horizon ngoài {20, 40}; `tplus_strategy_bench`,
+    `picks_portfolio_sim`, `ticker_ranker_experiment` chỉ nhận 20/40; book sim bỏ hàng đợi T+2.
+    `audit_past_picks.py` giữ nguyên các khung ngắn nhưng ghi rõ là tài liệu lịch sử (§26.3).
+  - Agent Minh: persona "giữ 4-8 tuần", tín hiệu ngành/regime là bối cảnh chưa kiểm chứng.
+  - Test: pytest 371 → 383 (12 mới, gồm lịch tái cơ cấu, từ chối T+, khớp t+1, giữ tín hiệu,
+    VNINDEX rác, benchmark từ panel); vitest 13 → 14. Negative control: chạy test mới trên engine
+    cũ — khớp t+1 và VNINDEX rác đỏ đúng lý do; bỏ carry-forward thì test giữ tín hiệu đỏ.
+- Follow-ups: luật shortlist chung + bỏ ngưỡng 2,5 (entry kế tiếp); dữ liệu ngành
+  (`close_idx`, `return_1d`, ATR, VNINDEX) sẽ đổi số backtest sau script sửa DB.
+
+## 2026-09-24 — review thuật toán: thước đo đang phóng đại edge, tầng ngành phát tín hiệu từ dữ liệu hỏng (chỉ tài liệu)
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `docs/reviews/ALGO_REVIEW_2026-09-24.md` (mới), `docs/reviews/algo_review_2026-09-24/`
+  (mới: 9 script đo lại + `.gitignore` cho `out/`), `docs/PATCHES.md` (một dòng "Đang làm").
+  **Không đổi dòng code production nào.**
+- Reason: Tom — *"review thuật toán đang sử dụng … tối ưu và đưa ra kết quả chính xác hơn …
+  so sánh cách làm với cách hiện tại"*; chọn "toàn bộ, đào sâu picks + bán" và "báo cáo + đo, chưa sửa".
+- Summary:
+  - Bench picks so factor có cổng SMA200 với base cũng có cổng, và bỏ 109/898 phiên có < 30 mã
+    trên SMA200. Chấm lại với một base NO GATE trên mọi phiên thì không luật nào dương đủ 4 năm —
+    "1/41 sống sót" (§26.9) là artefact của hai lựa chọn đó (cần cả hai mới lật được 2023).
+  - Luật như ship (điểm ≥ 2,5 → blend) chưa từng được đo: +0,29%/lệnh (t 0,86) ở 20 phiên,
+    +0,62% (t 1,06) ở 40, âm 2023. Ngưỡng `MIN_BUY_SCORE` tốn ~0,4%/lệnh (t −1,5…−1,6).
+  - Danh mục staggered cùng ngày: luật ship 2,7% / 9,3%/năm (20 / 40 phiên) vs VNINDEX 17,5%,
+    Sharpe 0,98 — không phải "11,7% vs 15,7%".
+  - `run_trail()` có look-ahead trong phiên (đỉnh cập nhật bằng giá đóng trước khi so giá thấp) →
+    giá của băng thoát bị phóng đại 2-3 lần. `sell_range.advise()` arm `give_back` cả khi thiếu
+    ngày mua (một vị thế trong bản tin 2026-09-23).
+  - Tầng ngành: cột stealth NULL từ 2026-08-25 → ranker chấm trên 0; ATR ngành chia n hai lần
+    (nhỏ 5×); `close_idx` nhảy khi rổ thiếu mã; 613 dòng `vnindex` ≈ 1,82 trong `macro_anchors`;
+    backtest `signals` bán hết ngày không có tín hiệu; ranker/regime/stealth không có edge OOS.
+  - ML ensemble ở chi phí đúng: ensemble − ship +0,62 (t 1,74) ở 20 phiên, −0,20 ở 40 → không dựng.
+  - Mọi số picks được một agent kiểm độc lập bằng harness tự viết lại: lệch ≤ 0,03 điểm %/lệnh.
+- Follow-ups: 20 khuyến nghị P0/P1/P2 ở §8 của review — chờ Tom quyết.
+
+## 2026-09-17 — mã đang nắm ngoài universe được theo dõi; và `give_back` là stop-loss trá hình
+- Author: Claude Code on behalf of Tom
+- Files: `daily_watch/holdings.py` (mới), `daily_watch/positions.py`,
+  `daily_watch/sell_range.py`, `daily_watch/service.py`, `daily_watch/README.md`,
+  `.claude/skills/theo-doi-hang-ngay/SKILL.md`, `CLAUDE.md` §8/§19, `.gitignore`.
+- Reason: Tom — *"có"*, cho câu hỏi sửa defect hai mã trong sổ không có giá.
+
+### Defect được yêu cầu sửa
+Universe 54 mã là **bộ lọc mua**, và sổ lấy giá từ chính nó — nên bộ lọc mua đang
+làm **danh sách theo dõi**. Trên sổ thật: hai vị thế không giá, trong đó có
+**mã lỗ nặng nhất** sổ.
+
+`daily_watch/holdings.py` lấy giá riêng cho mã đang nắm ngoài universe, bằng
+**đúng** `_fetch_ohlcv` + `_build_ticker_row` mà universe dùng — không có định
+nghĩa thứ hai. **Không** áp ngưỡng thanh khoản hay room: đó là điều kiện để mua,
+không phải để được nhìn thấy (một mã trong sổ chỉ là lô lẻ).
+
+**Cái bẫy phải tránh:** `mark_book()` được cả route `/positions/pnl` lẫn job gọi,
+và route đó cố ý chỉ `.peek()` để không treo 2-10 phút sau throttle KBS (§22.6).
+Nên `refresh()` (gọi mạng) chỉ job được gọi; `load()` (đọc đĩa) là thứ đường đọc
+dùng. Cache ở `data/holdings_prices.json`, **không** ở `data/watch/` — `audit.py`
+glob mọi `*.json` trong đó và sẽ đọc nhầm cache thành một bản lưu trữ.
+
+Kết quả: **mọi vị thế có giá**, hai mã từng thiếu giá **khớp đúng giá broker**
+Tom đưa.
+
+Một lỗi nhãn bắt được trước khi chạy: bản đầu suy tập mã-từ-snapshot bằng hiệu
+tập hợp (`giá − cache`), sẽ gán nhầm "ngoài universe" cho một mã hôm qua ngoài
+universe mà hôm nay đã vào. `_snapshot_prices()` nay trả tập đó riêng.
+
+### Defect nặng hơn, lộ ra khi mã đó lần đầu được nhìn thấy
+Ngay lần đầu có giá, mã đó bật **"nhả quá sâu (quanh đỉnh …)"**.
+Nhưng "đỉnh" đó **không phải đỉnh — nó là giá vào lệnh.** `advise()` gộp `entry` vào
+phép tính đỉnh, nên với một mã chưa từng lên trên giá vào, "đỉnh" = giá vào, và
+`give_back` = **lỗ 3,5×ATR so với giá vào. Tức một stop-loss** — đúng thứ Tom đã
+bỏ ngày hôm trước, mặc áo "range bán".
+
+Và nó **lệch khỏi thứ đã đo**: `run_trail()` chỉ bật băng *sau khi* lệnh đã lãi ≥
+`arm_atr`×ATR — docstring của chính nó ghi *"một lệnh âm không bao giờ bị quét
+ra"*. Code sống thì báo trên cả lệnh chưa từng lãi. Con số +1,07%/lệnh trong
+§26.10 là của luật **có** điều kiện arm — không phải của luật đang chạy.
+
+Sửa: đỉnh không gộp giá vào; thêm `ARM_ATR = 1.0` khớp đúng biến thể bench đã
+đo; `give_back` chỉ báo khi `armed`. **Negative control** trên đúng mã đó: hành vi
+cũ → "đỉnh" = giá vào, báo động True; sau sửa → đỉnh thật 30 phiên, armed
+False, không báo động. Range của nó dịch từ quanh giá vào xuống
+(quanh đỉnh thị trường).
+
+> Đây là **lần thứ ba trong hai ngày** một luật **đo** ở bench và luật **chạy** ở
+> production lệch nhau âm thầm (chi phí 0,70% vs 1,00%; stop neo giá vào vs băng
+> neo đỉnh; nay arm vs không arm). Mẫu chung: bench và production là **hai bản
+> code của một luật**. `ARM_ATR` nay có comment trỏ về đúng tham số bench, nhưng
+> đó là quy ước, không phải cơ chế — một test assert hai bên dùng chung hằng số
+> mới là cơ chế, và Tom đã chọn không thêm test cho phần thuật toán.
+
+- Kiểm chứng: 371 test, ruff 65. Job chạy thật lấy đủ lịch sử cho hai mã (272 và 30 phiên).
+  Kho lưu trữ có 2 bản (2026-09-16, 2026-09-17).
+
+---
+
+## 2026-09-16 (12) — range bán không cần ngày mua, và band_hi là nhánh chết
+- Author: Claude Code on behalf of Tom
+- Files: `daily_watch/sell_range.py`, `daily_watch/service.py`,
+  `.claude/skills/theo-doi-hang-ngay/SKILL.md`.
+- Reason: Tom — *"ngày mua có quan trọng không, tôi cần estimate range bán thôi
+  mà"*. Câu hỏi đúng, và tôi sai ở một nửa.
+
+### Ràng buộc thừa
+Tôi neo range vào "đỉnh **kể từ lúc mua**", rồi khi thiếu ngày mua thì chặn luôn
+cả range. Nhưng range giá là tính chất của **mã**, không phải của lệnh: đỉnh
+swing gần đây của một mã ở đâu thì nó ở đó, không phụ thuộc Tom mua lúc nào.
+
+Thứ **thật sự** cần ngày mua chỉ có `sell_from`/`sell_by` — chúng đếm phiên kể
+từ lúc vào lệnh, không có gì thay thế được. Và ngay cả nó cũng chịu được ước
+lượng: cửa sổ rộng 20 phiên nên lệch vài ngày gần như không đổi gì. Bản tin nói
+câu đó thay vì đòi một ngày chính xác.
+
+### Nhánh chết tự tạo ra, bắt được ngay khi nhìn output
+Sau khi mở lại range, 3/4 mã báo "trong vùng bán". Lý do: `peak` tính cả phiên
+gần nhất, nên `last <= peak` **luôn đúng theo định nghĩa** — `band_hi` (đỉnh +
+1×ATR) không bao giờ chạm tới được, "trên vùng bán" là nhánh chết, và "trong
+vùng bán" bật cho mọi mã đang ở gần đỉnh. Một trạng thái luôn đúng không nói lên
+điều gì.
+
+Đỉnh nay tính trên mọi phiên **trừ phiên gần nhất**, nên lập đỉnh mới hôm nay sẽ
+đẩy giá lên phần trên của vùng hoặc vượt hẳn. Live: hai vị thế **trên vùng**
+(vừa lập đỉnh), một **trong vùng**, một **dưới vùng** — cả ba trạng thái đều tới
+được và mỗi cái nói một điều khác nhau.
+
+- Kiểm chứng: 371 test, ruff 65. Phân bố `band_status` trên sổ thật: đủ cả ba
+  trạng thái, cộng các mã chưa có giá.
+
+---
+
+## 2026-09-16 (11) — kho lưu trữ để audit, và module rời khỏi services/
+- Author: Claude Code on behalf of Tom
+- Files: `daily_watch/` (mới — `service.py`, `positions.py`, `sell_range.py`,
+  `audit.py`, `__init__.py`, `README.md`), `api/routers/state.py`, `main.py`,
+  `tests/test_module_boundaries.py`, `tests/test_position_track.py`,
+  `.claude/skills/theo-doi-hang-ngay/SKILL.md`, `ARCHITECTURE.md`, `.gitignore`.
+- Reason: Tom — *"phải lưu trữ về sau để audit và evolve skill sau này; mục tiêu
+  skill là báo cáo, đề xuất mua, đề xuất bán"*, rồi *"lưu các model và code liên
+  quan của cái này thành 1 folder riêng… không cần html, chỉ cần trả lời chat"*.
+
+### Kho lưu trữ: vá đúng lỗ §26.1, ở đầu nguồn
+§26.1 ghi rằng khi Tom hỏi *"picks có tốt không"* thì **không có gì trong repo
+trả lời được** — không bảng nào lưu một pick, nên phải viết
+`extract_past_picks.py` bới 174 pick ra khỏi kho HTML, và dựng thêm một panel
+giá. `data/watch/<ngày>.json` lưu có cấu trúc ngay từ lần chạy đầu.
+
+Nó **tự chấm được**: mỗi bản lưu ghi cả khuyến nghị lẫn `marks` — giá đóng của
+mọi mã nó nhắc tới — nên N bản lưu tự cho một chuỗi giá. `daily_watch/audit.py`
+chấm khuyến nghị cũ bằng chính các bản lưu sau nó: **không cần nguồn giá thứ
+hai, không cần panel cập nhật tay**, hai thứ từng làm hỏng phép đo trước đây.
+
+Script từ chối in số khi chưa đủ dữ liệu thay vì in số 0 — với 1 bản lưu nó nói
+"chưa chấm được", và docstring nói thẳng đây là **nhật ký có chấm điểm**, không
+phải một biên độ alpha (§26.8: một sổ ~100 lệnh còn đổi dấu hai lần).
+
+`data/watch/` **gitignore**: nó chứa sổ của Tom (mã, giá vốn, khối lượng) và
+repo này public — cùng lý do `data/trading_state.json` bị ignore.
+
+### Module rời services/ — và cái giá của nó được nói ra
+Tom yêu cầu lần này là lần thứ hai; lần đầu tôi giữ ở `services/` vì bảng phân
+tầng trong `test_module_boundaries.py` kiểm được nó. Rời đi là **mất lớp kiểm
+đó**, nên phải thay bằng thứ khác chứ không im lặng bỏ: guard mới
+`test_services_never_import_the_daily_watch_module` giữ **hướng** phụ thuộc —
+`daily_watch/` đọc `services/`, không bao giờ ngược lại. Negative control: thêm
+một `from daily_watch import …` vào `services/trading_state.py` thì đúng test đó
+đỏ. Đây chính là cycle mà bảng phân tầng tồn tại để chặn.
+
+371 test (376 − 6 test tham số của 3 module rời đi, + 1 guard).
+
+Không sinh HTML và không gửi email: đầu ra là markdown (để tóm tắt vào chat) và
+JSON. `generate_report.py` là đường HTML/PDF riêng, module này không đụng tới.
+
+- Kiểm chứng: task `SectorFlow_daily_watch` chạy lại qua Task Scheduler sau khi
+  dời → `LastTaskResult 0`. 371 test, ruff 65, smoketest 6/6.
+- Follow-up: `daily_watch/audit.py` mới có 1 bản lưu nên chưa chấm được gì. Nó
+  bắt đầu có ích sau ~20 phiên chạy theo lịch.
+
+---
+
+## 2026-09-16 (10) — dự phóng các ngày tới: lịch và biên độ, không có hướng
+- Author: Claude Code on behalf of Tom
+- Files: `services/sell_range.py`, `services/daily_watch_service.py`,
+  `services/position_tracking.py`, `.claude/skills/theo-doi-hang-ngay/SKILL.md`.
+- Reason: Tom — *"cập nhật skill"*, rồi *"tôi muốn bạn đưa đề xuất và dự đoán
+  trong các ngày tới để dễ tham chiếu"*.
+
+### Ranh giới là toàn bộ thiết kế
+`sell_range.projection()` trả về **lịch** (phiên nào tới hạn gì) và **biên độ**
+giá theo ATR của chính mã đó, giãn theo căn bậc hai số phiên — đúng cách §16.15
+dựng `atr_scaled`, và là tính chất của bước ngẫu nhiên chứ không phải một ý kiến
+về giá. Nó **không** trả về hướng, và docstring nói rõ là không nên sửa để trả:
+không rule nào trong repo thắng VNINDEX risk-adjusted (§26.9), nên một con số
+"giá sẽ là X" là bịa — và bịa một cách nghe rất thuyết phục, vì nó đứng cạnh
+những con số có bằng chứng.
+
+Bản tin in kèm hai cảnh báo: đây là biên độ không phải dự báo, và ATR là biên độ
+**ngày** chứ không phải độ lệch chuẩn nên ±% không đọc được như khoảng tin cậy.
+SKILL.md §3c liệt kê thẳng "được nói gì / cấm nói gì", vì phần này là chỗ dễ
+trượt nhất khi tóm tắt.
+
+Mốc phiên tính theo lịch **của từng lệnh**, không phải một bộ mốc cố định: lệnh
+giữ 16 phiên thì "mở cửa sổ bán" là 4 phiên nữa. Một bảng mốc cố định sẽ in ngày
+vô nghĩa cho nửa số lệnh.
+
+### Lệch còn sót từ đợt bỏ stop
+Bảng **ứng viên** vẫn in `stop | target | R:R` trong khi sổ đã bỏ stop. Chúng là
+sản phẩm phụ của bộ lọc sàng lọc (`is_valid_long_pick` đòi `stop < entry` để
+tính sàn R:R), không phải mức bán — in chúng cạnh một cuốn sổ không có stop là
+mời người đọc dùng làm mức bán, đúng thứ §26.10 vừa bác. Thay bằng `ATR%/phiên`
+(quyết định range rộng bao nhiêu sau khi mua) và **cửa sổ bán nếu mua phiên tới**.
+
+SKILL.md cũng được bổ sung: `sell_range.py` vào bảng module, §3 "khi Tom hỏi nên
+bán lúc nào", §3b "dịch range lên — phần Tom cho phép dùng phán đoán" (đề xuất
+chứ không tự sửa, nói rõ là phán đoán không phải phép đo, không biến thành luật
+thoát), và một ghi chú rằng P&L realised trừ 0,40%/vòng chứ **không** trừ
+slippage nên lạc quan hơn con số bench.
+
+- Kiểm chứng: 376 test, ruff 65, smoketest 6/6. Bản tin vị thế đầu tiên hiện 4 mốc: 1 phiên
+  · 4 phiên **mở cửa sổ bán** · 5 phiên · 24 phiên
+  **hết khung**, mỗi mốc kèm biên độ.
+- Follow-up: dự phóng mới gắn cho vị thế đang mở. Ứng viên chỉ có cửa sổ bán dự
+  kiến, chưa có biên độ — thêm được nếu Tom cần so hai mã trước khi mua.
+
+---
+
+## 2026-09-16 (9) — bỏ stop, thay bằng cửa sổ bán; và range trượt cũng thua
+- Author: Claude Code on behalf of Tom
+- Files: `services/sell_range.py` (mới), `services/position_tracking.py`,
+  `services/daily_watch_service.py`, `main.py`, `scripts/tplus_strategy_bench.py`,
+  `.claude/skills/theo-doi-hang-ngay/SKILL.md`, `CLAUDE.md` §26.10,
+  `tests/test_module_boundaries.py`.
+- Reason: Tom đảo quyết định §26.10 trong cùng ngày — *"bỏ stop nhưng phải đưa
+  khuyến nghị range bán (range có thể thay đổi theo thời gian nếu bạn cảm thấy
+  nó vẫn có sóng lên)"*.
+
+### Câu hỏi tự nhiên, và nó được đo chứ không được đoán
+Một băng neo ở **đỉnh** có tốt hơn một stop neo ở **giá vào** không?
+`scripts/tplus_strategy_bench.py --trail` (mới) chấm 7 hình học thoát trên
+3.446 lệnh, luật vào lệnh đang ship, chi phí 1,00%/vòng, khung 40 phiên:
+
+| hình học | mean%/lệnh | excess | 2026 |
+|---|---|---|---|
+| **KHÔNG stop, giữ hết khung** | **+1,77** | **+0,59** | +1,25 |
+| range nhả 3,5×ATR | +1,07 | +0,49 | +1,05 |
+| chỉ gãy trend thì bán | +0,87 | +0,37 | +1,08 |
+| range nhả 2,5×ATR | +0,18 | +0,18 | +0,46 |
+| range nhả 1,5×ATR | −1,29 | +0,09 | +0,04 |
+
+**Giữ hết khung thắng mọi biến thể, và càng chặt càng tệ — đơn điệu.** Cùng kết
+quả ở khung 20. Kết luận tổng quát hơn cả hai lần Tom quyết định: **một luật
+thoát bằng mức giá, dù neo ở đâu, vẫn là một cái stop và vẫn tốn tiền.**
+
+`run_trail()` cố ý **không có stop lỗ nào**: mức thoát chỉ tồn tại sau khi lệnh
+đã lãi ≥ `arm_atr`×ATR. Một lệnh âm không bao giờ bị quét ra — đó mới đúng nghĩa
+"bỏ stop", và nếu không tách bạch thế thì biến thể "range" sẽ lén mang theo một
+cái stop ở những phiên đầu và phép đo sẽ đo nhầm thứ khác.
+
+### Ship: một luật và một tham chiếu, gọi tên khác nhau
+`services/sell_range.py` trả về hai nhóm, và docstring nói rõ chỉ **một** là luật:
+- `sell_from` / `sell_by` — **cửa sổ 20-40 phiên. LUẬT.** Ngoài khoảng đó không
+  factor nào sống sót (§26.9 + quét 10/20/40/60 cùng ngày).
+- `band_lo` / `band_hi` — ±1×ATR quanh **đỉnh đã đạt**, tự trượt lên khi giá lên.
+  **THAM CHIẾU, không phải luật** — thoát cơ học tại đây đã đo và thua.
+- `give_back` 3,5×ATR dưới đỉnh — mức **ít tốn nhất** trong các băng, không phải
+  mức tốt. Báo như tin về *luận điểm*, không phải lệnh bán.
+
+`breaches()` đổi thành `alerts()` với 3 loại theo thứ tự khẩn: quá hạn → nhả quá
+sâu → trong cửa sổ bán. Không còn cảnh báo stop. Tên cũ giữ làm alias.
+
+- Kiểm chứng: bench chạy lại sau khi dọn biến thừa cho **cùng byte kết quả**.
+  376 test, ruff 65. Vị thế đó đã xoá stop/target; bản tin hiện range tham chiếu và
+  cửa sổ bán của nó.
+- Follow-ups:
+  - `band_hi` (+1×ATR trên đỉnh) là con số **chọn cho dễ đọc**, không phải đo
+    được — một ATR là "một nhịp thường của chính mã đó". Nó chỉ là tham chiếu
+    nên không ảnh hưởng P&L, nhưng đừng trích nó như một mức đã kiểm chứng.
+  - Phần "nếu bạn cảm thấy nó vẫn có sóng lên" hiện do **đỉnh** đảm nhiệm (range
+    tự trượt khi giá lập đỉnh mới). Biến thể gãy-trend có đo (`chỉ gãy trend thì
+    bán`, +0,87) và **thua** giữ hết khung, nên không ship thành luật.
+
+---
+
+## 2026-09-16 (8) — stop mới bị chấm lên quá khứ: cảnh báo giả trên lệnh đang thắng
+- Author: Claude Code on behalf of Tom
+- Files: `services/trading_state.py`, `services/position_tracking.py`,
+  `api/routers/state.py`.
+- Reason: Tom báo đã mua một mã và hỏi stop đề xuất. **Lần đầu dùng thật
+  tính năng vừa dựng hôm nay, nó báo sai ngay.**
+
+### Defect
+Đặt stop cho vị thế đó (đang lãi, giá **trên** stop). Bản tin báo
+**"🔴 <mã> — ĐÃ CHẠM STOP"**.
+
+`hit_stop` được định nghĩa là *"đã từng chạm kể từ lúc vào lệnh"*, và mã đó có
+xuống dưới mức ấy đầu tháng 9. Nhưng mức stop **được đặt hôm nay** — nó chưa tồn tại
+lúc giá ở dưới đó. Mức stop không lưu ngày hiệu lực, nên phép kiểm âm thầm coi nó
+luôn luôn tồn tại và chấm nó lên cả quãng giá trước đó.
+
+Đây là **back-painting**, đúng họ lỗi §20.3 P1-4 / §25.3 — ở đó là nhãn regime
+được vẽ lại bằng hindsight, ở đây là mức stop. Và hậu quả tệ hơn im lặng: **một
+cảnh báo stop giả trên một lệnh đang thắng bảo người đọc bán một lệnh đang chạy
+tốt.** Nó cũng sẽ nổ **mỗi lần trail stop**, tức là đúng vào những lệnh có lãi.
+
+### Sửa
+`stop_set_at` / `target_set_at` trên mỗi vị thế: ngày mức đó bắt đầu có hiệu
+lực. `track()` chỉ quét đường giá **từ ngày đó**. `None` rơi về `opened_at`, nên
+mọi dòng ghi trước hôm nay vẫn đúng — mức của chúng quả thật có hiệu lực từ lúc
+mở lệnh, và không cần migration.
+
+Dấu ngày chỉ đóng khi giá trị **thực sự đổi**, không phải mỗi lần gọi
+`update_position` — sửa `qty` không được reset cửa sổ quan sát của stop.
+
+### Hai thứ khác rơi ra cùng lúc
+- **`thesis` đặt được lúc mở lệnh nhưng không sửa được ở đâu cả** — không có ở
+  `update_position` lẫn `PositionPatch`. Mà luận điểm là đúng thứ phải sửa khi
+  lệnh tiến triển (vào lệnh rồi, giờ sát target). Một trường viết-một-lần rồi cũ đi là
+  một trường sẽ nói dối. Cùng lỗi §22.10 đã ghi cho giá vào lệnh. Nay sửa được.
+- Giá vào lệnh trong sổ là **giá đóng phiên trước**, không phải
+  giá khớp của Tom. Đúng thứ §22.10 cảnh báo, và đúng lý do
+  `update_position` tồn tại.
+
+- Kiểm chứng: **negative control** — bỏ `stop_set_at` khỏi row thì `hit_stop`
+  quay lại `True` trên đúng vị thế đó; có nó thì `False`. 374 test, ruff 65.
+- Follow-up: `daily_prices` chỉ có giá đóng, không có high/low (`ponytail` đã
+  ghi), nên một cú xuyên stop trong phiên rồi đóng lại trên mức vẫn không được
+  ghi nhận. Với sổ swing chấm theo giá đóng thì chấp nhận được; với stop đặt ở
+  sàn thì không.
+
+---
+
+## 2026-09-16 (7) — task theo dõi hằng ngày + skill, và logic stop rời khỏi route
+- Author: Claude Code on behalf of Tom
+- Files: `services/position_tracking.py` (mới), `services/daily_watch_service.py`
+  (mới), `.claude/skills/theo-doi-hang-ngay/SKILL.md` (mới),
+  `scripts/jobs/job_daily_watch.bat` (mới), `api/routers/state.py`, `main.py`,
+  `scripts/cleanup_scheduled_tasks.ps1`, `tests/test_module_boundaries.py`,
+  `tests/test_position_track.py`, `CLAUDE.md` §8, `ARCHITECTURE.md`, `.gitignore`.
+- Reason: Tom — quét hằng ngày tìm mã triển vọng theo khung 4/8 tuần; mã đã mua
+  thì lưu riêng và **cảnh báo khi chạm stop**; theo dõi tiếp cho tới khi Tom báo
+  đã bán; báo cáo T2-T6. Và: *"skill sẽ phải gắn với 1 folder code riêng thay vì
+  bắt AI gen lại code mỗi lần chạy — AI chỉ có trách nhiệm run schedule và tổng
+  hợp lại"*.
+
+### Defect cấu trúc phải sửa trước
+Logic "đã chạm stop chưa" nằm trong `_track()` — một hàm **private trong
+`api/routers/state.py`**. Một job Task Scheduler không gọi được hàm nằm trong
+route: process scheduler không có HTTP client (cùng lý do `trading_state` đọc
+thẳng đĩa, §22.10). Viết lại nó trong job sẽ là **hai định nghĩa của cùng một
+câu hỏi**, và chúng sẽ lệch trong im lặng — §22.11 đã ghi đúng bài học này cho
+bar breakout, §16.15 cho đơn vị ATR, và hôm nay `analysis/bench.py` cho chi phí.
+Nay ở `services/position_tracking.py`; route và job là hai caller của một hàm.
+
+### Khung giữ: đo rồi mới đề xuất
+Tom cho phép "4 tuần/8 tuần hoặc range bạn đề xuất". Quét 41 factor × 4 khung
+(`ticker_alpha_bench.py --horizons 10,20,40,60 --verdict`):
+
+| giữ | factor qua 2 tiêu chí bắt buộc | quy năm |
+|---|---|---|
+| 10 phiên | **không cái nào** | — |
+| 20 phiên | `X_prop_obv` | +5,9% |
+| **40 phiên** | `X_prop_obv` | **+11,7%** |
+| 60 phiên | **không cái nào** | — |
+
+**Cùng một factor thắng ở 20 và 40**, nên hai khung *không* cho hai danh sách
+khác nhau — chỉ khác thời gian giữ, và bản tin nói đúng như vậy thay vì dựng ra
+hai bảng giả. Khoảng dùng được hẹp: dưới 20 và trên 40 đều không có gì sống sót.
+8 tuần đáng **gấp đôi** 4 tuần, nhất quán với §26.9 (phí khấu hao trên ít vòng
+hơn nhanh hơn tốc độ alpha/lệnh giảm).
+
+### Skill không chứa logic — đó là yêu cầu, không phải phong cách
+`SKILL.md` chỉ: chạy `main.py --daily-watch`, đọc file kết quả, tóm tắt theo thứ
+tự khẩn cấp, và ghi nhận mua/bán qua API. Nó **không** có công thức nào. Mục 5
+liệt kê thẳng những việc không được làm, trong đó có "không sửa `MIN_BUY_SCORE`
+để danh sách dài ra" — một phân tích sinh lại mỗi lần chạy là một phân tích khác
+nhau mỗi lần chạy.
+
+### Lỗ thật, do chạy thật mới thấy
+Lần chạy đầu: **vị thế đầu tiên trong sổ không có `stop`** — nên nó sẽ không bao giờ được
+cảnh báo, đúng thứ Tom vừa yêu cầu. Bản tin nay nói thẳng câu đó cho mọi vị thế
+thiếu stop, thay vì im lặng báo "không có gì chạm stop".
+
+Cảnh báo "dữ liệu không phải phiên hôm nay" cũng sai: nó bắn mỗi sáng, vì phiên
+hôm nay chưa đóng. Nay đếm bằng **phiên** và chỉ cảnh báo khi trễ > 1.
+
+- Task: `SectorFlow_daily_watch`, **30 17 * * 1-5**, trigger `-Weekly Mon..Fri`
+  thật (8 job cũ ghi Cron `1-5` nhưng đăng ký `-Daily`, nên có chạy cuối tuần).
+  `RunLevel = Limited` — job chỉ chạy python và ghi file, và ở mức đó đăng ký
+  được **không cần shell admin**; `cleanup_scheduled_tasks.ps1` nay nhận
+  `RunLevel` theo từng job.
+- Kiểm chứng: chạy thật qua Task Scheduler → `LastTaskResult 0`, file sinh ra,
+  log có dòng kết quả. Hai endpoint mà skill hướng dẫn (`POST /positions`,
+  `POST /positions/{symbol}/close`) đã gọi thử bằng `TestClient` → 200, và dữ
+  liệu thử đã dọn. `cleanup_scheduled_tasks.ps1` kiểm bằng AST parser thật, sau
+  khi tokenizer bỏ sót một lỗi ngữ pháp: PS 5.1 coi `if` là **câu lệnh**, nên
+  `Get-JobPrincipal (if (...) {...})` không hợp lệ dù token hợp lệ.
+- 374 test, ruff 65, smoketest 6/6.
+- Follow-ups:
+  - **Chưa gửi email** (Tom: *"tạm thời chưa cần… để sau"*). Khi cần thì đi qua
+    `generate_report.py` chứ không dựng trình gửi thứ hai (§2).
+  - Hình học stop/target vẫn là SWING (chỉnh cho 20 phiên). Nếu Tom chuyển sang
+    giữ 40 phiên thì cần một profile riêng — **chưa đo**, và §26.10 vừa chốt giữ
+    stop nên câu hỏi mở là *hình học nào rẻ nhất*, không phải có hay không.
+  - `report/watch_*.md` ghi mỗi ngày một file, chưa có dọn cũ.
+
+---
+
+## 2026-09-16 (6) — hai bench chấm cùng một lệnh ở hai mức phí; và bộ khung để thêm thuật toán
+- Author: Claude Code on behalf of Tom
+- Files: `analysis/bench.py` (mới), `scripts/factors/` (mới: `__init__.py`,
+  `README.md`), `scripts/ticker_alpha_bench.py`, `scripts/ticker_ranker_experiment.py`,
+  `CLAUDE.md` §26.6/§26.9/§26.10, `docs/doctrine/26-ticker-picks.md`,
+  `docs/PATCHES.md`, `README.md`. Không đụng đường production.
+- Reason: Tom — *"test các tính năng thuật toán, cần xây dựng AI native để sau AI
+  chỉ cần đưa thuật toán và code thuật toán sẽ … trả lời giúp tôi hàng ngày"*, và
+  *"tôi vẫn nghĩ cần stoploss"*.
+
+### Defect tìm được trên đường, và nó đắt hơn cả việc được giao
+Không phải hai script mà **năm**, ở **bốn** mức chi phí khác nhau:
+
+| script | chi phí/vòng | vì sao |
+|---|---|---|
+| `ticker_alpha_bench.py` | **1,00%** | lấy `BACKTEST_SLIPPAGE_MIN_PCT` từ config — đúng §18.2/9 |
+| `ticker_ranker_experiment.py` | 0,70% | gõ tay `2 * 0.0015` |
+| `tplus_strategy_bench.py` | 0,70% | `--slippage-bps` mặc định 15 |
+| `picks_portfolio_sim.py` | 0,70% | `--slippage-bps` mặc định 15 |
+| `audit_past_picks.py` | **0,40%** | không tính slippage — mà cột vẫn tên `net%` |
+
+Một cột tên là "net" nhưng thiếu hơn nửa chi phí thì tệ hơn là không có cột đó.
+Cả năm nay lấy từ `analysis/bench.py`; hai script có CLI vẫn override được,
+nhưng **mặc định** là con số doctrine.
+
+Ở khung 20 phiên đó là **3,8 điểm %/năm**. Hệ quả cụ thể: con số ensemble
+*"+16,7%/năm — lần đầu vượt VNINDEX 15,7%"* trong `docs/PATCHES.md` tính bằng
+bản **rẻ hơn**; dưới hằng số của chính `config` nó là **~12,9%, thua index**.
+Cái được tuyên bố là cột mốc hoá ra là một sai số đơn vị, y như §16.15.
+
+**0,70% không phải "số cũ hợp lệ", nó mâu thuẫn với §18.2/9** — một BLOCKER đã
+được chốt. Nay `analysis/bench.py` là nguồn duy nhất và cả hai bench import nó.
+`CLAUDE.md` §26.6 mang bảng đính chính (T+3: 58,8% → **84,0%/năm**), và
+`docs/doctrine/26-ticker-picks.md` mang cảnh báo ở đầu file để không ai đọc số
+cũ mà tưởng đúng. **Mọi `excess` không đổi** — excess là hiệu hai lợi suất gộp
+nên chi phí triệt tiêu; chỉ net/lệnh và quy năm sai, đúng bằng 0,30%/lệnh.
+
+### Bộ khung: thêm thuật toán không phải sửa bench
+- `analysis/bench.py` giữ **chi phí + registry + phán quyết** ở một chỗ.
+- `scripts/factors/*.py`: một file một ý tưởng, `@register(...)`, bench tự nạp.
+  Kiểm bằng file thử (`ZZ_probe`) — nạp đúng, metadata đúng — rồi xoá.
+- `--verdict` chấm theo **tiêu chí doctrine**, không phải ngưỡng tôi nghĩ ra:
+  thắng base rate gộp (§16.12) · **thắng base rate TỪNG NĂM (§16.12, bắt buộc)**
+  · **quintile đơn điệu (§18.7, bắt buộc)** · IC |t|≥2 (§26.2) · dương sau chi
+  phí (§26.6) · vượt VNINDEX 15,7% (§26.9).
+- Báo cáo bằng **quy năm**, không phải %/lệnh: +0,2%/lệnh ở T+3 là thảm hoạ còn
+  ở 8 tuần là tốt, nên %/lệnh không so sánh được giữa các khung giữ.
+- `--json` để so được giữa các lần chạy.
+
+### Kết quả lần chạy đầu — 41 factor, khung 20 phiên, chi phí 1,00%
+**1/41 qua được hai tiêu chí bắt buộc**, và đó là `X_prop_obv` — đúng thứ tự
+đang ship (§26.9). Kết quả đến từ tiêu chí, không từ việc tôi chọn.
+
+| factor | quy năm | theo năm | đơn điệu | phán quyết |
+|---|---|---|---|---|
+| `Y_shipped_plus_small` | **+7,5%** | 23:+0,76 24:+1,52 **25:−0,80** 26:+1,26 | có | REJECT |
+| `X_prop_small_obv` | +6,9% | 23:+0,45 24:+1,59 **25:−0,90** 26:+1,54 | có | REJECT |
+| **`X_prop_obv`** | **+5,9%** | 23:+0,39 24:+0,56 **25:+0,13** 26:+1,24 | có | **EDGE, DƯỚI TRẦN** |
+| `A_shipped_score` (điểm cũ) | −14,2% | âm mọi năm | không | REJECT |
+
+> **Bộ khung tự chứng minh giá trị ở đúng một dòng**: factor kiếm nhiều tiền
+> nhất (`Y_shipped_plus_small`, +7,5%) **âm 2025**, nên trượt. Xếp theo tiền thì
+> chọn nhầm — hai tiêu chí bắt buộc là thứ chặn lại. Đây là §16.12 được **thi
+> hành** thay vì phải nhớ, và nó cũng là §26.9 đã ghi (size tilt hỏng 2025).
+
+Thứ tự đang ship đo lại dưới chi phí đúng: excess +0,49% (không đổi), net
++0,47%/lệnh, **quy năm +5,9%** thay vì +10,1%. **Vẫn thua VNINDEX 15,7%.**
+
+### Stop-loss: Tom giữ (§26.10 đóng)
+Phép đo nói bỏ stop lời hơn (+36,2% vs −5,2% trên book 5 mã, drawdown cũng thấp
+hơn). Tom giữ. **Không đổi dòng code nào** — `is_valid_long_pick`, sàn R:R, thang
+stop→target trên thẻ, `hit_stop` trong sổ đều nguyên vẹn.
+
+Đây là lựa chọn **trên** chứng cứ chứ không bỏ qua chứng cứ: backtest không nhìn
+thấy margin call, gap-down theo tin, hay ngày không ngồi trước màn hình — ba thứ
+stop tồn tại để chặn và không thứ nào có trong bảng. Tail per-trade (−47% không
+stop vs −15% có stop) đứng về phía quyết định.
+
+Cái giá ~0,86 điểm %/lệnh **ở lại doctrine**, được chấp nhận có ý thức: nó
+chuyển từ *defect chưa biết* sang *chi phí đã biết*. Và nó mở ra việc đáng làm
+hơn — đã chốt giữ thì câu hỏi không còn là *có hay không* mà là **hình học nào
+rẻ nhất**; mới đo 4 hình học cố định, chưa đo trailing, stop theo thời gian,
+stop chỉ kích hoạt sau khi lãi, hay stop theo ATR động.
+
+- Kiểm chứng: 370 test, ruff 65 (cả hai không đổi — +6 F401 do đợt sửa này sinh
+  ra đã dọn hết), cơ chế plugin kiểm bằng file thử rồi xoá, `ticker_ranker_
+  experiment.py` import lại đúng `COST = 0.01`.
+- Follow-ups:
+  - **Chưa dựng đường production cho ensemble.** Theo ý Tom (*"backend, frontend
+    để riêng"*), đợt này chỉ đo. Và con số biện minh cho nó vừa mất 3,8 điểm
+    %/năm, nên phải đo lại trước khi dựng.
+  - Bench mới chạy khung 20. Nên quét 10/20/40/60 để bảng §26.9 nhất quán ở chi
+    phí đúng.
+  - `scripts/tplus_strategy_bench.py` và `picks_portfolio_sim.py` chưa kiểm xem
+    có gõ lại hằng số chi phí không.
+
+---
+
+## 2026-09-16 (5) — CLAUDE.md tách làm hai: luật ở lại, chứng cứ ra `docs/doctrine/`
+- Author: Claude Code on behalf of Tom
+- Files: `CLAUDE.md` (133.621 → 48.092 B), `docs/doctrine/*.md` (9 file mới,
+  119.552 B), `docs/PATCHES.md`, `AGENTS.md`, `ARCHITECTURE.md`. Không đụng code.
+- Reason: `CLAUDE.md` được khai là CACHED và *"DO NOT modify mid-session"*, nhưng
+  đã tới **135.718 B ≈ 33.400 token nạp lại mỗi lượt** — gấp 13 lần ngân sách
+  10 KB mà `claude/CLAUDE.md` mẹ đặt ra. Transcript đo được hậu quả: `4b2f418e`
+  hết context **5 lần trong một ngày**, `9245140a` 3 lần. **72% (96 KB) là hậu
+  kiểm có ngày tháng**, không phải luật đang có hiệu lực.
+- Summary:
+  - **Nguyên tắc cắt, áp cho từng khối**: *nếu một agent không bao giờ đọc đoạn
+    này, nó có làm sai không?* Có → ở lại. Chỉ giải thích *vì sao* luật đó có →
+    chuyển đi. Kết quả: **−64%**, ~21.000 token mỗi lượt.
+  - **Mọi heading `##` ở lại** (25/25, cộng §27 mới). Số hiệu mục bị trỏ quá
+    nhiều để đổi — §16.1 104 lần, §18.2 99, §22.11 23 — nên tách mà làm gãy
+    tham chiếu thì đổi một vấn đề lấy một vấn đề khác. **58 mục con được trỏ đều
+    tra được**: hoặc còn heading thật, hoặc có dòng trong bảng tra §27.1.
+  - **9 file doctrine, nguyên văn.** Không tóm tắt, không sửa số, không sửa ngày:
+    một hậu kiểm được viết lại là một hậu kiểm không còn là chứng cứ.
+  - **§18.1-18.5 cố ý KHÔNG đẩy hết đi.** 24 finding là *yêu cầu còn mở*, không
+    phải chứng cứ, và §18.8 bắt mọi thay đổi phải trích số hiệu finding nó đóng.
+    Giữ lại dưới dạng mục lục một dòng mỗi finding + trạng thái (mở / đóng ở đâu),
+    2,2 KB thay vì 7,1 KB, và §18.2 lấy lại heading của nó.
+  - **Cảnh báo vận hành được giữ nguyên văn trong `CLAUDE.md`**, không rút gọn
+    thành dòng trỏ: §16.14 (`ACCUMULATE` chưa có edge đo được → là watchlist,
+    không phải lệnh), §16.12 (phải thắng NO GATE **trong từng năm**), §26.6
+    (T+3 không thể có lãi), §26.9 (vẫn không thắng index), §26.10 (câu hỏi bỏ
+    stop đang chờ Tom). Đây là những câu mà không đọc thì sẽ làm sai.
+- Kiểm chứng:
+  - Script đối chiếu **từng dòng** của `git show HEAD:CLAUDE.md` với
+    `CLAUDE.md` mới + 9 file doctrine → **0 dòng biến mất**.
+  - Script quét `§NN.M` trong mọi `.py/.ts/.tsx/.md` của repo → **58 mục con,
+    0 mục tra không ra**.
+  - 370 test pass, ruff 65 (cả hai không đổi), `scripts/_doc_audit.py` không
+    phát sinh mục mới — mục `/api/flow/ingest` chỉ đi theo đoạn văn từ
+    `CLAUDE.md` sang `docs/doctrine/20-code-review.md`.
+- **Hai defect do chính script kiểm chứng bắt được** (không phải do đọc lại):
+  1. **§20.3 mất 9 dòng.** Tôi viết lại mục đó bằng tiếng Việt, giữ 3 mục còn mở
+     và nén 4 mục đã đóng thành một dòng — nhưng dải trích cho file doctrine
+     dừng ở §20.2, nên chi tiết 4 mục đã đóng (số đo P0-5, lý lẽ P1-1, P1-4,
+     P3-2) **không được chuyển đi đâu cả**. Đây đúng là thứ "tách file" dễ làm
+     hỏng nhất, và nó lọt qua mắt tôi. Nay nối nguyên văn vào cuối
+     `20-code-review.md`.
+  2. **§24.3 tra không ra.** Nội dung (`POST /api/state/report/send` chạy
+     subprocess, guard double-click ở backend) vẫn còn, nhưng nhãn số thì không
+     — một mục con có nội dung mà không có nhãn thì tham chiếu `§24.3` chết.
+     Nay các gạch đầu dòng của §24 mang nhãn §24.1/§24.2/§24.3.
+  > Bài học chung hơn cả hai: **một phép tách chỉ an toàn khi có script đối chiếu
+  > từng dòng.** Đọc lại bằng mắt sẽ không bắt được một mục bị viết lại mà bản
+  > gốc không được chuyển đi — vì đoạn viết lại *trông đúng*.
+- Nhân tiện sửa 2 con trỏ hỏng **có sẵn** trong `ARCHITECTURE.md`, cả hai lộ ra
+  khi kiểm tính toàn vẹn tham chiếu: dòng 27 trỏ `§22.10` (operator state) cho
+  đoạn nói về calibrator → `§25.2`; dòng 214 trỏ `§17`, mà **§17 chưa từng tồn
+  tại** trong bất kỳ commit nào (`CLAUDE.md` nhảy từ §16 sang §18) → đánh dấu
+  tại chỗ, **không đoán** ý định, vì đó là một entry changelog có ngày (§21).
+- Follow-ups:
+  - Luật mới, ghi ở §27: phép đo mới vào `docs/doctrine/`; `CLAUDE.md` chỉ nhận
+    **kết luận**, và chỉ khi kết luận đó đổi một luật. Mục nào ở `CLAUDE.md` dài
+    quá ~15 dòng thì phần thừa thuộc về `docs/doctrine/`.
+  - Chưa làm: `README.md` §118 vẫn trỏ "`CLAUDE.md` §19 cho module coverage" —
+    §19 giờ chỉ còn bảng đếm, coverage nằm ở `docs/doctrine/19-testing-history.md`.
+
+---
+
+## 2026-09-16 (4) — a learned ranker wins pooled and loses 2026; the ensemble does not
+- Author: Claude Code on behalf of Tom
+- Files: `scripts/ticker_ranker_experiment.py` (new), `scripts/ticker_alpha_bench.py`
+  (+2 size variants). No production path touched.
+- Reason: Tom, *"cập nhật code và backend mô hình dự đoán hiện tại ... tập trung
+  profit"*, having agreed to the four-week horizon.
+- Summary:
+  - **The VN-4 size lead is settled, and it does not ship.** Tested a second
+    time, now on top of the shipped ordering rather than the bare score: adding
+    a dollar-volume tilt lifts pooled excess at +20 from +0.49% to +0.61% and
+    **breaks 2025 (-0.80)**, the same year it broke the first time. Two
+    independent tests failing in the same place is a result, not noise.
+  - **A LightGBM lambdarank over 23 features, walk-forward with a 22-session
+    purge, beats the hand-built blend decisively when pooled** -- excess +1.38%
+    against +0.64%, IC t = 8.1, monotone quintiles, over 73,754 out-of-sample
+    rows from 2023-11 to 2026-08. **And it loses 2026 at every capacity
+    setting** (-1.39 at 15 leaves, -1.42 at 7, -0.76 at 31). Shrinking the model
+    does not fix it, which is what makes it a regime problem rather than an
+    overfit -- 25.9 already identified 2026 as the high-volatility stretch where
+    every model here degrades.
+  - **The ensemble is the thing that qualifies.** A 50/50 rank average of the
+    learned score and the shipped blend is positive in all four years at every
+    capacity tried, best at the MOST regularised setting (leaves 7:
+    +3.73 / +1.98 / +0.12 / +1.38), excess **+1.25%**, net **+1.23% per trade**,
+    quintiles monotone. Two weakly-correlated orderings averaged is the cheapest
+    robustness available, and it is the natural answer when one wins pooled and
+    the other wins the year the first one loses. Annualised at a four-week
+    cadence that is roughly **+16.7%/yr** -- the first configuration measured in
+    26 that exceeds VNINDEX buy-and-hold (15.7% CAGR), though on five names
+    rather than an index.
+  - **Nothing shipped.** The experiment writes no model artifact on purpose:
+    `RotationRanker.fit()` saves to `config.SAVED_MODELS_DIR` unconditionally
+    and once left the 17:00 job with a three-feature model while the suite
+    stayed green (19). A production path needs a training job, a versioned
+    artifact, the 23 features computed at prediction time (`_build_ticker_row`
+    produces about six), a retrain cadence and the drift monitor 18.3/16 asks
+    for. That is its own change, recorded in `docs/PATCHES.md`.
+- Follow-ups:
+  - Build the ensemble path. It is the largest measured profit item still open.
+  - 2026 runs only to August in the panel, so its cell is the thinnest; the
+    learned ranker's failure there should be re-checked once the year closes.
+
+---
+
+## 2026-09-16 (3) — PNJ and PLX: the question the interrupted session never answered
+- Author: Claude Code on behalf of Tom
+- Files: none (measurement only, recorded here rather than in `CLAUDE.md`
+  because that file is already 134 KB and is re-sent every turn — see below).
+- Reason: recovered from the transcript of session `6f63d327`
+  (2026-09-15, interrupted). Its only instruction was *"Đánh giá con PNJ và PLX
+  dựa vào cả thuật toán đã có / hay cải tiến — tôi thấy thuật toán nhiều cái
+  chưa chính xác"* and it was never answered.
+- Summary:
+  - **The old system recommended both, repeatedly, and both lost.** PNJ went out
+    three times (2026-08-25/28/31) at old scores +5/+4/+4: T+3 −6.90% / −7.47% /
+    −7.47%, average **−7.28%** against a −0.90% base rate, **3 of 3 hit the
+    stop, 0 of 3 reached target**; the first is −16.02% by T+10. PLX went out
+    three times at +1/+8/+4 for a T+3 average of −2.44% against −1.22%.
+  - **All six would be rejected by the rewritten score**, each for a stated
+    reason. The clearest is PNJ on 2026-08-25: old score **+5**, RSI(2) at
+    **98.2** — maximally overbought — below its SMA200 and carrying a 5.5% ATR.
+    The old rule paid +2 for RSI(14) in 50-70 and +2 more for a volume surge,
+    so it rewarded precisely the profile that was about to fall 16%. This is
+    §26.2's failure mode in a case Tom named himself before any of it was
+    measured.
+  - PLX on 2026-08-27 scored **+8**, near the old ceiling, on RSI(2) of 3.2 —
+    genuinely oversold, but below SMA200, which is the falling-knife shape the
+    new trend gate exists to block.
+  - Live on 2026-09-15 both are still blocked: PNJ ranks 51/93 and PLX 53/93,
+    both floored at −20 for the same reason (no confirmed uptrend).
+- Follow-ups:
+  - **The crashes are context exhaustion, confirmed from the transcripts.**
+    Session `4b2f418e` carries the marker *"continued from a previous
+    conversation that ran out of context"* **five times in one day** (8,650
+    records, 17.8 MB); `9245140a` three times. Not a software fault.
+    `Trading/CLAUDE.md` is **133,622 bytes ≈ 33,400 tokens, re-sent every
+    turn**, against the 10 KB budget the parent `claude/CLAUDE.md` sets — and
+    **72% of it (96 KB) is dated post-mortems**, not standing doctrine. Worse,
+    that file is declared CACHED and "DO NOT modify mid-session"; the three
+    §26 appends made today each invalidated the cache. Proposed split (NOT
+    done, it needs Tom's approval since it restructures the governing
+    document): keep §1-15 and §21 resident (~14 KB), move §16.11-16.15, §19,
+    §20 and §22-26 to `docs/doctrine/` behind one-line pointers. Est. 134 KB →
+    ~20 KB, about 28,000 tokens off every turn.
+
+---
+
+## 2026-09-16 (2) — the horizon is worth ten times the algorithm
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `services/picks_scoring.py` — `blended_rank_scores()` + `_pct_rank()`,
+    `W_RANK_SCORE` / `W_RANK_OBV`.
+  - `services/picks_universe_service.py` — `TickerRow.obv_chg20` and
+    `.rank_score`, OBV computed in `_build_ticker_row`, a cross-sectional
+    Stage E that fills `rank_score` over the whole universe, `_rank_key` reads
+    it.
+  - `scripts/ticker_alpha_bench.py` — `obv_chg20` feature; literature-lead
+    factors (size, residual momentum, OBV) and four blends; `X_prop_obv` now
+    CALLS the shipped `blended_rank_scores` rather than reimplementing it.
+  - `scripts/tplus_strategy_bench.py` — three swing entry rules.
+  - `tests/test_picks_ranking.py` — +7 (370 total).
+  - `CLAUDE.md` §26.9, `docs/PATCHES.md`.
+- Reason: Tom, after reading §26.6 — *"cho phép thay đổi dự báo mua 2-4 tuần nếu
+  benchmark test cho thấy profit lợi hơn … cái tôi cần là profit"* — plus web
+  access to check whether more was available.
+- Summary:
+  - **Web search and WebFetch do not work in this session** (both route through
+    a model this account cannot reach). The built-in browser does, so the
+    reading was done there. Two facts were checked because either could have
+    overturned §26.6: settlement and fees. **Settlement confirmed at T+2** from
+    VNDIRECT's own HSX/HNX pages ("cổ phiếu về tài khoản trước 13h00 ngày T+2",
+    and the afternoon session opens at 13:00) — so `BACKTEST_SETTLEMENT_LAG = 2`
+    and §22.10's T+3→T+2 correction were both right, and a widely-syndicated
+    advisory page claiming "sellable only from T+3 morning" is citing a circular
+    that predates the 2022 change. **Fees are 0.2%/side online** at retail order
+    sizes, not the 0.15% config assumes, so §26.6's cost stack is at the cheap
+    end and its conclusion is conservative.
+  - **The measurement that answers the question.** Base rate with NO ranking,
+    by holding period, annualised: T+3 **−40.6%**, T+10 −4.9%, T+15 **+1.3%**
+    (costs break even), T+20 +4.7%, T+40 +10.2%, T+120 +15.6%. Trading frequency
+    is a pure tax and it is the largest term in the system: T+3 → four weeks is
+    worth ~**+45pp/yr** before any skill. The best ranking rule measured is worth
+    +0.5 to +0.8pp per trade. The horizon is an order of magnitude bigger than
+    the algorithm, and nobody had measured it.
+  - **The literature lead was tested, not adopted.** *Factors and anomalies in
+    the Vietnamese stock market* (Pacific-Basin Finance Journal 82, 2023) puts
+    ln(ME) at −0.11, p<0.01 — a strong size effect. Tested here it helps pooled
+    (+0.40% excess at +20) and **fails 2025 (−0.64)**, so it does not clear
+    §16.12's within-year bar and is **not shipped**. What did survive was a term
+    the paper did not name: on-balance-volume trend.
+  - **What shipped: a cross-sectional ordering pass.** The per-row score decides
+    admission; a 50/50 rank blend of (score, OBV trend) decides order. At +20 it
+    lifts excess from +0.13% to **+0.49%**, IC t 2.6 → **4.4**, quintiles from
+    non-monotone to **monotone**, and by year from 3-of-4 to **4-of-4 positive**;
+    at +40, +0.77% excess with the same properties. The per-row form was tried
+    first and is measurably worse (+0.23%, still non-monotone) — adding a raw
+    value lets one day's dispersion decide whether the term dominates.
+  - **A surprising property found by a failing test.** With 50/50 weights the
+    best score on the worst flow **ties** the worst score on the best flow. The
+    first draft asserted the opposite and went red, which is how it was found.
+    It is safe only because admission runs first, and that dependency now has
+    its own test — reading either alone would mislead.
+  - **The book simulation was noise, and that is a finding.** It made a
+    40-session hold look spectacular (+170% total, CAGR 30.9%). Sweeping the
+    hold on the SAME rule: +25.9 / **−17.1** / +78.8 / +127.2 / +170.2 /
+    **−30.7** at 15/20/25/30/40/60 sessions. The sign flips twice and
+    neighbouring holds differ by 96pp. ~100 trades over 3.7 years is dominated
+    by which names happened to be held. §26.8 had already logged this; every
+    number in §26.9 comes from the cross-sectional bench instead.
+  - **Honest bottom line, in the doctrine so it is not lost.** The best
+    configuration measured returns ~+14.4%/yr at an eight-week hold and
+    ~+10.1%/yr at four weeks, against **VNINDEX buy-and-hold at 15.7% CAGR,
+    Sharpe 0.91, MaxDD −18.1%**. Nothing beats the index. What the change IS
+    worth is +1.05pp per trade over yesterday's ordering — about **+13pp/yr** at
+    a four-week cadence — which is a large fix to a losing ranking, not a case
+    for picking stocks over an index position.
+  - **Negative controls:** setting `W_RANK_OBV = 0` fails exactly 3 of the new
+    tests; ignoring `rank_score` in the sort key fails exactly 1. 370 pass,
+    ruff back to 65 after making both new `zip()` calls strict.
+  - **§26.10 — the stop is costing more than it protects.** Measured while
+    checking whether the SWING geometry survives the longer horizon. It does,
+    but the stop does not: over 3,542 trades at a four-week hold, every stopped
+    geometry loses money (shipped SWING −0.14%/trade) and only the unstopped one
+    earns (+0.72%). At 2.5/1.8 over twenty sessions, 40% of trades reach the
+    target and **44% touch the stop** — a stop firing as often as the target is
+    ending the thesis, not protecting it. Per trade the tail is three times
+    worse without it (worst −47% vs −15%), but at a five-name book the unstopped
+    version earns more AND draws down less (+36.2% / −18.8% vs −5.2% / −21.5%):
+    position count is already doing the tail's job, and doing it twice costs
+    ~0.86pp per trade — more than the whole §26.9 ranking gain.
+    **Deliberately NOT shipped.** `is_valid_long_pick` requires `stop < entry`,
+    the R:R floor is built on it, the card draws a stop→target ladder and the
+    book tracks `hit_stop`; and a backtest cannot see margin, gap-downs, or not
+    watching the screen. It is Tom's call, now with a number attached.
+- Follow-ups:
+  - The size effect is **unresolved, not rejected** — significant in the
+    literature and pooled here, failing one year in four. 3.7 years cannot
+    settle it.
+  - `MIN_BUY_SCORE` and the 2.5×ATR target distance were **not** re-derived for
+    the longer horizon. Whether a different target pays more over 20-40 sessions
+    is its own measurement and is not assumed.
+  - Tom has authorised 2-4 weeks. The table says 8 weeks is better still
+    (+14.4% vs +10.1%); that is beyond what he authorised and is his call.
+
+---
+
+## 2026-09-16 — the per-ticker score ranked backwards; the card never said its horizon
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `services/picks_scoring.py` — `score_ticker` rewritten (int → float, new
+    terms), `PROFILE_HORIZON_SESSIONS` + `horizon_note()`, `MIN_BUY_SCORE`,
+    `MAX_5D_DROP_PCT`, `UNTRENDED_FLOOR`, and the ranking coefficients the bench
+    imports.
+  - `services/picks_universe_service.py` — `_rank_key` (dollar-volume tie-break
+    removed), `rsi_2` / `ret_1d` / `price_to_sma_200` on `TickerRow`, OHLCV
+    lookback 110 → 400 calendar days, `score: int → float`, thesis carries the
+    horizon, and the all-zero `foreign_room` guard.
+  - `generate_report.py` — shortlist thresholds onto the shared constants;
+    `:+d` score formatting → `:+.1f` (it would have raised on a float).
+  - `api/routers/insight.py`, `frontend/src/pages/DailyInsightPage.tsx` —
+    continuous score rendered at one decimal.
+  - New: `scripts/extract_past_picks.py`, `scripts/build_price_panel.py`,
+    `scripts/ticker_alpha_bench.py`, `scripts/audit_past_picks.py`,
+    `scripts/tplus_strategy_bench.py`, `scripts/picks_portfolio_sim.py`.
+  - Tests: `tests/test_picks_scoring.py` rewritten for the new rule (+4),
+    `tests/test_picks_ranking.py` new (+7), `tests/test_picks_universe_service.py`
+    (+2). **370 total.**
+  - `CLAUDE.md` §26, `docs/PATCHES.md`, `ARCHITECTURE.md`.
+- Reason: Tom reported the suggested tickers moving far slower than a T+3 hold
+  needs. Nothing in the repo could check that — no table records a pick and
+  there is no per-ticker price panel — so the first half of this change is the
+  two instruments that make the claim testable.
+- Summary:
+  - **The claim was right, and the cause was not what it looked like.** Read
+    back from the HTML archive, the 174 picks emailed between 2026-07-23 and
+    2026-09-14 reached their printed target in **4%** of cases inside T+3
+    (median 7 sessions when reached) while touching the stop **24%** of the
+    time. `PickProfile.SWING` is a 2.5×ATR target — a three-to-four-week trade
+    at VN's ~2% ATR. The picks were not slow; the card never said how long.
+  - **And the ranking was separately, measurably worse than random.** Over 143
+    names × 1,168 sessions the shipped 0..7 trend score scored **−0.06%**
+    against the base rate at +3 sessions with **non-monotone** quintiles (Q5
+    below Q4), negative in four of five calendar years. As actually ranked —
+    `(score, dv_20d)` — **−0.15%**: the tie-break was not neutral, it handed
+    back the largest and slowest name in every score bucket. Replacement scores
+    **+0.21%**, monotone, IC t = +7.9, positive in every year it can be
+    evaluated.
+  - **Panel breadth nearly invalidated the whole first pass.** Seeded from
+    `_legacy_stock_prices` the panel was 21 names wide before 2025 because the
+    fetcher chased each symbol's missing tail and never its missing head. Every
+    2023-24 figure was "top 5 of 21". Fixed, and the bench now refuses a
+    cross-section under 30 names rather than quietly ranking inside one.
+  - **A live production defect fell out of the verification.** The KBS price
+    board returned `foreign_room = 0` for every name; the filter is `room > 0`;
+    stage C1 passed 0 of 75 and the build finished with 0 tickers. Same
+    asymmetry as §25.5 — a zero meaning "missing" and a zero meaning "none
+    left" are the same number — so the guard judges the column, not the cell.
+    The empty build was correctly not persisted, so the homepage never blanked.
+  - **What did NOT get fixed, and cannot be.** At 0.70% round trip, a T+3
+    rotation costs **58.8%/yr** against a universe returning 12.5%/yr. The best
+    ranking rule measured is worth +0.21% per trade. T+3 rotation is not a
+    tuning problem. §26.6 says so in the doctrine so no later reader re-derives
+    it, and no rule tested beat VNINDEX buy-and-hold risk-adjusted.
+  - **Negative controls, all four:** restoring the dollar-volume tie-break fails
+    exactly 2 of the new tests; diverging the bench's assembly from the service
+    fails the equivalence test; removing the `foreign_room` guard fails exactly
+    1. The fourth caught a test of mine that proved nothing — the equivalence
+    fixture had no name with ATR above the penalty threshold, so deleting the
+    penalty from the bench left all 7 tests green. Fixed by adding a third,
+    deliberately wild name, plus a guard asserting the fixture still reaches
+    both sides of every branch.
+- Follow-ups:
+  - Nothing beats the index. Until something does, the daily list is a
+    shortlist for a reader, not a system to follow (§26.8).
+  - The book simulation is too noisy at 5 positions to choose between rules;
+    the cross-sectional bench is the deciding instrument. Recorded in §26.8 so
+    it is not used as one.
+  - Entering at the next open costs a measured 0.145pp per trade (§26.7).
+    Larger than the ranking edge and not acted on — capturing it means scoring
+    before the 14:45 ATC auction, which is a different pipeline.
+
+---
+
+## 2026-08-26 — migration 12: two tables that never had a writer
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `database/migrations.py` — migration 12, two `DROP TABLE IF EXISTS`.
+  - `database/models.py` — `SectorAccumulationEvent` + `SectorFlowHandoff` deleted.
+  - `tests/test_database_schema.py` — +3 (7 in the file, 348 total).
+- Reason: the follow-up left by yesterday's entry. `sector_accumulation_events`
+  is what made `/api/sectors/stealth` answer 0 from a panel holding 21 events,
+  for months, indistinguishably from the truth. A table nobody writes is not
+  inert — it is a plausible-looking source of a wrong answer.
+- Summary:
+  - **Measured before touching anything.** Both tables hold 0 rows in the live
+    DB and have held 0 since creation (migrations 9 and 10). Neither has a
+    writer anywhere in the tree; the facts they were meant to store are derived
+    instead — stealth runs from `sector_flow_daily.accumulation_age` (§22.11),
+    handoffs by `analysis/flow_handoff.compute_handoff` on request
+    (`/api/sectors/handoff`). After yesterday's fix neither had a reader either.
+  - **The ORM classes had to go with the tables, and that is the whole trap.**
+    `init_db()` calls `Base.metadata.create_all` **before** `run_migrations()`.
+    Leave a model behind and the next start recreates the table while the
+    migration records itself as applied — a schema change that silently reverts
+    and, being versioned, never runs again.
+  - **That trap fired during this change, live.** The negative control
+    reinstated the two model classes for a moment; the running
+    `uvicorn --reload --reload-dir database` picked the edit up, called
+    `init_db()`, and both tables came back — with the *stub* schema from the
+    control, which is how they were identified. Migration 12 had already
+    recorded itself, so it would never have re-run. Dropped again with the
+    models gone; verified they stay gone across a reload window. 25 → 23 tables.
+  - Live DB backed up to `vnstock_market.db.bak-mig12` before applying. A drop
+    is not reversible and 0 rows is a measurement, not a guarantee.
+  - 348 tests (+3), ruff 65 (unchanged), smoketest 6/6.
+  - **Negative control**: reinstating the two model classes fails exactly
+    `test_a_dropped_table_has_no_orm_model_left_to_recreate_it` and
+    `test_the_drop_survives_a_restart`, and the second fails through the real
+    startup sequence (create_all → migrate, twice) rather than by inspecting
+    metadata — so it would have caught the live recurrence above.
+- Follow-ups:
+  - The §16.14 caveat (38% hit vs a 43% base rate) is on the Stealth Watch page
+    but not wherever `/api/sectors/stealth` is read. Currently nowhere — that
+    endpoint has **zero** consumers in `frontend/src`; the UI uses
+    `/api/stealth/*`. Worth deciding whether it should exist at all.
+  - `init_db()` running `create_all` before migrations is the general hazard
+    here, not a property of these two tables. Any future drop hits it.
+
+---
+
+## 2026-08-25 — two endpoints, one question, opposite answers
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `api/routers/sectors_flow.py` — `history` derives from `accumulation_age`.
+  - `api/routers/stealth.py` — both routes take `get_session_dependency`.
+  - `analysis/stealth.py` — `panel_from_rows()` + `_PANEL_FIELDS`.
+  - `tests/test_stealth_history.py` — +3 (17 in the file, 345 total).
+  - `CLAUDE.md` §22.11, `ARCHITECTURE.md` §5 + §9 — the open item, closed.
+- Reason: the last item flagged open by yesterday's doc audit, and the same
+  defect family §22.11 fixed — a stealth history sourced from a table nothing
+  writes.
+- Summary:
+  - **`/api/sectors/stealth` reported 0 events; `/api/stealth/history` reported
+    21 — from the same panel.** The first built its `history` key from
+    `SectorAccumulationEvent`, which migration 9 created and nothing has
+    written since. Not a stub this time, but the same outcome: a permanent
+    empty list that reads as "this sector has never accumulated" rather than
+    "nobody fills that table". Both now call
+    `stealth_events(panel_from_rows(...))`; live they agree on the first 20 of
+    21 (`/api/sectors/stealth` caps at 20 by design).
+  - **The reason it outlived the §22.11 fix is the more useful finding.** Both
+    `/api/stealth/*` routes opened `SessionLocal()` inside the handler instead
+    of taking `get_session_dependency`, so no test could hand them a panel —
+    the routes were **structurally untestable**, and the only assertions
+    anyone could write against them were on Query defaults and helper
+    functions (`test_router_defaults_come_from_the_scanner`,
+    `test_router_cond4_ranks_atr...`). That is exactly the shape of coverage
+    that looks like coverage. A route you cannot give data to is a route you
+    cannot show to be wrong. They take the dependency now, which is what makes
+    `test_both_stealth_endpoints_derive_the_same_events` possible at all.
+  - **`panel_from_rows()` is one function rather than two dict literals**
+    because the six columns are the contract. A caller that omits `atr_pct`
+    gets a `0.0` default and silently scores against `breakout_bar_baseline`'s
+    fallback instead of the sector's own ATR — the wrong number, no error, no
+    way to notice. It takes anything with the six attributes, so `analysis/`
+    still imports no DB model.
+  - The equality test compares the **event list**, not the count: a route that
+    finds the right *number* of the wrong runs is the failure worth guarding.
+  - `sector_accumulation_events` now has **no reader either**. Recorded in
+    `ARCHITECTURE.md` §5: dropping it is a one-line migration 12, and until
+    someone does, its only function is to mislead the next person who greps.
+- Verification: 345 pass (+3), ruff 65 (unchanged). **Negative control** —
+  reverting `history` to `[]` fails exactly the 3 new tests and nothing else.
+  Live: `/api/sectors/stealth` 20 events, `/api/stealth/history` 21 / 21 scored
+  / hit 0.381 / median lead 21 / 75% at ≥10d, first 20 keys identical.
+- Follow-ups:
+  - Migration 12 to drop `sector_accumulation_events` (and `sector_flow_handoff`
+    if the on-the-fly handoff stays).
+  - The §16.14 caveat is on the Stealth Watch page but **not** on whatever
+    reads `/api/sectors/stealth` — a 38% hit rate against a 43% base rate still
+    needs the warning wherever it is shown.
+
+---
+
+## 2026-08-25 — the reference docs were teaching a system that does not exist
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `docs/reference/ALGORITHM.md` — §0, §4, §5, §12, §13 rewritten against the
+    code; header stamp updated.
+  - `docs/reference/GLOSSARY_VI.md` — §1 regime labels.
+  - `ARCHITECTURE.md` — §3, §5, §8, §9 rewritten from measurement; §7 stealth
+    block and §11 migration status corrected for consistency.
+  - `scripts/_doc_audit.py` — brace-shorthand expansion, so the tool stops
+    reporting the docs' own compact notation as ghost routes.
+- Reason: Tom picked two of the four fixes the doc audit proposed, and ranked
+  the reference pair highest — *"đây là chỗ dạy sai"*. He is right about the
+  ordering: a contract that is stale is wrong, but a **walkthrough** that is
+  stale is wrong *to the person who is not reading the code*, which is the only
+  audience it has.
+- Summary:
+  - **`GLOSSARY_VI.md` named three regimes that never existed in any commit** —
+    `TREND_UP`, `TREND_DOWN`, `RISK_OFF`. The real four come from
+    `analysis/regime.py:_LABELS_BY_RETURN` and are lowercase. Replaced with a
+    table sourced to that constant, plus a line recording **what the old text
+    said and that it was wrong** — someone holding a printout of the old file
+    needs to recognise it, and a silent overwrite denies them that.
+  - **`ALGORITHM.md` §4 taught the retired 5-of-5 conjunction**, four months
+    after §16.1 became a score, and carried three sub-rules that exist in **no
+    source file**: `foreign_net_z20 ≥ +0.5` as the second half of cond2
+    (§18.5/21), a sector-specific 2y quantile for cond4 (§18.3/15 — the code
+    uses a rolling 20d median), and the distribution guard (§18.5/22). All three
+    were *plans*, written in the present tense. They are now listed under "not
+    implemented" and cross-referenced to the §12 open list, which is the only
+    place an unbuilt thing belongs.
+  - **It also invented a job.** §4 credited a `stealth_scanner` for emitting
+    ACCUMULATE and opening rows in `sector_accumulation_events`. Neither
+    happens: `grep` finds no such job, `Get-ScheduledTask -TaskPath
+    '\SectorFlow\'` returns exactly 8 tasks and it is not among them, and the
+    table has had **no writer since migration 9**. The real path is
+    `accumulation_age` → `SectorSignalService.publish()` at 17:00.
+  - §5 regime rewritten around the §25 redefinition (confidence = P(label
+    survives 5 sessions), filtered not smoothed, hedge **below** 0.55), and two
+    absences stated: no regime-conditioned stealth z (§18.1/3), and **no code
+    anywhere throttles entries under `chop`** — the label is published and read,
+    and that is all it does.
+  - **`ARCHITECTURE.md` §9 was the worst section in the repo**: 8 endpoints
+    named that do not exist (`/api/flow/monitor`, `/api/flow/ingest`,
+    `/api/rotation/map`, `/api/stealth/watch`, `/api/stealth/events`,
+    `/api/pulse/tape`, `/api/sectors/ranking/history`,
+    `/api/sectors/backtest/{id}`) and ~15 live ones missing. Rewritten from
+    `/openapi.json`: **12 routers, 46 paths**, with the regeneration command in
+    the section so the next reader re-measures instead of trusting me.
+  - §3, §5, §8 likewise re-derived — `ls`, `sqlite_master`, `Get-ScheduledTask`.
+    Corrections worth naming: **25 tables** (the doc listed a subset), migrations
+    **1–11** not 1–10, **342** pytest cases not 156, `frontend/src` is **flat,
+    not feature-sliced**, and three listed paths were deleted months ago
+    (`analysis/charts/`, `scripts/create_key.py`, `scripts/seed_data.py`).
+  - **The `as of 2026-04-22` stamp is gone, and the reason replaces it in the
+    text.** A fixed date in a living document ages without anyone noticing: that
+    one sat above a tree with three dead paths, six missing services and a test
+    count off by 186, and the stamp made all of it look deliberate.
+  - **Two empty tables, two different meanings, now written down.**
+    `sector_flow_handoff` is empty because it is computed on the fly — harmless.
+    `sector_accumulation_events` is empty because **nothing writes it**, which is
+    what let §22.1 misfile a hardcoded `{"rows": []}` stub as "correct code with
+    no data" for months. Either give it a writer or drop it.
+  - **`job_freshness_check.bat` is an orphan** — has a cron header, is absent
+    from `$CanonicalJobs` and from Task Scheduler, and has never written a log.
+    Recorded in §8, **not** resolved: deciding its fate was one of the two
+    proposals Tom did not select.
+  - **The audit tool was fixed, not the documents.** After the rewrite
+    `_doc_audit.py` flagged 9 routes in `ARCHITECTURE.md`; 8 were its own
+    misreading of `{series,heat,…}` brace shorthand as a path parameter.
+    A document forced to avoid compact notation to please a linter is a worse
+    document, so `expand()` now splits on the comma — which FastAPI path params
+    cannot contain. Post-fix `ARCHITECTURE.md` reports exactly one route,
+    `/api/flow/ingest`, and that one is **deliberate prose** in §9 explaining
+    that the route does not exist.
+- Verification: 342 pass, ruff 65 (unchanged — doc-only, plus one script).
+  Every claim above was measured before it was written: `/openapi.json`,
+  `sqlite_master` + row counts, `ls`, `Get-ScheduledTask`, `schema_migrations`.
+- Follow-ups (both deliberately **not** done — Tom selected two of four fixes):
+  - Decide `job_freshness_check.bat`: register it or delete it.
+  - Promote `scripts/_doc_audit.py` into a permanent drift test. Until then the
+    ghost routes it still finds in `specs/` (`/api/insight/send-gmail`,
+    `/api/pulse/var`, `/api/rotation/pair/{}/{}`, `/api/stealth/timeline`, and
+    four in `SPEC_INTRADAY_VNSTOCK.md`) stay as they are.
+  - `api/routers/sectors_flow.py:80` still builds its `history` from the
+    writer-less `SectorAccumulationEvent`; it should read `stealth_events()`
+    like `/api/stealth/history` does (`CLAUDE.md` §22.11).
+
+---
+
+## 2026-08-25 — credential scan after going public, and a smoketest for what pytest cannot see
+- Author: Claude Code on behalf of Tom
+- Files:
+  - `scripts/smoketest.py` — new, 7 checks.
+  - `.github/workflows/ci.yml` — comment saying why it is *not* run in CI.
+  - `README.md` §Testing — the smoketest section; the pytest count corrected
+    from 156 to 342 and the command from `python -m pytest` to `uv run pytest`
+    (production resolves `.venv` through `uv`; a README telling you otherwise
+    is how §25.4's missing-`hmmlearn` defect stayed invisible for months).
+- Reason: Tom asked to revoke credentials and check the smoketest. Neither
+  premise held as stated, and both answers are worth recording.
+- Summary:
+  - **Nothing needed revoking, measured rather than assumed.** Both live secret
+    values were scanned against every commit reachable from every ref
+    (`git log --all -S "<value>"`): `REPORT_EMAIL_PASSWORD` 0 hits,
+    `LOCAL_API_KEY` 0 hits. `.env` has never been tracked — `git rev-list --all
+    --objects` has no `.env` blob. What *is* in history is the three recipient
+    addresses removed by `eab5a1e`; addresses are not revocable, and Tom's
+    earlier call not to rewrite history stands.
+  - **There was no smoketest.** `docs/PATCHES.md` and `CLAUDE.md` never claimed
+    one, and searching the repo returned matches only inside `.venv`. So this
+    was not "check the smoketest", it was "there is a hole where one should be".
+  - **What it checks is chosen from defects that shipped while pytest was
+    green**, which is the only defensible basis for a second suite. Every test
+    fakes vnstock, fakes the LLM and redirects `SAVED_MODELS_DIR` to a tmpdir —
+    all three deliberately — so the suite is structurally blind to the
+    artefacts production reads. Three of the seven checks are named after the
+    defect they would have caught: the ranker overwritten by a 3-feature test
+    panel (§19), the picks snapshot whose absence blanked the homepage on every
+    restart (§22.6), and `/api/stealth/history` returning a hardcoded
+    `{"rows": []}` (§22.11).
+  - **The stealth-history check exists because a 200 is not enough.** The route
+    check sees `/api/stealth/history` answer 200; the stub answered 200 too.
+    Only `summary.events > 0` distinguishes them.
+  - **In-process, not over a port.** The API is exercised through FastAPI's
+    `TestClient`, so the smoketest binds nothing and cannot collide with a
+    running dev server or a scheduled job. `--with-report` is the one exception
+    — it shells out to `generate_report.py --no-email`, reaches vnstock, takes
+    minutes, and is off by default.
+  - **Deliberately not in CI**, with the reason written in the workflow rather
+    than left for someone to rediscover: a clean clone has no trained model, no
+    snapshot and no DB, so there it would fail for the one reason that is not a
+    defect. CI proves the repo installs; this proves the machine works.
+  - Thresholds are **imported, not retyped** — `DEFAULT_MAX_GAP` and
+    `latest_flow_date` come from `scripts/check_freshness.py`. Two definitions
+    of "stale" drift, and only one of them ends up in the job log.
+  - A check that raises is reported as a failure and the run continues. A
+    smoketest that dies on check 3 and never reports 4-7 is worth less than one
+    that finishes.
+- Verified:
+  - `uv run python scripts/smoketest.py --with-report` → **7/7**: db gap 1d ·
+    ranker 19 features · snapshot 54 tickers · routes 9/9 · history 21 events,
+    20 scored · import inert · wrote `daily_report_2026-08-25.{html,pdf}`.
+  - **Negative control on the three checks that carry the feature**, because a
+    check that has only ever been green proves nothing. Pointed
+    `SAVED_MODELS_DIR` at a dir holding the exact artefact that killed the
+    17:00 job (`["f1","f2","all_null"]`) → FAIL "3 features"; at an empty dir →
+    FAIL "no trained ranker"; fed the history check the stub's own
+    `{"rows": []}` → FAIL "0 events".
+  - `uv run pytest tests/ -q` → 342 passed. `ruff check .` → 65, unchanged;
+    `scripts/smoketest.py` clean.
+- Follow-ups:
+  - The smoketest is not wired to Task Scheduler. `check_freshness.py` already
+    runs there; adding this one means deciding what a failure should *do*, and
+    a red line nobody reads is not monitoring.
+  - Tom is rotating `REPORT_EMAIL_PASSWORD` and `LOCAL_API_KEY` provider-side
+    as a precaution despite the clean scan. After each rotation the check is
+    `uv run python scripts/smoketest.py --with-report` for the report path, and
+    a live `/api/insight/refresh` for the agent path — the smoketest fakes
+    neither but exercises neither's credentials either.
+
+---
+
 ## 2026-08-24 (16) — the stealth history was a stub, and the test for it proved nothing
 - Author: Claude Code on behalf of Tom
 - Files:

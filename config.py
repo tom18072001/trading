@@ -188,11 +188,28 @@ BENCHMARK = "VNINDEX"
 # Applied by SectorBacktestService instead of the old flat daily cost.
 BACKTEST_FEE_BPS         = 15     # broker fee per side (0.15%) — §18.2/10
 BACKTEST_SELL_TAX_BPS    = 10     # HOSE sell tax on proceeds (0.10%) — §18.2/10
-BACKTEST_SLIPPAGE_MIN_PCT = 0.003 # slippage floor 0.3% — §18.2/9
-BACKTEST_SLIPPAGE_ATR_MULT = 0.5  # slippage = max(min, 0.5 × ATR%) — §18.2/9
+BACKTEST_SLIPPAGE_MIN_PCT = 0.003 # slippage 0.3% per side — §18.2/9
+# ATR term of `max(min, mult × ATR%)`. 0.5 until 2026-09-25, when the sector ATR
+# was fixed (it had been 1/5 of the truth, so the term never beat the floor) and
+# 0.5 × the real ~2.8% daily ATR became ~1.4% per side: 66% of capital in costs
+# for `flow_z` at a 20-session hold, 2024-01 -> 2026-09. Tom chose the flat 0.3%
+# the ticker bench already uses (`analysis/bench.py`) -- one slippage model
+# for both, closer to a small order in a top-5 basket name. CLAUDE.md §23.
+BACKTEST_SLIPPAGE_ATR_MULT = 0.0
 BACKTEST_PRICE_BAND_PCT  = 0.07   # HOSE ±7% daily band; skip fills on gap days — §18.2/9
-BACKTEST_SETTLEMENT_LAG  = 2      # T+2 cash settlement; capital locked — §18.2/7
 BACKTEST_LONG_ONLY       = True   # VN cash market cannot short — §18.2/12
+
+# --- Holding horizons (2026-09-25, Tom: "bỏ T+2, chỉ sử dụng 4 tuần và 8 tuần") ---
+# 4 weeks and 8 weeks are the ONLY holding periods this system uses. The T+
+# trading mode (3-5 sessions) and the T+2 settlement rule in the backtest are
+# gone: at a 20-session hold T+2 can never bind, and at 3 sessions the round
+# trip alone costs 84%/year (§26.6). Every horizon in the repo reads from here —
+# the picks' sell window, the bulletin, the benches and the sector backtest.
+HOLD_SESSIONS: tuple[int, int] = (20, 40)    # (4 tuần, 8 tuần), in trading sessions
+# Rebalance period of the sector backtest when the caller does not choose one.
+# 20 because the rotation ranker's target is the 20-session forward return
+# (ROTATION_TARGET_HORIZON_DAYS). Must be one of HOLD_SESSIONS.
+BACKTEST_HOLD_SESSIONS   = 20
 
 # ===== Trader agent (Daily Insight "Minh") =====
 # 2026-06-18: the agent had NO enforced timeout — if the Claude SDK transport

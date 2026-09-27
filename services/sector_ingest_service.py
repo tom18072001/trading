@@ -13,7 +13,7 @@ from typing import Iterable
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from analysis.flow_aggregation import aggregate_sector
+from analysis.flow_aggregation import aggregate_sector, chain_close_idx
 from config import PROXY_BASKETS, SECTORS
 from database.models import SectorFlowDaily, SectorFlowTS
 from utils.clock import now as market_now, to_market_date_str, today_str
@@ -206,6 +206,17 @@ class SectorIngestService:
             r.time for r in self.session.query(SectorFlowTS.time).filter_by(sector_code=code).all()
         }
         written = 0
+        # Chain each new daily level from the level of the session before it
+        # (2026-09-25): a stored row if there is one, else the row this loop
+        # just wrote. Works whether the backfill extends the tail or the head.
+        from bisect import bisect_left
+        stored = sorted(
+            (r.date, r.close_idx) for r in self.session.query(SectorFlowDaily)
+            .filter(SectorFlowDaily.sector_code == code,
+                    SectorFlowDaily.close_idx.isnot(None), SectorFlowDaily.close_idx > 0)
+        )
+        stored_dates = [d for d, _ in stored]
+        level, level_date = None, None
         for day in idx:
             ts = pd.Timestamp(day).to_pydatetime()
             if ts in have:
@@ -236,13 +247,19 @@ class SectorIngestService:
                 .filter_by(sector_code=code, date=date_str).one_or_none()
             )
             if existing_daily is None:
+                k = bisect_left(stored_dates, date_str) - 1
+                if k >= 0 and (level_date is None or stored_dates[k] > level_date):
+                    level, level_date = stored[k][1], stored_dates[k]
+                level, level_date = chain_close_idx(level, agg.basket_return), date_str
                 self.session.add(SectorFlowDaily(
                     sector_code=code, date=date_str,
                     net_dollar_flow=agg.net_dollar_flow, foreign_net=agg.foreign_net,
                     up_down_vol_ratio=up_dn, breadth_sma20=agg.breadth_sma20,
                     breadth_sma50=agg.breadth_sma50, atr_pct=agg.atr_pct,
-                    close_idx=agg.close_idx, return_1d=agg.basket_return,
+                    close_idx=level, return_1d=agg.basket_return,
                 ))
+            elif existing_daily.close_idx:
+                level, level_date = existing_daily.close_idx, date_str
             written += 1
         self.session.commit()
         return written
@@ -292,22 +309,20 @@ class SectorIngestService:
 
             up_dn = (r.up_vol / r.down_vol) if (r.down_vol and r.down_vol > 0) else None
 
-            # return_1d: prefer the split-safe basket return computed at
-            # aggregation time; fall back to a close_idx ratio against the
-            # previous daily row only when the bar predates migration 11.
+            prev = (
+                self.session.query(SectorFlowDaily)
+                .filter(SectorFlowDaily.sector_code == code,
+                        SectorFlowDaily.date < row_date,
+                        SectorFlowDaily.close_idx.isnot(None),
+                        SectorFlowDaily.close_idx > 0)
+                .order_by(SectorFlowDaily.date.desc())
+                .first()
+            )
+            # return_1d: the split-safe basket return computed at aggregation
+            # time. A bar that predates migration 11 has none, and then there is
+            # no return to chain -- the level is carried, not guessed from a
+            # ratio of two raw price sums (that ratio IS the defect below).
             ret_1d = r.basket_return
-            if ret_1d is None and r.close_idx:
-                prev = (
-                    self.session.query(SectorFlowDaily)
-                    .filter(SectorFlowDaily.sector_code == code,
-                            SectorFlowDaily.date < row_date,
-                            SectorFlowDaily.close_idx.isnot(None),
-                            SectorFlowDaily.close_idx > 0)
-                    .order_by(SectorFlowDaily.date.desc())
-                    .first()
-                )
-                if prev is not None:
-                    ret_1d = r.close_idx / prev.close_idx - 1.0
 
             existing = (
                 self.session.query(SectorFlowDaily)
@@ -329,8 +344,14 @@ class SectorIngestService:
             # P0-2: the scheduled path now carries price through. These three
             # columns feed the ML target, stealth condition 5 and the backtest
             # P&L, and used to be filled only by the UI-triggered fast_ingest.
-            if r.close_idx is not None:
-                existing.close_idx = r.close_idx
+            #
+            # 2026-09-25: close_idx is CHAINED from the previous session's level
+            # and today's basket return. It used to store the raw weighted sum
+            # of constituent prices, which jumps whenever the set of names that
+            # fetched changes: STEEL +62% on 2026-09-22 and -39% on 09-23 while
+            # its return_1d said +0.5% / -0.1% (review 2026-09-24 §4.1/5).
+            existing.close_idx = chain_close_idx(
+                prev.close_idx if prev is not None else None, ret_1d)
             if ret_1d is not None:
                 existing.return_1d = ret_1d
             written += 1

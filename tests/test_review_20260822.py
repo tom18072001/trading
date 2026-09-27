@@ -34,13 +34,13 @@ def _ohlcv(closes: list[float], start="2026-01-01", vol=1_000_000.0) -> pd.DataF
     )
 
 
-def _seed_daily(session, code: str, dates: list[str], close_start=100.0):
+def _seed_daily(session, code: str, dates: list[str], close_start=100.0, flow_sign=1):
     for i, d in enumerate(dates):
         session.add(SectorFlowDaily(
             sector_code=code, date=d,
             close_idx=close_start * (1.01 ** i),
             return_1d=0.01,
-            net_dollar_flow=1e9 * (i + 1),
+            net_dollar_flow=flow_sign * 1e9 * (i + 1),
             atr_pct=0.02,
         ))
     session.commit()
@@ -117,8 +117,27 @@ def test_p0_2_rollup_writes_close_idx_and_return(seeded_session):
     SectorIngestService(seeded_session).rollup_to_daily(date="2026-03-02")
 
     row = seeded_session.query(SectorFlowDaily).filter_by(date="2026-03-02").one()
-    assert row.close_idx == pytest.approx(1234.5)
+    # 2026-09-25: the stored level is CHAINED from the basket return, not the
+    # bar's raw price sum (1234.5) -- a first row starts the chain at 100.
+    assert row.close_idx == pytest.approx(100.0 * 1.0234)
     assert row.return_1d == pytest.approx(0.0234)
+
+
+def test_the_rollup_chains_close_idx_from_the_previous_session(seeded_session):
+    """The raw price sum jumps when a constituent fails to fetch: STEEL +62% on
+    2026-09-22 and -39% on 09-23 with return_1d +0.5% / -0.1% (review
+    2026-09-24 §4.1/5). The stored level may only move by the basket return."""
+    seeded_session.add(SectorFlowDaily(sector_code="STEEL", date="2026-09-21",
+                                       close_idx=250.0))
+    seeded_session.add(SectorFlowTS(
+        sector_code="STEEL", time=datetime(2026, 9, 22, 15, 0),
+        net_dollar_flow=5e9, close_idx=405.0, basket_return=0.005,   # raw sum +62%
+    ))
+    seeded_session.commit()
+    SectorIngestService(seeded_session).rollup_to_daily(date="2026-09-22")
+    row = seeded_session.query(SectorFlowDaily).filter_by(
+        sector_code="STEEL", date="2026-09-22").one()
+    assert row.close_idx == pytest.approx(250.0 * 1.005)
 
 
 def test_p0_2_rollup_repairs_a_row_that_is_missing_price(seeded_session):
@@ -135,7 +154,7 @@ def test_p0_2_rollup_repairs_a_row_that_is_missing_price(seeded_session):
     SectorIngestService(seeded_session).rollup_to_daily(date="2026-03-02")
 
     row = seeded_session.query(SectorFlowDaily).filter_by(date="2026-03-02").one()
-    assert row.close_idx == pytest.approx(999.0)
+    assert row.close_idx == pytest.approx(100.0 * 1.005)      # chained, not the raw 999
     assert row.return_1d == pytest.approx(0.005)
 
 
@@ -420,7 +439,10 @@ def test_p1_5_shorts_can_be_switched_off(seeded_session, monkeypatch):
 
     codes = ["BANK", "BROK", "REAL", "STEEL", "RETAIL"]
     for code in codes:
-        _seed_daily(seeded_session, code, ["2026-02-27", "2026-02-28", "2026-03-02"])
+        # The bottom-ranked sectors bleed money: a SELL needs outflow persistence
+        # (2026-09-25 -- persistence is directional now).
+        _seed_daily(seeded_session, code, ["2026-02-27", "2026-02-28", "2026-03-02"],
+                    flow_sign=-1 if code in ("STEEL", "RETAIL") else 1)
 
     ranked = pd.DataFrame([
         {"sector_code": c, "score": 1.0 - i * 0.1, "rank": i + 1}

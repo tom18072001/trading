@@ -54,6 +54,19 @@ def is_trading_day(d: date | None = None) -> bool:
     return d.isoformat() not in set(VN_MARKET_HOLIDAYS_2026)
 
 
+def closed_today() -> str | None:
+    """Today's date (ISO) if the exchange has no session today, else None.
+
+    The scheduled jobs are registered `-Daily` (CLAUDE.md §8), so they also run
+    on weekends and holidays; 14 of 62 published signal dates were such days,
+    each a copy of the last session under a new date (review 2026-09-24
+    §4.1/11). Publishers ask this before writing a dated row. One seam, so the
+    test suite pins the calendar in one place (`tests/conftest.py`).
+    """
+    d = today()
+    return None if is_trading_day(d) else d.isoformat()
+
+
 def previous_trading_day(d: date | None = None) -> date:
     """The most recent trading day strictly before `d`."""
     d = d or today()
@@ -68,10 +81,10 @@ def previous_trading_day(d: date | None = None) -> date:
 def next_trading_day(d: date | None = None, n: int = 1) -> date:
     """The n-th trading day strictly after `d`.
 
-    The mirror of previous_trading_day, and the reason it exists: T+2.5
-    settlement means "when can I sell this" is a count of SESSIONS, not of
-    calendar days. `DailyInsightPage.tsx` was doing `setDate(+3)`, so a Thursday
-    buy claimed a Sunday sell date.
+    The mirror of previous_trading_day, and the reason it exists: "when does
+    the 4-8 week sell window open" is a count of SESSIONS, not of calendar days.
+    `DailyInsightPage.tsx` once did `setDate(+3)`, so a Thursday buy claimed a
+    Sunday sell date; 20 calendar days is not 20 sessions either.
     """
     d = d or today()
     probe = d

@@ -142,7 +142,7 @@ def aggregate_sector(
     breadth50_hits = 0
     breadth50_n = 0
     atr_acc = 0.0
-    atr_n = 0
+    atr_w = 0.0
     close_idx = 0.0
     ret_acc = 0.0
     ret_w = 0.0
@@ -168,14 +168,23 @@ def aggregate_sector(
             breadth50_hits += b50
             breadth50_n += 1
 
+        # Weighted MEAN: divide by the weights that contributed, not by a
+        # count. It used to add atr*w (w = 1/n) and then divide by atr_n = n,
+        # i.e. divide by n twice -- every sector ATR since the table existed
+        # was 1/5 of the basket's (median 0.57% instead of ~2.7%). That fed the
+        # sentinel stop (CRITICAL on 21.7% of sector-days instead of 0.7%), the
+        # backtest slippage (always the 0.3% floor) and §16.15's premise.
+        # Review 2026-09-24 §4.1/3.
         atr = _atr_pct(df)
         if not np.isnan(atr):
             atr_acc += atr * w
-            atr_n += 1
+            atr_w += w
 
-        # Synthetic sector index = weighted last-close (not normalized).
-        # Kept for backwards compatibility; see `basket_return` for the
-        # split-safe quantity downstream code should use.
+        # Weighted SUM OF RAW PRICES. Not an index: it jumps whenever the set
+        # of constituents that fetched changes (STEEL +62% then -39% on
+        # 2026-09-22/23 with `return_1d` +0.5% / -0.1%). `sector_flow_daily`
+        # stores a CHAINED index instead (`chain_close_idx`, 2026-09-25); this
+        # raw figure stays on the intraday table only.
         close_idx += float(df["close"].iloc[-1]) * w
 
         r = _last_bar_return(df)
@@ -221,10 +230,26 @@ def aggregate_sector(
         foreign_intensity=foreign_intensity,
         breadth_sma20=(breadth20_hits / breadth20_n) if breadth20_n else float("nan"),
         breadth_sma50=(breadth50_hits / breadth50_n) if breadth50_n else float("nan"),
-        atr_pct=(atr_acc / atr_n) if atr_n else float("nan"),
+        atr_pct=(atr_acc / atr_w) if atr_w > 0 else float("nan"),
         close_idx=close_idx,
         basket_return=(ret_acc / ret_w) if ret_w > 0 else 0.0,
     )
+
+
+def chain_close_idx(prev_close_idx: float | None, basket_return: float | None,
+                    base: float = 100.0) -> float:
+    """The sector's daily index level, chained from its split-safe return.
+
+    `prev_close_idx` is the previous session's stored level; `basket_return` is
+    today's mean constituent return (`SectorAggregate.basket_return`). A
+    missing previous level starts the chain at `base`; a missing return
+    carries the level flat rather than inventing a move.
+    """
+    prev = prev_close_idx if (prev_close_idx is not None and prev_close_idx > 0
+                              and not np.isnan(prev_close_idx)) else base
+    if basket_return is None or np.isnan(basket_return):
+        return float(prev)
+    return float(prev * (1.0 + basket_return))
 
 
 def relative_strength(

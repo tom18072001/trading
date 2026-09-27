@@ -76,15 +76,30 @@ def cmd_intraday() -> None:
 
 
 def cmd_eod_rollup() -> None:
+    """16:00: roll the intraday bars into `sector_flow_daily`, THEN recompute
+    the §16.2 leading features over it.
+
+    The second step only ran on the UI Refresh path until 2026-09-25, so every
+    scheduled row since 2026-08-25 had flow_z20..accumulation_age NULL on all
+    15 sectors, and the 16:45 ranker (which fills NULL with 0) scored zeros
+    (review 2026-09-24 §4.1/1). `predict_today` now also refuses to run on a
+    session whose feature column is NULL for every sector.
+    """
+    from services.fast_ingest import rebuild_leading_features
     with get_session() as s:
         n = SectorIngestService(s).rollup_to_daily()
         print(f"[main] sector_flow_daily rows: {n}")
+        m = rebuild_leading_features(s)
+        print(f"[main] leading features rebuilt on {m} rows")
 
 
 def cmd_regime() -> None:
     with get_session() as s:
         rec = RotationModelService(s).classify_regime()
-        print(f"[main] regime: {rec.regime_label} conf={rec.confidence}")
+        # classify_regime returns the last stored label, unchanged, when it
+        # refuses to publish (no session today, or no usable daily VNINDEX).
+        print(f"[main] regime ({rec.date or 'none stored'}, {rec.model_version}): "
+              f"{rec.regime_label} conf={rec.confidence}")
 
 
 def cmd_train() -> None:
@@ -94,8 +109,15 @@ def cmd_train() -> None:
 
 
 def cmd_rotation_predict() -> None:
+    from services.rotation_model_service import FeaturesMissingError
     with get_session() as s:
-        df = RotationModelService(s).predict_today()
+        try:
+            df = RotationModelService(s).predict_today()
+        except FeaturesMissingError as e:
+            # Exit non-zero so Task Scheduler's "Last Run Result" shows it; the
+            # 17:00 publish makes the same check and publishes nothing.
+            print(f"[main] rotation_predict REFUSED: {e}")
+            raise SystemExit(2) from None
         print(f"[main] rotation_predict: {len(df)} sector rows")
         if not df.empty:
             cols = [c for c in ("sector_code", "rank", "score") if c in df.columns]
@@ -117,6 +139,28 @@ def cmd_risk_sentinel() -> None:
         print(f"[main] risk_sentinel: {len(breaches)} breach(es)")
         for b in breaches:
             print(f"  - {b}")
+
+
+def cmd_daily_watch(top_n: int = 5) -> None:
+    """Sổ + shortlist, ghi ra report/watch_<date>.md và data/watch_latest.json.
+
+    Không gửi email (Tom 2026-09-16: "tạm thời chưa cần nhận email, để sau").
+    Logic ở daily_watch/ — module riêng, skill chỉ gọi lệnh này rồi tóm tắt,
+    nó không sinh lại code phân tích.
+    """
+    from daily_watch import service as daily_watch_service
+
+    payload = daily_watch_service.run(top_n=top_n)
+    alerts = payload["alerts"]
+    print(f"[main] daily_watch: {len(payload['book']['positions'])} vị thế, "
+          f"{len(alerts)} cần quyết định, {len(payload['shortlist'])} ứng viên "
+          f"(dữ liệu phiên {payload['data_as_of']})")
+    for a in alerts:
+        sr = a.get("sell_range") or {}
+        print(f"  - {a['kind']}: {a['symbol']} @ {a['last']} "
+              f"(cửa sổ bán {sr.get('sell_from')} -> {sr.get('sell_by')})")
+    for f in payload.get("_written", []):
+        print(f"  -> {f}")
 
 
 # ---------- compound commands (ad-hoc only) ----------
@@ -165,6 +209,10 @@ def main() -> None:
                         help="Write signals (job: sector_signal_publish)")
     parser.add_argument("--risk-sentinel", dest="risk_sentinel", action="store_true",
                         help="Stop-loss breach scan (job: sector_risk_sentinel)")
+    parser.add_argument("--daily-watch", dest="daily_watch", action="store_true",
+                        help="Sổ + shortlist ra file (job: daily_watch)")
+    parser.add_argument("--top", type=int, default=5,
+                        help="Số ứng viên trong --daily-watch (mặc định 5)")
     # compound (ad-hoc)
     parser.add_argument("--ingest", action="store_true",
                         help="Shorthand: --macro + --intraday + --eod-rollup")
@@ -191,6 +239,7 @@ def main() -> None:
     if args.rotation_predict:  cmd_rotation_predict();  ran = True
     if args.publish:           cmd_publish();           ran = True
     if args.risk_sentinel:     cmd_risk_sentinel();     ran = True
+    if args.daily_watch:       cmd_daily_watch(args.top); ran = True
     if not ran:
         parser.print_help()
 

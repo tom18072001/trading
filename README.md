@@ -108,11 +108,38 @@ Dry-run: thêm `-WhatIf`. Giữ legacy: `-KeepLegacy`.
 ## Testing
 
 ```bash
-python -m pytest tests/      # 156 tests — backend
-cd frontend && npm test       # 13 tests — frontend (vitest)
+uv run pytest tests/ -q       # 342 tests — backend
 ```
 
-Xem `CLAUDE.md` §19 cho module coverage. Live integration (`POST /api/insight/refresh` — gọi vnstock KBS + LLM provider thật) **không nằm trong pytest**, chạy tay sau khi đụng chạm các path đó.
+```bash
+cd frontend && npm test
+```
+
+Module coverage và *vì sao từng bài test tồn tại*: `docs/doctrine/19-testing-history.md` (`CLAUDE.md` §19 giờ chỉ giữ bảng đếm + 2 lệnh chạy). Live integration (`POST /api/insight/refresh` — gọi vnstock KBS + LLM provider thật) **không nằm trong pytest**, chạy tay sau khi đụng chạm các path đó.
+
+### Smoketest — máy này có chạy được không
+
+```bash
+uv run python scripts/smoketest.py
+```
+
+`pytest` trả lời câu khác: mọi test đều giả lập vnstock, giả lập LLM, và trỏ
+`SAVED_MODELS_DIR` sang tmpdir. Nên suite xanh **không** nói gì về các artefact
+mà production đọc thật. Cả ba defect dưới đây đều từng ship trong lúc suite xanh:
+
+| check | defect nó bắt |
+|---|---|
+| `ranker artifact` | chạy pytest ghi đè model production còn 3 feature giả — job 17:00 chết, `git status` sạch (§19) |
+| `picks snapshot` | trang chủ trắng sau mỗi lần restart backend (§22.6) |
+| `stealth history` | endpoint hardcode `{"rows": []}`, giống hệt sự thật suốt nhiều tháng (§22.11) |
+
+Còn lại: DB có tươi không (cùng ngưỡng với `check_freshness.py`, import chứ
+không gõ lại), 9 route của 5 trang nav có trả 200 không, và `import
+generate_report` có gửi mail không (§20.3 P3-2).
+
+Thêm `--with-report` để render luôn HTML+PDF hôm nay — chậm, có gọi vnstock, nên
+mặc định tắt. Không chạy trong CI: clone sạch không có model, không có snapshot,
+không có DB, nên ở đó nó đỏ vì đúng một lý do không phải defect.
 
 ## Tài liệu
 

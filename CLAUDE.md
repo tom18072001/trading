@@ -4,6 +4,10 @@
 > Supersedes: legacy 170-symbol prediction system
 > Owner: Tom (anhchitruong18@gmail.com)
 > Rule: every future modification MUST append an entry to `MODIFICATION_LOG.md`.
+> Đọc file này thế nào: giữ **luật đang có hiệu lực**. Chứng cứ — phép đo có
+> ngày tháng, hậu kiểm, lịch sử test — nằm ở `docs/doctrine/`, một file một mục.
+> Mọi số hiệu mục (§16.1, §22.11, §25.9 …) vẫn giải được ở đây; mục nào đã
+> chuyển thì có dòng trỏ. Tách ngày 2026-09-16: 135.718 B → xem cuối file.
 
 ## 1. Mission
 Pivot the VN Trading system from per-symbol prediction to **sector-level money-flow tracking and rotation prediction** across the 15 inherited VN sectors. Goal: fewer, higher-signal records; slower, more persistent edge; lower compute.
@@ -13,7 +17,7 @@ Pivot the VN Trading system from per-symbol prediction to **sector-level money-f
 - REMOVE: 170-symbol universe, `stock_prices`, `stock_features`, `trade_setups`, `predictions`, symbol screener, T+3 scanner, symbol pages in frontend, per-symbol ML.
 - REPLACE: primary key `symbol` → `sector_code` everywhere.
 - **Per-ticker picks (2026-04-17 onward):** `generate_report.py` and `api/routers/insight.py` read per-ticker BUY/ACCUMULATE picks exclusively from `services.picks_universe_service.PicksUniverseService` (dynamic HOSE universe from vnstock Listing). They no longer read `_legacy_stocks`, `_legacy_stock_prices`, or `_legacy_stock_features`. These three tables stay in the DB during a 2-week shadow window then drop in migration 10.
-- **Email report (2026-04-23 onward):** `generate_report.py` is the **sole** daily email generator. It unifies the picks surfaced in the Daily Insight page (`snapshot.top_buys`/`top_sells` — no ranker gate) with the ranker-gated BUY/ACCUMULATE picks into a single de-duped list, each entry tagged with its source (`BOTH` / `DAILY_INSIGHT` / `RANKER`). The HTML/PDF gains an Expert Trader Memo section at the top; the email body is plain text (buy symbols + reasons + Dashboard + news links). Recipients come from `REPORT_EMAIL_TO` in the local `.env` — **no list is committed and there is no fallback in code** (removed 2026-08-24 when the repo went public; a source file is the wrong place to publish an inbox). Empty means the HTML/PDF are written and no mail is sent. `scripts/jobs/job_sector_signal_publish.bat` calls `generate_report.py`.
+- **Email report (2026-04-23 onward):** `generate_report.py` is the **sole** daily email generator. **Since 2026-09-25 its BUY list is `snapshot.top_buys` verbatim** — one buy rule (`picks_universe_service.long_shortlist`: SMA200 gate → rank blend) shared with Daily Insight and the 17:30 bulletin; the ranker no longer gates or adds buys (no out-of-sample edge, review 2026-09-24 §4.2). The AVOID list still unifies `snapshot.top_sells` with the ranker's SELL sectors into one de-duped list, each entry tagged with its source (`BOTH` / `DAILY_INSIGHT` / `RANKER`). The HTML/PDF gains an Expert Trader Memo section at the top; the email body is plain text (buy symbols + reasons + Dashboard + news links). Recipients come from `REPORT_EMAIL_TO` in the local `.env` — **no list is committed and there is no fallback in code** (removed 2026-08-24 when the repo went public; a source file is the wrong place to publish an inbox). Empty means the HTML/PDF are written and no mail is sent. `scripts/jobs/job_sector_signal_publish.bat` calls `generate_report.py`.
 - **One report generator, no versioned copies.** `generate_report.py` is the only
   daily-report generator in the repo. Every earlier numbered copy is gone:
   SecV2 on 2026-04-20, SecV3 + SecV4 on 2026-06-18 (they were kept only as
@@ -54,13 +58,25 @@ Record-count impact vs legacy: **~98% reduction** (15 sectors × ~12 features vs
 | Job | Cron | Purpose |
 |---|---|---|
 | sector_intraday_flow | */15 9-15 * * 1-5 | Proxy OHLCV + foreign flow → `sector_flow_ts` |
-| sector_eod_rollup | 0 16 * * 1-5 | Daily rollup |
-| macro_ingest | 0 * * * * | Macro anchors hourly |
-| regime_classify | 30 16 * * 1-5 | HMM regime label |
+| sector_eod_rollup | 0 16 * * 1-5 | Daily rollup **+ §16.2 leading features** (2026-09-25 — trước đó chỉ đường Refresh của UI tính, nên từ 2026-08-25 ranker chấm trên số 0) |
+| macro_ingest | 0 * * * * | Macro anchors hourly (VNINDEX ngoài 200-5.000 bị bỏ, không carry-forward) |
+| regime_classify | 30 16 * * 1-5 | HMM regime label — **chỉ từ chuỗi VNINDEX ngày**; thiếu chuỗi hoặc không có phiên thì giữ nhãn cũ, không publish |
 | rotation_train | 0 2 * * * | Nightly LightGBM ranker retrain |
 | rotation_predict | 45 16 * * 1-5 | Next-day sector ranking |
-| sector_signal_publish | 0 17 * * 1-5 | Write signals + Gmail briefing |
+| sector_signal_publish | 0 17 * * 1-5 | Write signals + Gmail briefing — không publish ngày không có phiên, hay khi một cột feature NULL toàn bộ |
 | sector_risk_sentinel | */30 9-15 * * 1-5 | Stop-loss alerts on held sectors |
+| daily_watch | 30 17 * * 1-5 | **(2026-09-16)** Module `daily_watch/`: báo cáo sổ + đề xuất mua + đề xuất bán (cửa sổ 20-40 phiên + range tham chiếu, **không stop-loss**) → `report/watch_<date>.md` + kho `data/watch/<date>.json`. Theo dõi cả mã đang nắm **ngoài universe**. Không gửi email. Skill `.claude/skills/theo-doi-hang-ngay/` đọc output, **không** tự phân tích lại |
+
+> **2026-09-16 — task thứ 9, và một chi tiết đáng biết về 8 task cũ.** Trigger
+> của cả 8 job trên được đăng ký là `-Daily`, dù cột Cron ghi `1-5`; nên chúng
+> **có** chạy cuối tuần. *Không* vô hại như câu này từng viết: 14/62 ngày tín
+> hiệu ngành là cuối tuần/lễ, mỗi ngày một bản sao feature phiên trước dưới ngày
+> mới (review 2026-09-24 §4.1/11). Từ 2026-09-25 `publish()` và
+> `classify_regime()` hỏi `utils.clock.closed_today()` và bỏ qua ngày đó. `daily_watch` đăng ký
+> `-Weekly Mon..Fri` thật, vì Tom yêu cầu T2-T6 rõ ràng. Nó cũng là job duy nhất
+> chạy ở `RunLevel = Limited` — nó chỉ chạy python và ghi file, không cần đặc
+> quyền, và ở mức đó **đăng ký được mà không cần shell admin**
+> (`scripts/cleanup_scheduled_tasks.ps1` nay nhận `RunLevel` theo từng job).
 
 ## 9. Data Sources
 Primary: **vnstock** (proxy OHLCV, foreign flow, VNINDEX). Macro: FRED (US10Y), stooq (Brent, Gold), SBV/exchangerate.host (USD/VND). Optional: HOSE order-book deltas, ETFs FUEVFVND/E1VFVND.
@@ -68,7 +84,7 @@ Primary: **vnstock** (proxy OHLCV, foreign flow, VNINDEX). Macro: FRED (US10Y), 
 ## 10. Models
 - **Regime classifier:** Gaussian HMM on macro + VNINDEX returns → {risk_on, risk_off, rotation, chop}
 - **Sector ranker:** LightGBM lambdarank, target = forward 5d sector return
-- **Persistence filter:** flow sign held ≥3 sessions
+- **Persistence filter:** net flow **cùng chiều với lệnh** ≥3 phiên — BUY cần vào ròng, SELL cần rút ròng (2026-09-25; trước đó chấp nhận mọi chuỗi cùng dấu, và 24/96 BUY đã đi sau 3 phiên rút ròng)
 - **Sizing:** vol-targeted, max 3 long / 2 short
 
 ## 11. Backtest Targets
@@ -185,32 +201,22 @@ Extend `SectorSignal.action` enum:
 - `SELL` — flow z20 flips negative AND price still high. Full exit.
 - `HOLD` — default.
 
-### 16.4 New target / training change
-- **Replace** `fwd_5d_sector_return` with `fwd_20d_sector_return` as the primary ranker target. 5d rewards noise chasing; 20d rewards real rotations.
-- Add a **second ranker head**: classifier for "did this sector enter breakout within next 15 sessions?" (`1` if `fwd_15d_max_return > 2 × atr_pct`). Two-stage: ranker sorts by expected return, classifier filters noise.
-- Training window: rolling 2y, monthly retrain (not nightly — flow regimes change slowly).
+### 16.4-16.8 Target, job, backtest metric, cột DB, frontend
 
-### 16.5 New scheduler jobs
-| Job | Cron | Purpose |
-|---|---|---|
-| stealth_scanner | 0 17 * * 1-5 | Evaluate §16.1 conditions per sector, emit `ACCUMULATE` signals when they flip. |
-| lead_time_audit | 0 3 * * 1 | Weekly: for each past breakout, measure how many days earlier `flow_z20` crossed +1; store in `flow_leadtime_proxy`. Use as model diagnostic. |
-| flow_regime_report | 30 17 * * 5 | Friday EOD: export a "sector flow heatmap" (z20 grid) to Gmail via `trader_agent` + `generate_report.py`. |
+Ranker target đổi sang `fwd_20d_sector_return` + classifier head thứ hai
+(§16.4); 3 job `stealth_scanner` / `lead_time_audit` / `flow_regime_report`
+(§16.5); entry-timing attribution — median entry lag ≥ 10 phiên, root-capture
+≤ 0.85 (§16.6); 6 cột thêm vào `sector_flow_daily` + bảng
+`sector_accumulation_events` (§16.7); halo `flow_z20` + trang `/accumulation`
+(§16.8).
 
-### 16.6 Backtest extension
-Add an **entry-timing attribution** report to `SectorBacktestService`:
-- For each closed trade, compute `entry_lag_days` = days between `ACCUMULATE` trigger and eventual price breakout.
-- Metric: **median entry lag** (target: ≥ 10 trading days — meaning Tom bought at least 2 weeks before the move).
-- Metric: **"root capture ratio"** — (price at entry) / (price at trade peak). Target: ≤ 0.85 (you bought in the bottom 15% of the move).
+> **Hai mục đã bị thực tế vượt qua, đừng dựng lại:**
+> `sector_accumulation_events` **đã drop ở migration 12** (2026-08-26) vì chưa
+> từng có writer — run stealth suy ra từ `accumulation_age`, xem §22.11.
+> Trang `/accumulation` **đã xoá** (§12) vì `accumulation_age` khi đó bằng 0 ở
+> mọi dòng; thay bằng Stealth Watch trong nav "Luân chuyển" (§22.9).
 
-### 16.7 New database fields
-- `sector_flow_daily`: add `flow_z20`, `flow_z60`, `foreign_streak`, `foreign_hit_20d`, `stealth_score`, `flow_price_divergence`.
-- New table `sector_accumulation_events (id, sector_code, start_date, end_date, peak_return_pct, lead_days_to_price, resolved)` — one row per stealth event, closed when the sector either breaks out or the stealth conditions invalidate.
-
-### 16.8 Frontend surface
-- **Flow Dashboard:** add a `flow_z20` column with a green halo when ≥ +1.0 for ≥ 5 sessions (visual stealth badge).
-- **New page `/accumulation`:** live list of sectors currently in stealth phase, with `accumulation_age`, `stealth_score`, and the estimated `days_until_breakout` (historical median lead time).
-- **Ranking page:** new `ACCUMULATE` badge (deeper green than BUY) with a "root/branch/canopy" label per sector.
+→ Nguyên văn: [`docs/doctrine/16-stealth-measurements.md`](docs/doctrine/16-stealth-measurements.md)
 
 ### 16.9 Execution rules (risk-adjusted for early entry)
 Because early entries mean wider stops and more time at risk:
@@ -219,561 +225,219 @@ Because early entries mean wider stops and more time at risk:
 - If a sector spends > 30 sessions in stealth without breaking out, auto-exit with no loss/gain ("dry powder reclaimed").
 
 ### 16.10 Implementation order (append to §13)
-11. Add §16.2 features to `flow_feature_service`, backfill over existing 2.2y panel.
-12. Add `StealthDetector` in `analysis/stealth.py` implementing §16.1.
-13. Add `ACCUMULATE` path + new sizing rules to `sector_signal_service` and `risk_service`.
-14. Add `sector_accumulation_events` table + migration 9.
-15. Switch ranker target to 20d + add classifier head in `models/rotation_ranker.py`.
-16. Add three new scheduler jobs (§16.5).
-17. Extend backtest metrics (§16.6) — validate against 2023-2025 VN rotations (bank rally Q4'23, steel run Q2'24, broker breakout Q1'25 as ground-truth cases).
-18. Ship `/accumulation` frontend page + Flow Dashboard halo.
+
+Bước 11-18. → [`docs/doctrine/16-stealth-measurements.md`](docs/doctrine/16-stealth-measurements.md)
 
 ### 16.11 Success criterion
-The system is considered successful on this axis if, in out-of-sample backtest across 2024-2026:
-- **≥ 60% of `ACCUMULATE` signals** precede a price breakout by **≥ 10 trading days**.
-- **Median root-capture ratio ≤ 0.85**.
-- **False-positive rate ≤ 30%** (stealth signals that dissolve without a breakout).
 
-Anything worse than this means the thesis is still lagging — go back to features.
+Ba tiêu chí gốc: ≥ 60% tín hiệu `ACCUMULATE` đi trước breakout ≥ 10 phiên;
+median root-capture ≤ 0.85; false-positive ≤ 30%.
 
-> **First actual measurement — 2026-08-23. The gate fires and FAILS this
-> section.** Now that §16.1 can fire at all, the 23 events it produces over the
-> full panel were scored against the three criteria above:
->
-> | criterion | target | measured (≥4/5, N=3) |
-> |---|---|---|
-> | breakout within 40d | — | 74% (17/23) |
-> | lead time ≥ 10 trading days | ≥ 60% | **24%** — median lead **3 days** |
-> | median root-capture ratio | ≤ 0.85 | **0.910** |
-> | false positives | ≤ 30% | 26% |
->
-> Tightening does not rescue it: ≥4/5 with N=5 gives 12 events, 92% breakout,
-> 36% at ≥10d lead, root capture 0.913. Loosening is worse: ≥3/5 N=5 gives 130
-> events, 79% breakout, 17% at ≥10d, 0.944.
->
-> Read plainly: the gate now identifies sectors that **are about to move**
-> (74-92% breakout is a real hit rate) but it identifies them **~3 days early,
-> not ~2 weeks**, and it enters at 91% of the eventual peak. That is a momentum
-> confirmation signal — §16.3's `BUY`, "cành cao" — wearing the `ACCUMULATE`
-> label. **The "gốc" claim is not yet earned**, and no ACCUMULATE sizing rule
-> (§16.9: 1.5× vol target, 2.5×ATR stop) should be trusted on it until the lead
-> time is fixed.
->
-> The conditions are the suspects, not the aggregation: c1 (`flow_z20 > 1`) is
-> a *contemporaneous* flow spike, so it tends to fire with the move rather than
-> ahead of it. The leading candidates in §16.2 that would actually buy lead time
-> — `flow_price_divergence`, `foreign_streak`, `flow_leadtime_proxy` — are
-> computed and stored but are in **no** condition. That is the next experiment.
+**Cả ba là cần, không đủ — và tiêu chí lead-time không sống sót §16.15.** Dưới
+một bar breakout đúng đơn vị, base rate không lọc đã đạt 74% ở ≥10d: tiêu chí
+đó thoả mãn được bằng nhiễu. **Chỉ biên độ so với NO GATE mới có nghĩa**
+(§16.12).
 
-> **The experiment was run — 2026-08-24 — and the suspect above was wrong.**
-> `scripts/stealth_leadtime_experiment.py` scores candidate condition sets over
-> the full panel. Every variant containing `flow_price_divergence` made lead
-> time **worse** (median 3 → 2-3 days, ≥10d share 20% → 4-17%) while inflating
-> the event count 20 → 38-77. It fires more often, not earlier.
->
-> What moved was the condition §16.11 did not name: replacing **cond2's 20d hit
-> *rate*** with **`foreign_streak ≥ 3`** — consecutive sessions of net foreign
-> buying.
->
-> | | events | breakout | ≥10d lead | med lead | med RC |
-> |---|---|---|---|---|---|
-> | shipped §16.1 | 20 | 75% | 20% | 3 | 0.940 |
-> | cond2 → `foreign_streak ≥ 3` | 16 | 88% | **50%** | **8** | 0.924 |
->
-> This is §18.5/21's argument arriving from the other direction: a hit rate is
-> satisfiable by one block trade plus 19 quiet days, and one block trade is not
-> accumulation. **Persistence is the part that leads.**
->
-> **Not shipped, on purpose.** n=16 over 3.5 years, and the year split puts the
-> entire effect before 2026: 2023-25 run 50-67% at ≥10d with median lead 10-14,
-> while 2026's three events are 0% / median 3 — the same collapse the shipped
-> gate shows in 2026 (0% at ≥10d on six events). Tightening to `streak ≥ 8`
-> gives 100% at ≥10d on n=2, which is not a result. Root capture stays ~0.92
-> against the 0.85 target either way, so no variant here earns the "gốc" claim.
->
-> **The real question this surfaced:** both gates degrade sharply in 2026. A
-> defect common to two different condition sets is more likely data or regime
-> than condition choice — that is the next thing to look at, ahead of any
-> further condition tuning.
+→ Toàn bộ phép đo: [`docs/doctrine/16-stealth-measurements.md`](docs/doctrine/16-stealth-measurements.md)
 
 ### 16.12 The base rate — and why §16.11's criteria are not sufficient
 
-> **2026-08-24, chasing the 2026 collapse.** Adding the missing row to
-> `scripts/stealth_leadtime_experiment.py` — score **every** row in the panel,
-> i.e. no gate at all — produced the most important number in this section:
->
-> | | events | breakout | ≥10d lead | med lead | med RC |
-> |---|---|---|---|---|---|
-> | **NO GATE (base rate)** | 13,033 | **83%** | **23%** | **4** | **0.944** |
-> | shipped §16.1 | 20 | 75% | 20% | 3 | 0.940 |
-> | cond2 → `foreign_streak ≥ 3` | 16 | 88% | 50% | 8 | 0.924 |
->
-> **The shipped gate is worse than not filtering at all.** Lower breakout rate,
-> fewer early signals, shorter lead. Of the six variants only
-> `foreign_streak` beats the base rate on any axis.
->
-> **Every number in this section and §16.11 uses the old 1.15% bar — see
-> §16.15.** Re-measured under a horizon-consistent one, the base rate is 43%
-> breakout / 74% at ≥10d, and the shipped gate still fails to beat it. The
-> ranking of the variants does not change; the absolute levels do.
->
-> **§16.11's three criteria cannot detect this**, which is the doctrine defect.
-> They are absolute thresholds ("≥60% at ≥10d", "RC ≤ 0.85", "FP ≤ 30%"), so a
-> gate posting a respectable-sounding 75% breakout reads as *underperforming a
-> target* when it is in fact **selecting worse-than-random sector-days**. Every
-> §16.11 measurement from here on is reported against the NO GATE row, and a
-> variant that does not beat it is not a signal regardless of its absolute
-> numbers. The bench prints the row on every run.
->
-> **Amend §16.11's success criteria accordingly:** each of the three targets is
-> now *necessary but not sufficient* — a candidate must also beat the
-> unconditional base rate on breakout share and ≥10d share, **within each
-> year**, not pooled. Pooling is what let `foreign_streak`'s pre-2026 strength
-> mask a 2026 that matches random.
+**Luật, áp dụng cho mọi phép đo từ nay:** mọi bench phải in dòng **NO GATE**
+(chấm toàn bộ panel, không lọc), và một biến thể **không thắng base rate thì
+không phải tín hiệu**, bất kể con số tuyệt đối đẹp đến đâu. So sánh phải
+**trong từng năm**, không gộp — gộp là thứ đã che được một 2026 ngang mức ngẫu
+nhiên.
+
+**NO GATE nghĩa là gì (2026-09-25):** mọi mã đủ thanh khoản, **mọi phiên** có
+≥ 30 mã như thế — một base chung cho mọi luật. **Cấm** so factor có cổng với base
+cũng có cổng (xoá luôn phần đóng góp của chính cái cổng), và **cấm** bỏ phiên theo
+bề rộng cross-section của chính factor (đúng các phiên thị trường yếu mà
+production vẫn ra danh sách). Hai lựa chọn đó cùng nhau đã lật năm 2023 của picks
+(review 2026-09-24 §1). Lợi suất h phiên đo mỗi ngày chồng nhau: t là Newey-West
+lag h. "Vượt VNINDEX" là danh mục staggered so với index **cùng ngày** — không
+phải quy năm số học so với một hằng số.
+
+→ Bảng đo: [`docs/doctrine/16-stealth-measurements.md`](docs/doctrine/16-stealth-measurements.md)
 
 ### 16.13 The 2026 collapse is mostly the market
 
-> **Same investigation, 2026-08-24.** Ruled out first, cheaply:
-> - **Not data.** 2026 rows are 99% non-zero `foreign_net`, 100% `close_idx`
->   and `atr_pct`, 15 sectors, 156 sessions — coverage matches 2024-25.
->   `breadth_sma20` has **zero NULLs** in 2024-26 (245 in 2023 only); its
->   apparent "76% coverage" was a miscount on my part — a legitimate `0.0` is
->   not a missing value. Its zero *rate* does rise, 14/15/16% in 2023-25 →
->   **24%** in 2026, which is not a gap but the flat tape below showing up in
->   breadth: on a quarter of 2026 sector-days no constituent was above its
->   SMA20. (Breadth takes 9 distinct values over 5 names — §20.3 P1-3.)
-> - **Not right-censoring.** Only 1 of 7 shipped-gate events in 2026 has fewer
->   than 40 forward sessions, so "a long lead is unobservable near the panel
->   edge" does not explain it.
->
-> What did explain most of it is the tape itself. The **unconditional** base
-> rate falls in lockstep:
->
-> | year | base breakout | med fwd-40d max | gate breakout | gate ≥10d |
-> |---|---|---|---|---|
-> | 2023 | 88% | +7.1% | 80% | 25% |
-> | 2024 | 84% | +5.4% | 100% | 25% |
-> | 2025 | 86% | +7.9% | 80% | 25% |
-> | **2026** | **68%** | **+3.2%** | **50%** | **0%** |
->
-> 2026 is a flatter tape: half the forward move, and a breakout definition
-> pinned to 2×ATR catches far less of it. **But the gate degrades faster than
-> the market** — 50% vs a 68% base rate, 0% vs 18% at ≥10d. So regime explains
-> the level, not the shortfall. Both remain open; the tape is the larger term.
+Không phải dữ liệu, không phải right-censoring. 2026 **giảm và biến động cao
+hơn** hai năm trước (median fwd-40d −7,6%, vol 0,42 vs 0,21-0,29) — nhưng gate
+sập nhanh hơn thị trường, nên regime giải thích mức, không giải thích phần hụt.
 
-> **"Flatter" was the wrong word — 2026-08-24 (4).** Measured directly
-> (`scripts/late_period_diagnosis.py`, check 2), 2026 is not flat, it is
-> **down, and more volatile than the two years before it**:
->
-> | year | med fwd-40d | med fwd-40d **max** | % of fwd-40d positive | ann vol |
-> |---|---|---|---|---|
-> | 2023 | +3.9% | +7.1% | 70% | 0.89 |
-> | 2024 | +1.4% | +5.4% | 58% | 0.21 |
-> | 2025 | +3.6% | +7.9% | 63% | 0.29 |
-> | **2026** | **−7.6%** | **+2.9%** | **17%** | **0.42** |
->
-> The `med fwd-40d max` column is what §16.13 was reading, and taken alone it
-> does look like a quiet tape. It is not: only the *max* compressed. The median
-> forward move went negative and vol went **up**. That distinction matters for
-> what to do next — a quiet tape argues for a more sensitive gate, a falling
-> one argues that a long-only breakout definition has little to find, which is
-> a different problem with a different fix.
->
-> The 2×ATR breakout bar also moves with the tape it is measuring: ATR rose,
-> so the bar rose, while the moves it must clear shrank. A breakout definition
-> that gets harder exactly when the market gets choppier will show a collapse
-> in any year like this one, independent of the gate.
+→ [`docs/doctrine/16-stealth-measurements.md`](docs/doctrine/16-stealth-measurements.md)
 
 ### 16.14 What this means for §16 as a whole
 
-> Stated plainly, so no later reader has to re-derive it: **as of 2026-08-24
-> the §16.1 gate has no measurable edge.** It fires 20 times in 3.5 years and
-> those 20 sector-days break out *less* often, *later*, and at a *worse* entry
-> than a sector-day drawn at random from the same panel.
+> **Cảnh báo vận hành, còn hiệu lực.** Tính đến 2026-08-24 cổng §16.1 **không
+> có edge đo được**: 20 lần bắn trong 3,5 năm, breakout *ít* hơn, *muộn* hơn và
+> vào lệnh *tệ* hơn một sector-day lấy ngẫu nhiên từ cùng panel.
 >
-> This does not falsify §16's thesis — that VN money flow leads public
-> coverage by ~1 month. It falsifies **this implementation** of it. The one
-> result pointing back at the thesis is `foreign_streak`: persistence of net
-> foreign buying is the only tested condition that beat the base rate
-> (88% vs 83% breakout, 50% vs 23% at ≥10d, median lead 8 vs 4), and §18.5/21
-> predicted exactly that on different grounds.
+> Hệ quả: **không luật sizing nào ở §16.9 được tin trên cổng hiện tại** — 1,5×
+> vol target, stop 2,5×ATR, 4 vị thế đồng thời. Coi output `ACCUMULATE` sống là
+> **watchlist, không phải lệnh**, cho tới khi một biến thể thắng NO GATE trong
+> từng năm.
 >
-> **Operational consequence, effective now:** no `ACCUMULATE` sizing rule from
-> §16.9 — 1.5× vol target, 2.5×ATR stop, 4 concurrent — should be trusted on
-> the current gate. §16.11's warning said the "gốc" claim was *not yet earned*;
-> the base rate says the signal is not yet a signal. Treat live `ACCUMULATE`
-> output as a watchlist, not an instruction, until a variant beats NO GATE
-> within-year.
+> Điều này **không** bác thesis §16 (dòng tiền VN đi trước tin ~1 tháng) — nó
+> bác **bản hiện thực này** của thesis.
+>
+> **2026-09-25 — thi hành bằng nhãn, không bằng trí nhớ.** Ranker ngành, nhãn
+> regime và cổng stealth nằm trong `analysis/verification.py`; email và Daily
+> Insight in ghi chú "chưa kiểm chứng" từ đó cạnh mọi con số của chúng. Một
+> thứ thắng NO GATE từng năm thì xoá dòng của nó — nhãn đi theo. Ứng viên duy nhất từng thắng base rate
+> là `foreign_streak` (tính bền của mua ròng nước ngoài), đúng thứ §18.5/21 dự
+> đoán trên cơ sở khác.
 
-### 16.15 The breakout bar was 1.15%, not 8% — 2026-08-24 (5)
+→ [`docs/doctrine/16-stealth-measurements.md`](docs/doctrine/16-stealth-measurements.md)
 
-§25.10 suspected §16.4's `2 × atr_pct` of **scaling with the tape it measures**:
-ATR rises in choppy markets, so the bar would rise exactly when the moves
-clearing it shrink. `scripts/stealth_leadtime_experiment.py --breakout` now
-scores four definitions so that could be tested rather than assumed.
+### 16.15 The breakout bar was 1.15%, not 8%
 
-**The suspicion was wrong.** Sector ATR barely moves across years — median
-0.58 / 0.53 / 0.57 / 0.67% in 2023-26 — so `atr_now` (today's reading) and
-`atr_baseline` (the sector's trailing 2y median, no feedback) produce
-near-identical tables. The feedback is real in direction and negligible in size.
+Nghi ngờ ban đầu (2×ATR co giãn theo tape) **sai**; lỗi thật là **đơn vị** —
+`atr_pct` là biên độ *ngày* (median 0,57%) nên bar ~1,15%, áp lên max 40 phiên
+thì **83% sector-day "breakout"**. Đó là phép thử còn sống, không phải phép thử
+breakout. `atr_scaled = 2 × median ATR × √40 ≈ 7,2%` giữ đúng ý "hai nhịp
+thường" mà nhất quán với horizon.
 
-**The actual defect is units.** `atr_pct` is a **daily** range, median 0.57%, so
-the bar is ~**1.15%**. Asking whether a **40-session forward maximum** ever
-exceeded 1.15% is not a breakout test — it is a liveness test, and **83% of all
-sector-days pass it**. Every §16.11 and §16.12 breakout number recorded so far
-was measured against that.
+**Chỉ là bench đo, không ship vào scanner** — `analysis/stealth.py` không dùng
+định nghĩa breakout nào.
 
-`atr_scaled` = `2 × median ATR × √40` ≈ **7.2%** keeps §16.4's "two normal
-moves" intent while being horizon-consistent (a random walk's expected maximum
-grows with √n), stays sector-relative, and takes the trailing median so it has
-no feedback.
+> **ĐÍNH CHÍNH 2026-09-25 — tiền đề "ATR ngày trung vị 0,57%" sai 5 lần.**
+> `flow_aggregation` nhân ATR mỗi mã với `w = 1/n` rồi lại chia cho n: `atr_pct`
+> ngành là 1/5 ATR rổ thật (~2,7%). Với ATR thật, `atr_scaled` ≈ 35% và không bao
+> giờ chạm tới — mọi con số bar breakout ở mục này phải đo lại sau khi
+> `scripts/repair_sector_data.py` tính lại `atr_pct`. Hệ quả sống của cùng lỗi:
+> sentinel stop báo CRITICAL trên 21,7% số ngành-ngày thay vì 0,7%, và slippage
+> backtest chỉ còn mức sàn 0,3% (review 2026-09-24 §4.1/3).
 
-| | events | breakout | ≥10d lead | med lead | med RC |
-|---|---|---|---|---|---|
-| NO GATE, old bar | 13,033 | 83% | 23% | 4 | 0.944 |
-| **NO GATE, `atr_scaled`** | 13,048 | **43%** | **74%** | **17** | 0.944 |
-| shipped §16.1, `atr_scaled` | 20 | 40% | 75% | 21 | 0.940 |
-| cond2 → `foreign_streak ≥ 3` | 16 | **62%** | **90%** | **34** | 0.924 |
-
-**§16.11's lead-time criterion does not survive this.** Under a real bar the
-unconditional base rate already clears "≥10d on ≥60%" — 74%, median lead 17
-sessions — which is not the system detecting anything, it is what "40 sessions
-to move 7%" mechanically implies. The criterion was satisfiable by noise and was
-never the right test. **Only the margin over NO GATE means anything**, which is
-what §16.12 already said and this makes unavoidable.
-
-What survives the change, unchanged: the shipped gate is still no better than no
-gate (40% vs 43%), `foreign_streak` is still the only variant clearly ahead on
-every axis, and **every variant still collapses in 2026** under every definition
-(shipped 0% at ≥10d on n=6; `foreign_streak` 33% breakout / 0% at ≥10d on n=3).
-So §25.9's "it is the tape" conclusion stands and §16.14's "no measurable edge"
-verdict stands. The bar being wrong was a second, independent defect.
-
-**Not shipped into the scanner.** `analysis/stealth.py` does not use a breakout
-definition — this is a measurement bench only, and no live signal changes.
-Root capture is untouched at ~0.94 either way, so no variant has earned the
-"gốc" claim.
+→ [`docs/doctrine/16-stealth-measurements.md`](docs/doctrine/16-stealth-measurements.md)
 
 ## 18. Trader-Lens System Review — APPROVED 2026-04-09
 
 > Reviewer stance: "if I had to trade this book tomorrow with my own money, what would break or bleed me?" Findings are grouped by severity. Items marked **[BLOCKER]** must ship before live paper-trade; **[EDGE]** items are alpha improvements; **[HYGIENE]** items are robustness.
 
 ### 18.1 Signal quality gaps
-1. **[BLOCKER] Survivorship + constituent drift.** `sector_constituents` is a static top-5 by market cap. In VN, banks and brokers rotate in/out of the top-5 yearly (e.g., VIX, SHS replaced names in 2024). A frozen basket back-paints history. **Fix:** rebuild the basket monthly from point-in-time market cap and stamp `constituent_asof` on every `sector_flow_ts` row. Backtest MUST read the basket valid on each historical date.
-2. **[BLOCKER] Foreign-flow noise on ETF rebalance days.** FUEVFVND and E1VFVND monthly rebalances spike `foreign_net` on names like HPG, VHM, VIC without reflecting real directional conviction. **Fix:** add an `etf_rebalance_mask` feature; zero out `foreign_net` contribution for constituents on known index review windows (HOSE quarterly, ETF monthly). Expose as `foreign_net_clean`.
-3. **[EDGE] Flow z-score needs regime conditioning.** A +1.0 z20 in `risk_off` means something very different than in `risk_on`. **Fix:** compute `flow_z20_by_regime` — z-score relative to the distribution in the same HMM regime label. Stealth trigger §16.1 should use the regime-conditioned z.
-4. **[EDGE] No put/call or derivatives proxy.** VN30F1M open interest and basis (futures − spot) lead the cash index by 1-3 sessions on turns. **Fix:** add `vn30f1m_basis`, `vn30f1m_oi_chg_5d` to macro_anchors; feed into ranker. Cheap win — vnstock exposes it.
-5. **[EDGE] Missing margin-debt proxy.** SSI/VND/HCM publish monthly margin balances — leading indicator for broker sector and for systemic leverage. **Fix:** add `broker_margin_total_mom` as a macro anchor (manual CSV refresh monthly until scraped).
-6. **[EDGE] Breadth is computed on the 5-stock basket — too narrow to be "breadth".** Breadth SMA20/50 of 5 names is almost binary. **Fix:** compute breadth on the *full sector population* (all listed tickers mapped to sector), while keeping flow on the weighted top-5 basket. Two different tools.
+
+| # | finding | trạng thái |
+|---|---|---|
+| 1 | **[BLOCKER]** Survivorship + constituent drift — rổ top-5 tĩnh vẽ lại lịch sử. Dựng lại rổ hằng tháng theo market cap tại thời điểm, đóng dấu `constituent_asof` | mở |
+| 2 | **[BLOCKER]** Nhiễu foreign-flow ngày ETF rebalance → `etf_rebalance_mask`, `foreign_net_clean` | mở |
+| 3 | **[EDGE]** Flow z-score cần điều kiện theo regime → `flow_z20_by_regime` | mở |
+| 4 | **[EDGE]** Thiếu proxy phái sinh → `vn30f1m_basis`, `vn30f1m_oi_chg_5d` (vnstock có sẵn) | mở |
+| 5 | **[EDGE]** Thiếu proxy dư nợ margin → `broker_margin_total_mom` | mở |
+| 6 | **[EDGE]** Breadth tính trên rổ 5 mã — quá hẹp để gọi là breadth | mở, = §20.3 P1-3 |
 
 ### 18.2 Execution & risk realism
-7. **[BLOCKER] T+2.5 settlement not modeled.** VN HOSE is T+2 cash, ~T+2.5 effective. Backtest must lock capital for 2-3 sessions after a buy. Current `SectorBacktestService` assumes instantaneous recycling → overstated Sharpe. **Fix:** add `settlement_lag=2` to the backtest cash engine.
-8. **[BLOCKER] No foreign ownership room (FOL) check.** Banks, retail, airports routinely hit FOL and become un-buyable by foreigners — distorts `foreign_net` (it goes to zero not because of conviction but because of cap). **Fix:** pull `foreign_room_pct` per constituent; if median room < 3%, downweight `foreign_net` signal to 0.5× for that sector.
-9. **[BLOCKER] Slippage + price-band realism.** VN has ±7% daily price bands (HOSE), ±10% (HNX), ±15% (UPCoM). In strong rotations, sectors gap to ceiling with no fills. **Fix:** backtest must (a) add a `ceiling_floor_hit` flag, (b) skip fills when basket median touched ±7% of prior close, (c) apply slippage = max(0.3%, 0.5 × ATR%). No slippage = fantasy Sharpe.
-10. **[BLOCKER] Tax + fee line missing.** VN: 0.1% sell tax on proceeds, 0.15–0.35% broker fee round-trip. On a 20d holding period with 60%+ turnover, this is ~60-80 bps/trade of drag. **Fix:** hardcode `fee_bps=15` per side + `sell_tax_bps=10` in backtest config, expose in risk service too.
-11. **[EDGE] Vol-targeting uses sector ATR — should use portfolio vol.** Sizing each position on its own ATR ignores cross-sector correlation (banks + brokers + realty move together in VN). **Fix:** size against portfolio marginal contribution to vol using the rolling 20d correlation matrix you already compute.
-12. **[EDGE] Max 3 long / 2 short cap is arbitrary.** 15 sectors × high pairwise correlation → effective independent bets ≈ 3-4. Shorting in VN cash market is impossible (only VN30 futures). **Fix:** either restrict shorts to "reduce long" (cash flat) or model shorts exclusively through VN30F1M hedging. Delete the "2 short" concept from cash leg.
+
+| # | finding | trạng thái |
+|---|---|---|
+| 7 | **[BLOCKER]** Chưa mô hình hoá thanh toán T+2 → `settlement_lag=2` | **bỏ 2026-09-25** — Tom: *"bỏ T+2, chỉ sử dụng 4 tuần và 8 tuần"*. Ở khung ≥ 20 phiên T+2 không bao giờ là ràng buộc; backtest tái cơ cấu theo `config.HOLD_SESSIONS` thay vì mỗi phiên |
+| 8 | **[BLOCKER]** Chưa kiểm room ngoại (FOL) — `foreign_net` về 0 vì hết room chứ không phải vì hết niềm tin. Room median < 3% → hạ trọng số signal 0,5× | mở |
+| 9 | **[BLOCKER]** Slippage + biên giá ±7% HOSE; bỏ fill khi rổ chạm trần/sàn | **đóng ở backtest** (§23) — slippage 0,3%/chiều phẳng từ 2026-09-25 |
+| 10 | **[BLOCKER]** Thiếu dòng thuế + phí: `fee_bps=15`/chiều + `sell_tax_bps=10` | **đóng ở backtest** (§23) |
+| 11 | **[EDGE]** Vol-targeting dùng ATR ngành — phải dùng đóng góp biên vào vol **danh mục** (bank + broker + realty VN chạy cùng nhau) | mở |
+| 12 | **[EDGE]** Trần "3 long / 2 short" tuỳ tiện; **short cash ở VN là bất khả** — chỉ qua VN30F1M | `ALLOW_SHORT_SIGNALS` (§20.2 P1-5) |
 
 ### 18.3 Model & validation
-13. **[BLOCKER] No walk-forward with purged/embargoed folds.** Standard CV leaks across 5-20d forward targets. **Fix:** adopt López de Prado purged k-fold with embargo = max(target horizon) + 2 on ranker training.
-14. **[EDGE] Single 20d target loses nuance.** Add an ensemble target: weighted blend of `fwd_10d` (0.4) + `fwd_20d` (0.4) + `fwd_40d` (0.2). Prevents the model from overfitting a single horizon.
-15. **[EDGE] Stealth §16.1 uses fixed thresholds — should be sector-specific quantiles.** Banks normally run low ATR%; energy is chronically volatile. A global "ATR% < 20d median" is unfair across sectors. **Fix:** every §16.1 cut is evaluated against the **sector's own 2y empirical quantile**, not a cross-sector number.
-16. **[HYGIENE] No model drift monitor.** Ranker may silently degrade. **Fix:** nightly job logs ranker top-3 hit-rate on the last 20 sessions; Gmail alert if < baseline − 1σ for 5 consecutive days.
+
+| # | finding | trạng thái |
+|---|---|---|
+| 13 | **[BLOCKER]** Thiếu walk-forward với fold purged/embargoed (López de Prado, embargo = horizon + 2) | **đóng 2026-08-22** (§20.2 P0-6) |
+| 14 | **[EDGE]** Một target 20d là hẹp → ensemble `fwd_10d` 0,4 + `fwd_20d` 0,4 + `fwd_40d` 0,2 | mở |
+| 15 | **[EDGE]** Ngưỡng §16.1 cố định — phải là **quantile 2 năm của chính ngành đó** (bank ATR thấp kinh niên, năng lượng cao kinh niên) | mở |
+| 16 | **[HYGIENE]** Không có giám sát drift của ranker | mở |
 
 ### 18.4 Data & ops
-17. **[BLOCKER] Single-source vnstock risk.** If vnstock breaks for a day, the whole pipeline fails silently (ingest just catches). **Fix:** add a secondary HOSE scraper (cafef or ssi-iBoard) as fallback; circuit-breaker + loud Gmail alert on 2 consecutive miss.
-18. **[HYGIENE] SQLite for intraday 15m flow will contend.** 15 sectors × 26 intraday bars × 252 days ≈ 100k/yr — fine. But WAL on a network mount is fragile. **Fix:** document that DB must live on a local disk; add a startup check that rejects network paths.
-19. **[HYGIENE] No "as of" timestamp discipline.** A flow row should always carry `source_ts` (when the data was observed) + `ingested_ts`. Currently only one timestamp. Required for proper point-in-time backtesting. **Fix:** add `source_ts` column to `sector_flow_ts`.
-20. **[HYGIENE] No kill-switch.** If risk sentinel fires repeatedly, there is no global "pause all new ACCUMULATE entries" flag. **Fix:** add `config.trading_halt` bool read at the top of `sector_signal_service.publish()`.
+
+| # | finding | trạng thái |
+|---|---|---|
+| 17 | **[BLOCKER]** Rủi ro một nguồn vnstock — hỏng một ngày là cả pipeline chết im. Cần scraper dự phòng + circuit-breaker + cảnh báo lớn | mở |
+| 18 | **[HYGIENE]** WAL trên ổ mạng dễ vỡ → DB phải ở đĩa cục bộ, chặn ở startup | mở |
+| 19 | **[HYGIENE]** Thiếu kỷ luật "as of" → thêm `source_ts` tách khỏi `ingested_ts` | mở |
+| 20 | **[HYGIENE]** Không có kill-switch toàn cục | **đóng** (§20.2 P1-5, §22.10) |
 
 ### 18.5 Stealth doctrine sharpening (§16 delta)
-21. **[EDGE] "Foreign net ≥ 60% of last 20d" is too coarse.** A single huge block trade on day 1 can satisfy the hit-rate while flow dies for 19 days. **Fix:** require BOTH `foreign_hit_20d ≥ 0.6` AND `foreign_net_z20 ≥ +0.5`. Two independent checks.
-22. **[EDGE] Add a "distribution guard" to kill stealth early.** If during stealth window any single session sees `up_vol / down_vol < 0.5` AND `foreign_net < 0`, invalidate the event (smart money is leaving). Currently stealth only resolves on price breakout or 30-day timeout — too slow.
-23. **[EDGE] Track "institutional mornings" signal.** VN institutions trade disproportionately in the 09:15–10:30 window; retail dominates afternoons. Intraday 15m flow should compute `morning_share = morning_flow / daily_flow`. Rising `morning_share` during accumulation = high-conviction institutional buying. Add to `stealth_score`.
-24. **[EDGE] Lead-time audit must be regime-stratified.** Average lead-time is meaningless across bull/bear. `lead_time_audit` job must bucket by HMM regime on the event start date.
+
+| # | finding | trạng thái |
+|---|---|---|
+| 21 | **[EDGE]** "Foreign net ≥ 60% của 20d" quá thô — một lệnh khối ngày 1 thoả được hit-rate trong khi dòng tiền chết 19 ngày. Cần **cả** `foreign_hit_20d ≥ 0,6` **và** `foreign_net_z20 ≥ +0,5` | mở — và §16.11 đo được rằng **tính bền** mới là phần dẫn trước |
+| 22 | **[EDGE]** Thiếu "distribution guard" để huỷ sớm một stealth event | mở |
+| 23 | **[EDGE]** Tín hiệu "buổi sáng của tổ chức" → `morning_share = morning_flow / daily_flow` | mở |
+| 24 | **[EDGE]** Lead-time audit phải phân tầng theo regime | mở |
+
+→ Nguyên văn 24 finding: [`docs/doctrine/18-trader-review.md`](docs/doctrine/18-trader-review.md)
 
 ### 18.6 Priority queue (append to §13 + §16.10)
 Ship order, blockers first:
 - P0: §18.1/1–2, §18.2/7–10, §18.3/13, §18.4/17 — before any live paper trade.
-  > **2026-08-23:** §18.2/7, 9, 10 are **closed in the backtest engine** — T+2,
+  > **2026-08-23:** §18.2/9, 10 are **closed in the backtest engine** —
   > slippage, fee, sell tax and the ±7% band are modelled and now reported on
   > every run (§23). They stay open in `risk_service`, which sizes positions
-  > with no cost model. §18.3/13 closed 2026-08-22 (§20.2 P0-6).
+  > with no cost model. §18.3/13 closed 2026-08-22 (§20.2 P0-6). §18.2/7 (T+2)
+  > was closed the same way and **removed 2026-09-25** with the T+ mode.
 - P1: §18.1/3–6, §18.2/11–12, §18.3/14–15, §18.5/21–22 — before shadow-run metrics matter.
 - P2: remaining HYGIENE + EDGE.
 
 ### 18.7 Success re-definition
 Current §16.11 targets are necessary but not sufficient. Add:
-- **Net-of-cost Sharpe ≥ 0.8** (after fees, taxes, slippage, T+2 lag, price-band misses).
+- **Net-of-cost Sharpe ≥ 0.8** (after fees, taxes, slippage, price-band misses, on a 20- or 40-session book).
 - **Max adverse excursion on ACCUMULATE entries ≤ 6%** — if early entries routinely bleed more than that before working, the "root" claim is false.
-- **Decile monotonicity** of the ranker: mean forward 20d return must be monotone across score deciles on out-of-sample data. Non-monotone = model is guessing.
+- **Decile monotonicity** of the ranker: mean forward 20d return must be monotone across score deciles on out-of-sample data. Non-monotone = model is guessing. **Đọc kèm Q5−Q1 với t Newey-West** (2026-09-25): năm con số trung bình nhiễu rất dễ đổi thứ tự — ensemble ML chỉ đơn điệu ở 4/8 lần chạy, không năm nào đơn điệu (review 2026-09-24 §9).
 
 ### 18.8 Doctrine
 Any future change MUST (a) log a `MODIFICATION_LOG.md` entry referencing the §18 item number it resolves, and (b) update the relevant spec file under `specs/`. Closing a §18 item requires evidence (backtest diff, unit test, or data proof) — not just code.
 
 ## 19. Testing
 
-As of 2026-04-23:
+Counts below are re-measured, not dated — §22.7 removed a fixed "as of" stamp
+from `ARCHITECTURE.md` for the reason it applies here too: a date in a living
+document ages without anyone noticing, and a stale count reads as a fact.
+Run the two commands rather than trusting the numbers.
 
 | Suite | Count | Command |
 |---|---|---|
-| Backend (pytest) | 252 | `python -m pytest tests/` |
-| Frontend (vitest) | 13 | `cd frontend && npm test` |
-| **Total** | **265** | — |
+| Backend (pytest) | 451 | `uv run pytest tests/` |
+| Frontend (vitest) | 18 | `cd frontend && npm test` |
+| **Total** | **469** | — |
+> Vì sao từng bài test tồn tại — và 4 lần negative control bắt được test vô
+> dụng của chính tôi — ở [`docs/doctrine/19-testing-history.md`](docs/doctrine/19-testing-history.md).
+> Đọc nó trước khi xoá hoặc viết lại một bài test trông có vẻ thừa.
 
-> 2026-08-24 (13): +14 in `tests/test_stealth_history.py` — `stealth_events()`,
-> behind `/api/stealth/history` (§22.11). Backend **342**.
->
-> The one carrying the feature is
-> `test_a_long_open_run_is_not_scored_even_though_it_could_be`, and it exists
-> because its first draft did not work. That draft used a 3-session run at the
-> panel edge, which has no forward bars — so `judgeable` was already False and
-> the test passed against code with the `still_running` guard **deleted**. A
-> negative control caught it: removing the guard left all 13 green. The
-> replacement uses a 25-session open run that has 24 forward bars and clears the
-> breakout bar, so only `still_running` keeps it unscored, and it goes red
-> without it. General lesson, worth more than the test: a guard test whose
-> fixture also trips an *earlier* guard measures the earlier one.
->
-> `test_the_bench_and_the_endpoint_share_one_breakout_definition` asserts
-> `bench._bar_atr_scaled is S.breakout_bar_scaled` — identity, not equal output,
-> because two copies that agree today are still two copies.
->
-> The fixture pads 60 quiet sessions in front of every panel. Without them
-> `breakout_bar_baseline` falls short of its 20 ATR observations and silently
-> returns the 0.02 default, so the tests would score against a bar production
-> never uses.
->
-> 2026-08-24 (12): +11, and one of them found a live production defect.
-> `tests/test_report_import.py` (+8) pins that `import generate_report` sends no
-> mail, opens no DB and writes no file — the property the §20.3 P3-2 split
-> exists for. Three of those are behavioural and one is structural
-> (`test_the_work_lives_inside_main_not_at_module_level`), because the first
-> three can pass by luck and the last cannot: measured against the pre-split
-> file it is 113 module-level statements versus 4, so the `< 40` threshold
-> discriminates. `smtplib.SMTP` is replaced with a raising bomb rather than a
-> recording mock — a mock lets the import finish and reports afterwards, which
-> is exactly the behaviour that shipped for months.
->
-> `tests/test_model_artifacts.py` (+3) guards something worse and unrelated to
-> the refactor: **running pytest overwrote the production ranker.**
-> `RotationRanker.fit()` writes `rotation_ranker.pkl` to
-> `config.SAVED_MODELS_DIR` unconditionally, six tests call it with 2-3
-> synthetic features, and `models/saved/` is gitignored — so the 17:00 publish
-> job died with *"number of features in data (19) is not the same as it was in
-> training data (3)"*, `git status` was clean, and no test failed. A silent
-> suite that breaks production is the worst shape a defect can take.
-> `tests/conftest.py::_models_go_to_a_tmpdir` is autouse for the reason an
-> opt-in fixture would fail: the tests that forget to ask are the dangerous
-> ones. Verified by negative control — de-autousing it fails 2 of the 3 guards
-> (and re-broke the live model, which is the bug reproducing itself).
->
-> 2026-08-24 (9): +13. `tests/test_position_track.py` — stop/target on the book
-> and the price path since entry (§22.10). The two that carry the feature are
-> `test_stop_and_target_survive_the_round_trip` (the defect itself: both numbers
-> were destroyed at the mark) and
-> `test_hit_stop_is_ever_touched_not_just_today`. Its mirror,
-> `test_a_breach_before_entry_is_not_your_breach`, is what stops the fix
-> over-firing on the 30-session tail that predates the trade.
-> `test_sellable_on_skips_holidays_too` pins the reason `next_trading_day`
-> exists at all rather than `setDate(+2)`.
->
-> One fixture detail is the test: `_bars()` keys the date as `"time"`, because
-> that is what `picks_universe_service` writes and `generate_report.py:164` has
-> to rename. A test that used `"date"` would pass against code that never
-> matches a real bar.
->
-> 2026-08-24 (3): +19. `tests/test_position_close.py` (+17) and two more in
-> `test_regime_confidence.py`.
->
-> The load-bearing one is `test_a_close_is_not_a_delete`: closing must *leave
-> evidence*. Until `close_position()` existed the only verb was
-> `remove_position()`, so a sale and a mis-click were the same operation and the
-> book could never answer whether the picks made money.
-> `test_costs_can_turn_a_small_win_into_a_loss` is the reason the §18.2/10
-> figures are imported rather than retyped — a +0.20% gross scalp is a loss net
-> of a ~0.40% round trip, and a book that disagrees with the backtest about that
-> is worse than no book. `test_a_break_even_book_reports_zero_not_none` guards a
-> `sum(...) or None` that would have erased an exactly-flat book, and
-> `test_an_old_state_file_without_closed_still_loads` pins the reason this
-> needed no migration.
->
-> 2026-08-24 (2): +26. `tests/test_regime_confidence.py` (+13) and
-> `tests/test_position_edit.py` (+13).
->
-> Three of the regime tests guard *wording*, not arithmetic, which is unusual
-> enough to justify: `confidence_phrase()` is the only reader-facing sentence
-> that says what the number means, and the four strings it replaced said "HMM
-> confidence 1.00" for months. `test_the_phrase_hedges_at_the_low_end_not_the_
-> high_end` pins the *direction* of the hedge — it first sat above 0.85 on a
-> 300-bar measurement that turned out to be a period artefact (§25.2), so
-> asserting the direction is what stops that regressing quietly.
->
-> **`hmmlearn` was missing from the interpreter that runs pytest**, while
-> production runs through `uv run` and resolves `.venv`, where it is installed.
-> So every regime test before this date exercised the heuristic fallback while
-> the scheduled job ran the HMM — a suite agreeing with itself about a code path
-> nobody ships. Installed now; the HMM tests `skipif` rather than silently pass
-> when it is absent.
->
-> The load-bearing regime test is
-> `test_fit_does_not_collapse_on_a_real_length_panel`, which pins the *cause*
-> (three of four states at hmmlearn's ceiling covariance) rather than the
-> symptom Tom reported (confidence stuck at 1.0) — the symptom is a consequence
-> and a future refactor could reproduce it a different way. The fixture is a
-> deliberate two-regime path: a single-regime random walk is exactly the input
-> that collapsed in production, so it cannot tell a working model from a broken
-> one.
->
-> On the book: `test_edit_does_not_restamp_the_open_date` is the one carrying
-> the feature — it is the whole reason `update_position` exists separately from
-> `add_position`. `test_pnl_route_is_not_shadowed_by_the_symbol_route` guards
-> FastAPI route ordering: `/positions/pnl` and `/positions/{symbol}` share a
-> prefix, and if the literal ever loses you get a position named "pnl".
-
-> 2026-08-23 (late, 6): +14 in `tests/test_stealth_gate.py` — §16.1 after it
-> stopped being a conjunction. The load-bearing one is
-> `test_four_of_five_fires_where_all_five_cannot`: a panel that clears four
-> conditions and never the fifth must produce an event, which the old gate
-> could not. `test_unevaluable_condition_does_not_raise_the_bar` guards the
-> numerator/denominator symmetry — the bug that let an all-zero `foreign_net`
-> column silently ship a 3-condition gate while the doctrine said 5. Two more
-> pin the endpoint to the scanner: that `/api/stealth/active`'s Query defaults
-> come from `analysis.stealth`'s constants rather than being retyped, and that
-> its cond4 ranks ATR instead of comparing a raw 0.006 fraction to 0.5.
->
-> The fixture is deterministic on purpose: flat flow gives sd=0 → z is NaN → c1
-> is reliably False, and a *ramp* (not a step) is what holds z above +1, since
-> a step's z decays to 0 once the 20d mean catches up. An earlier `rng.normal`
-> version produced random z-spikes that made the cold case fire intermittently.
-
-> 2026-08-23 (late, 5): +11 in `tests/test_report_runner.py` — the "Gửi báo cáo
-> ngay" button. One test carries the feature:
-> `test_second_click_does_not_start_a_second_run` — two clicks must send one
-> email, and the button being disabled is cosmetic, the backend is the guard.
-> The rest pin argv construction (`--no-email`, the date), rejection of a
-> malformed `report_date` **before** anything runs, and that a timeout lands in
-> the status instead of killing the daemon thread silently. No subprocess is
-> spawned: `send_report(runner=…)` takes the runner as a parameter for this.
-
-> 2026-08-23 (late, 4): +13 in `tests/test_backtest_controls.py` — the backtest
-> controls the UI can now reach. Two of them are the interesting ones:
-> `test_flow_z_is_not_the_same_strategy_as_flow_raw` (a +2.5σ small sector must
-> be reachable by `flow_z` and unreachable by `flow_raw`) and
-> `test_cross_sectional_z_preserves_raw_order`, which pins the *proof* that the
-> old cross-sectional z was an order-preserving affine map. The rest guard the
-> benchmark curve, cost-override clamping (a negative fee must not pay the
-> trader), the `Literal` strategy validation (422 on a typo, which used to fall
-> through to `flow_raw`) and the `trade_log` row shape the TS type claims.
-
-> 2026-08-23 (late): +13 in `tests/test_trading_state.py` — the operator store
-> behind the kill-switch, the position book and the watchlist. The guards that
-> matter: a corrupt file must not take the API down, the `TRADING_HALT` env
-> override must not be clearable from a browser, marking the same pick twice
-> must update rather than duplicate, and — the point of the whole feature — a
-> flag set from the browser must reach `SectorSignalService.publish()` and make
-> it emit all-HOLD.
-
-> 2026-08-23: +6 in `tests/test_picks_universe_service.py` — the disk-snapshot
-> round-trip (identity between `by_sector` and `tickers` preserved), cold-cache
-> load from disk, the stale-vs-latest-signal-date flag, and the two degrade
-> paths (corrupt file, missing file) that must return `None` rather than raise.
-> An empty build is not persisted.
-
-> 2026-08-22: +28 in `tests/test_review_20260822.py`, one guard per finding in
-> `docs/reviews/CODE_REVIEW_2026-08-22.md`. The 105 figure above also counted ~9 one-line
-> placeholder files under `tests/test_api/`, `tests/test_services/` and
-> `tests/test_database/` that contain only "Legacy test removed in sector
-> redesign" — real backend coverage before this review was ~101.
-
-Backend modules covered:
-- `config.py`, `database/models.py` schema (21 pre-existing).
-- `services/picks_scoring.py` — 20 tests (NVL-style regression guard, SWING/TPLUS profiles, is_valid_long_pick parametric matrix).
-- `services/picks_universe_service.py` — 14 tests (classification priority, cache lifecycle, degraded-mode fallback). vnstock calls mocked.
-- `services/trader_agent.py` — 23 tests (JSON parse variants incl. `<think>` stripping, prompt trimming, cache invalidation, provider routing for local/glm/claude, missing-key guard, local connect-error message, timeout guard). No live LLM call — the local transport is faked at `httpx.AsyncClient`.
-- `services/insight_refresh.py` — 5 tests (happy path, idempotent start while running, error propagation, stale run_id lookup, worker-thread progress plumbing). Uses an injected fake pipeline; no KBS / Claude / DB.
-- `api/routers/insight.py` refresh endpoints — 3 tests via FastAPI `TestClient` (POST returns run_id; polling completes with payload; second click while running returns same run_id + already_running).
-- `services/unified_picks.py` — 10 tests (NEW 2026-04-23). Anchors the SecV5 union-merge rule: consensus sort to top with `source=BOTH`; empty ranker → fallback to pure DAILY_INSIGHT (regression guard for the SecV4 silent-ranker bug); input lists not mutated; extra fields flow through; missing-score sort tiebreaker. Pure; no DB / vnstock / Claude dependencies.
-
-Frontend modules covered:
-- `pages/DailyInsightPage.tsx` — `fmtNum`, `fmtPct`, `AgentReport`, `PickGroup`, `PickCard` (valid + fallback + news toggle + SELL variant).
-
-Test runners:
-- Backend: pytest 9.x, anyio plugin. No network access required (mocked).
-- Frontend: vitest 4.x + @testing-library/react + jsdom + @testing-library/jest-dom.
-
-Live integration (not in pytest): `POST /api/insight/refresh` — exercises vnstock KBS + Claude Agent SDK end-to-end; run manually after meaningful changes to those paths. Since 2026-04-20 this endpoint is async: it returns a `run_id` immediately and the UI polls `GET /api/insight/refresh/status` for stage + progress. See `specs/daily-insight.md` §4.5 for the full contract.
-
-
+Smoketest (thứ pytest cấu trúc không thấy được): `uv run python scripts/smoketest.py`.
 
 ## 20. Code Review — 2026-08-22
 
 Full findings: **`docs/reviews/CODE_REVIEW_2026-08-22.md`** (22 findings: 6 P0, 6 P1, 4 P2, 6 P3).
 
-### 20.1 The central defect
+### 20.1-20.2 Defect trung tâm, và 15 mục đã sửa
 
-One causal chain ran through most of the P0s and started at one table,
-`sector_flow_daily`. The 16:00 EOD job wrote rows **without** `close_idx`. The
-only ingest path that writes `close_idx` (`services/fast_ingest.py`, reachable
-solely from `POST /api/flow/ingest`) skipped any date that already had a row —
-so the scheduler claimed each date first and permanently locked it in a
-price-less state. `scripts/backfill_close_idx.py`, `scripts/fix_close_idx.py`
-and the `STEALTH_SYNTHETIC_CLOSE` flag all exist only to paper over this.
+Một chuỗi nhân quả chạy qua phần lớn P0 và bắt đầu ở **một bảng**: job EOD 16:00
+ghi `sector_flow_daily` **thiếu `close_idx`**, mà `close_idx` nuôi target ML,
+điều kiện 5 của §16.1 và toàn bộ P&L backtest. Đã sửa, cùng 14 mục khác.
 
-Because `close_idx` feeds the ML target, stealth condition 5 and the entire
-backtest P&L, every number the system surfaced rested on an untrustworthy
-daily table.
+→ Chuỗi nhân quả + bảng 15 mục: [`docs/doctrine/20-code-review.md`](docs/doctrine/20-code-review.md)
+→ 22 finding đầy đủ: [`docs/reviews/CODE_REVIEW_2026-08-22.md`](docs/reviews/CODE_REVIEW_2026-08-22.md)
 
-### 20.2 Fixed in this pass
+**Mặc định chọn để giữ nguyên hành vi sống:** `API_REQUIRE_KEY=0`,
+`ALLOW_SHORT_SIGNALS=1`, `TRADING_HALT=0`. `MAX_ACCUMULATE_SECTORS=4` và luật
+giải phóng sau 30 phiên **có** đổi hành vi — chúng hiện thực §16.9, thứ chưa
+từng được thi hành.
 
-| Id | Fix | Files |
-|---|---|---|
-| P0-1 | `rollup_to_daily()` derives each row's date from the bar's own timestamp and refuses to stamp a stale bar as a new session | `services/sector_ingest_service.py` |
-| P0-2 | The scheduled path now carries `close_idx` + `return_1d` through; `fast_ingest` upserts instead of skipping, so it can repair damaged dates | `sector_ingest_service.py`, `fast_ingest.py`, migration 11 |
-| P0-3 | `SectorAggregate.basket_return` — the split-safe weighted mean of constituent returns. `close_idx` remains a raw price sum and must not be used for returns | `analysis/flow_aggregation.py` |
-| P0-4 | Backtest replays published `sector_signals` by default (`strategy="signals"`), with `flow_z` and legacy `flow_raw` baselines for comparison; benchmark is VNINDEX per §11, labelled when it falls back. **Half-true until 2026-08-23** — see §23 | `services/backtest_service.py` |
-| P0-6 | Purged/embargoed CV — embargo = horizon + 2 sessions (§18.3/13, was BLOCKER). Metrics replaced with `top1_excess_hit` (vs. median sector), `decile_monotonic` (§18.7) and `ndcg_at_3` | `models/rotation_ranker.py` |
-| P1-2 | The mean-flow fallback is flagged `is_degraded` and announced loudly instead of shipping as "ranker-gated" | `rotation_ranker.py`, `sector_signal_service.py` |
-| P1-5 | §16.9 ACCUMULATE cap (4) and 30-session auto-exit, §18.4/20 `TRADING_HALT` kill-switch, and `ALLOW_SHORT_SIGNALS` to retire the cash-leg short per §18.2/12 | `config.py`, `services/sector_signal_service.py` |
-| P1-5b | **2026-08-23** — the kill-switch stops being env-only. `publish()` ORs `TRADING_HALT` with a runtime flag toggled from `/positions?tab=risk`, read once before the loop so a mid-run toggle cannot split a batch. The env var remains a hard override a browser cannot clear | `services/trading_state.py`, `api/routers/state.py`, `sector_signal_service.py` |
-| P1-6 | `utils/clock.py` — one market-local definition of "today". `config.TIMEZONE` was declared and used nowhere | new module + call sites |
-| P2-1 | `require_api_key` is wired to every router behind `API_REQUIRE_KEY`; the slowapi limiter is finally attached to the app; the inert `"https://*.ngrok-free.app"` CORS entries are gone | `api/main.py`, `config.py` |
-| P3-1 | `AGENTS.md` reduced to a pointer — one source of truth again | `AGENTS.md` |
-| P3-3 | `.env.example` regenerated from `config.py` | `.env.example` |
-| P3-4 | `rollup_to_daily` no longer loads the whole `sector_flow_ts` table; `_stealth_sectors()` N+1 collapsed to one query | ingest + signal services |
-| P3-5 | ruff config in `pyproject.toml`; 666 findings → 30, all of them real | `pyproject.toml` + call sites |
+**Baseline ruff: 60.** Đo lại, đừng tin dòng này — một lần refactor có thể làm
+số này tăng mà không hỏng gì, hoặc giảm mà không sửa gì (§20.2).
 
-> **2026-08-24 — the "30" above is stale; the baseline is 66.** Measured, not
-> re-broken: `F401` 14 · `E402` 11 · `B904` 8 · `B905` 5 · `S608` 5 · `E401` 4
-> · `PERF401` 4, then a tail of ones and twos. The 30 was counted before
-> several later features landed, and nobody re-measured it — which is the
-> failure mode a hardcoded count in a document always has. Treat 66 as the
-> number a change must not grow, and re-measure rather than trusting this line.
->
-> **65 as of 2026-08-24 (12)** — three `F841` dead locals in
-> `generate_report.py` (`sector_prior_dv`, never even written to;
-> `sector_stats_map`; `flow_in_secs`) fell out of the `main()` wrap. They were
-> not new: ruff analyses function scope properly and module scope barely, so
-> moving the body inside a function is what made them visible. That is worth
-> knowing before the next count moves — a refactor can raise this number without
-> breaking anything, and lower it without fixing anything.
+### 20.3 Còn mở — cần một quyết định, không chỉ code
 
-**Defaults chosen to preserve live behaviour:** `API_REQUIRE_KEY=0`,
-`ALLOW_SHORT_SIGNALS=1`, `TRADING_HALT=0`. Nothing in the daily email changes
-until you flip these. `MAX_ACCUMULATE_SECTORS=4` and the 30-session release
-DO change behaviour — they implement §16.9, which was never enforced.
-
-### 20.3 Still open — needs a decision, not just code
-
-| Id | Question |
+| Id | Câu hỏi |
 |---|---|
-| ~~P0-5~~ | **CLOSED 2026-08-23** — `foreign_net` was backfilled by commit `b4d1d90`. Measured: **12,616 / 13,470 rows non-zero**, spanning 2023-03-13 → 2026-08-21; `foreign_hit_20d` spans 0.0 → 1.0 with 2,742 rows clearing the §16.1 0.6 threshold. The three `FEATURE_COLS` entries are no longer constant. **Consequence nobody logged at the time:** `analysis/stealth.py` drops cond2 whenever `foreign_net` is all-zero, so the backfill silently took the stealth gate from 3 evaluable conditions to 5 — a behaviour change that arrived as a side effect of a data change. That asymmetry is now explicit in the code (numerator *and* denominator) and pinned by `test_unevaluable_condition_does_not_raise_the_bar`. |
-| ~~P1-1~~ | **CLOSED 2026-08-23**, in the direction of neither number. Doctrine said N=5 / bottom 40%, `analysis/stealth.py` shipped N=3 / bottom 60% — but under a five-way AND **both give zero sectors over 3.5 years**, so the disagreement was never worth what it cost to argue about. §16.1 is a score now; the scanner, `api/routers/stealth.py` and the UI presets read the same two knobs. |
-| P1-3 | Breadth over 5 names takes 6 discrete values (§18.1/6, still open). |
-| ~~P1-4~~ | **CLOSED 2026-08-24** (§25.3). The published label is the filtered posterior of the last bar — `predict_proba(X[:t+1])[-1]`, which has no future to smooth over — so it no longer changes with hindsight. Found while chasing a different symptom: confidence pinned at 1.0. The back-painting was the *third* defect in that chain; the first was a collapsed fit that made the posterior 1.0 by construction. |
-| P2-2 | Two rate-limit buckets in one process: `utils/vnstock_gate` and `picks_universe_service._kbs_throttle`. `/insight/refresh` takes no `job_lock` at all, so a UI refresh overlapping the intraday job runs at 2× the KBS ceiling. |
-| P2-3 | The "intraday" job fetches `interval="1D"` and re-downloads 120 days every 15 minutes (~3,750 calls/day against an 18/min gate). Either fetch real 15m bars or admit it is an EOD pipeline and fix §4/§8. |
-| ~~P3-2~~ | **CLOSED 2026-08-24.** `import generate_report` is inert: 113 module-level statements → 4, everything else inside `main(argv=None)`. `services/report/` took the genuinely pure pieces — chart builders, the six SQL reads (which now take the cursor as an argument instead of closing over a module global, the actual reason nothing could be tested) and the two formatters. **The HTML weave deliberately did not move**: ~700 lines of `X = build_x()` where each builder reads several others' globals is a rewrite, not an extraction, and the harm was `import` sending mail — which is fixed. `ponytail:` in `services/report/__init__.py` names the trigger for finishing it (a second output format). `/api/state/report/send` still shells out; it no longer has to, and that is its own commit. |
+| P1-3 | Breadth trên 5 mã chỉ nhận 9 giá trị rời rạc (§18.1/6, còn mở). |
+| P2-2 | Hai bucket rate-limit trong một process: `utils/vnstock_gate` và `picks_universe_service._kbs_throttle`. `/insight/refresh` **không lấy `job_lock`**, nên một lần refresh từ UI chồng lên job intraday sẽ chạy ở 2× trần KBS. |
+| P2-3 | Job "intraday" fetch `interval="1D"` và tải lại 120 ngày mỗi 15 phút (~3.750 call/ngày trên gate 18/phút). Hoặc fetch bar 15m thật, hoặc thừa nhận đây là pipeline EOD và sửa §4/§8. |
+
+**Đã đóng** (chi tiết ở [`docs/doctrine/20-code-review.md`](docs/doctrine/20-code-review.md)):
+P0-5 backfill `foreign_net` (2026-08-23) · P1-1 cổng §16.1 thành điểm
+(2026-08-23) · P1-4 filtered posterior, hết back-paint (2026-08-24, §25.3) ·
+P3-2 `import generate_report` thành trơ, 113 → 4 câu lệnh module-level
+(2026-08-24).
 
 ### 20.4 Doctrine drift to close
 
@@ -810,768 +474,417 @@ one of them was a degraded mean-flow fallback (see section 20 / P0-8), so
 none was worth keeping. The next `--train` writes the first real one.
 
 
+
 ## 22. Frontend flow audit — 2026-08-23
 
-Every route and every endpoint behind it was exercised against the running
-server. Full numbers in the **Sector Flow Bench** artifact.
+→ Nguyên văn §22.1-22.11: [`docs/doctrine/22-frontend-audit.md`](docs/doctrine/22-frontend-audit.md)
 
-### 22.1 Flows that render nothing
-These return HTTP 200 with an empty collection, so the page draws an empty
-state. They are not broken code — they are correct code with no data:
+### 22.7 Bốn tài liệu chia việc — đọc trước khi viết vào file nào
 
-| surface | endpoint | why it is empty |
+| file | trả lời | hình dạng |
 |---|---|---|
-| Stealth Watch | `/api/stealth/active` | `accumulation_age` is 0 on all 13k rows; §16 has never fired — **cause corrected 2026-08-23**: not missing data, an unreachable AND gate (§16.1). 53 rows are non-zero now. |
-| ~~Stealth Watch history~~ | ~~`/api/stealth/history`~~ | **Misdiagnosed, fixed 2026-08-24** — it was not empty *data*, it was a hardcoded `return {"rows": []}`, the same defect as Flow Pulse below. Now derives runs from `sector_flow_daily.accumulation_age`: **21 events, 20 scored, 40% hit, median lead 21 sessions**. See §22.11. |
-| Rotation Map | `/api/rotation/pairs` | ~~no pair clears the 1.5 threshold~~ — **wrong, corrected below** |
-| Flow Pulse | `/api/pulse/exposure` | ~~no positions are tracked~~ — **wrong, corrected below** |
+| `CLAUDE.md` | hệ thống **phải** thế nào | doctrine, sửa tại chỗ |
+| `docs/doctrine/` | **vì sao** luật đó có — phép đo, hậu kiểm | một file một mục §, nguyên văn |
+| `ARCHITECTURE.md` | contract hiện **là** gì | lớp + changelog có ngày |
+| `MODIFICATION_LOG.md` | cái gì **đã đổi**, và vì sao | append-only, một entry một lần sửa |
+| `docs/PATCHES.md` | plan nào **đang chạy**, plan nào **xong** | hai bảng, một dòng một plan |
 
-Fixing Stealth Watch means fixing §16 (see §20.3), not the UI — which is what
-§16.1's 2026-08-23 amendment did. The other two
-rows were **misdiagnosed**; both were fixed on 2026-08-23:
+Tài liệu cũ thì **xoá, không lưu trữ** — một doc sai được archive vẫn là một doc
+sai sẽ có người đọc. `GLOSSARY_VI.md` là file nguy hiểm nhất khi sai: nó viết
+cho người **không** đọc code.
 
-- **Rotation Map** was not threshold-limited, it was structurally empty.
-  `rotation.py` builds `pairs` as the cartesian product of
-  `delta < -threshold*sigma` × `delta > +threshold*sigma`, and a live probe
-  returned 10 nodes **all on the target side**. The product is therefore empty
-  at *every* threshold — lowering it widens both sets from the same one-sided
-  `delta`. The page now reads `/api/sectors/handoff`, which computes the same
-  thing correctly (`max(0, -Δz_A) * max(0, +Δz_B)`; the independent clip per
-  side is what keeps both sides non-empty) and had 270 rows and no consumer.
-  `/api/rotation/*` stays mounted, unread.
-- **Flow Pulse** exposure was not "no positions" — `api/routers/pulse.py`
-  returns a hardcoded `{"rows": []}` while the real implementation sits in
-  `sectors_risk.py`. The client now calls `/api/sectors/risk/exposure`.
+### 22.8 Một design system, một bộ từ vựng hành động
 
-### 22.2 Client code pointing at deleted routes
-`agentApi.briefing()` and `agentApi.stoplossAlerts()` called `/api/agent/*`,
-which was removed from the backend on 2026-04-18 when OpenClaw was replaced by
-`services.trader_agent`. Both returned 404 for four months. Removed, along with
-`BriefingPage`, which was their only caller.
+`frontend/src/lib/actions.tsx` là nguồn duy nhất, và nó tách hai thứ từng bị gộp:
 
-### 22.3 Performance
-- `flowApi.series` and `flowApi.sector` hard-coded `lookback = 400` in the
-  **client**, so lowering the backend default to 120 changed nothing until the
-  client changed too. Now 120 both ends: **2.8 s / 1.0 MB → 1.3 s / 303 KB**.
-  > **2026-08-23: this was only two-thirds true.** The client *default* and
-  > `SectorDetailPage` were changed, but `FlowMonitorPage.tsx` passed an
-  > explicit `400` that overrode the default, so the route users actually open
-  > still shipped 1.0 MB. Fixed now — measured 1,000,870 B / 2.72 s →
-  > 304,682 B / 1.61 s. The lesson: changing a default proves nothing until you
-  > grep the call sites.
-- Wiring the four pages eagerly took the main bundle from 372 kB to 732 kB,
-  because `BacktestPage` imports recharts. They are `React.lazy` now: main
-  bundle 376 kB, recharts in a 346 kB chunk that only loads when you open
-  Backtest.
+| component | nghĩa | nguồn | trạng thái |
+|---|---|---|---|
+| `ActionBadge` | làm gì với tiền | `sector_signal_service.py` (§16.3) | ACCUMULATE · BUY · TRIM · SELL · HOLD |
+| `FlowBadge` | tape đang làm gì | `api/routers/flow.py`, chỉ từ `flow_z` | HOT · COOL · NEUTRAL |
 
-### 22.4 Dev server bound to every adapter
-`vite.config.ts` had `host: true`, which binds 0.0.0.0 and advertises every
-network adapter — including `172.20.16.1`, the Hyper-V vEthernet switch WSL and
-Docker Desktop create, which nothing outside the machine can reach. Now
-`host: 'localhost'`; use `npm run dev:lan` when you want it on the LAN. That is
-also the safer default while `API_REQUIRE_KEY=0`: the Vite proxy fronts the
-trading API, so putting the dev server on the LAN puts the API there too.
+`FlowBadge` cố ý styling phẳng hơn: tape HOT là một **quan sát**, không phải
+lệnh, và không được đọc ra như BUY. **TRIM được render nhưng chưa bao giờ phát**
+— signal service không có đường tới nó, nên §16.3 thực tế còn 4 trạng thái.
 
-### 22.5 The frontend test suite was red, and §19 said it was green
-8 of the 13 vitest tests failed with `TypeError: React.act is not a function`.
-React 19.2 ships `act` only in its development build, and Vitest runs with
-`NODE_ENV=test`, so Vite resolved React's production entry and
-`@testing-library/react` fell back to the removed `react-dom/test-utils.act`.
-Fixed in `vitest.config.ts` by asking the resolver for the `development`
-condition. **13/13 pass now** — the count in §19 is finally true.
+### 22.9 Nav 5 mục, tab nằm trong URL
 
-### 22.6 The homepage was empty after every restart — 2026-08-23
-The defect the audit above missed, because it only shows up on a cold process.
-`PicksUniverseService` kept its snapshot **only in memory**, so a backend
-restart blanked Daily Insight until a human clicked Refresh. `/api/insight/daily`
-deliberately does a cache-only `.peek()` (a cold `get_snapshot()` would hang the
-endpoint for 2–10 minutes behind the 18 req/min KBS throttle), so the endpoint
-was correct and the cache was the gap — it was the only stage of the daily
-pipeline with no durable store. It now persists to
-`data/snapshots/picks_universe.json` and reloads on a cold cache. The file is a
-cache, not a source of truth: corrupt, missing or stale degrades to the existing
-empty-state banner and never raises; a stale one is loaded anyway and flagged
-through `freshness.errors`. See `MODIFICATION_LOG.md` 2026-08-23 (evening) A1.
+Daily Insight · Dòng tiền · Luân chuyển · Rủi ro & Vị thế · Nghiên cứu.
+Tab ở `?tab=` với `replace: true` — trang gộp phải giữ được deep link của route
+cũ, và đổi tab không được chồng history. Mọi path trước khi gộp đều redirect.
 
-### 22.7 Docs layout — 2026-08-23
-Seven outdated documents were **deleted**, not archived (Tom's call: an archived
-wrong doc is still a wrong doc someone will read). `README.md`'s email command
-had been running a file deleted on 2026-06-18. What survives:
+### 22.10 Operator state — kill-switch, sổ vị thế, watchlist
+
+`services/trading_state.py` = **một file JSON** (`data/trading_state.json`,
+gitignored), 5 khoá: halt · capital · positions · closed · watchlist, sau
+`/api/state/*`. **Cố ý không phải bảng:** process scheduler không có HTTP client
+nên phải đọc cờ halt thẳng từ đĩa.
+
+- **Halt có hai nguồn, OR lại.** `TRADING_HALT` là override cứng mà browser
+  không xoá được; cờ runtime là thứ UI bật. `publish()` đọc **một lần trước
+  vòng lặp**, nên bật giữa chừng không thể publish nửa batch.
+- **Bán ≠ xoá.** `close_position()` để lại chứng cứ; `remove_position()` vẫn
+  xoá, dành cho lúc bấm nhầm. P&L realised **net** chi phí §18.2/10 (≈0,40%
+  vòng), import từ `config.py` chứ không gõ lại.
+- **`hit_stop` là "đã từng chạm kể từ lúc vào lệnh"**, không phải "giá đóng hôm
+  nay xuyên mức". T+ đếm **phiên**, không đếm ngày (`utils/clock.next_trading_day`).
+
+### 22.11 Lịch sử stealth suy ra từ `accumulation_age`
+
+**Không** đọc `sector_accumulation_events` — bảng đó chưa từng có writer và đã
+drop ở migration 12. Một sự thật nằm ở hai chỗ là hai sự thật sẽ lệch nhau.
+`classification` **nullable**: run đang chạy hoặc chưa đủ `BREAKOUT_WINDOW` phiên
+là *chưa chấm được*, không phải trượt.
+
+`BREAKOUT_WINDOW`, `BREAKOUT_ATR_MULT` và hai hàm bar sống ở `analysis/stealth.py`
+— bench và endpoint là caller của **cùng một** định nghĩa, và test assert
+*identity* chứ không phải output bằng nhau.
+
+> **Trang phải in §16.14 cạnh con số**: base rate không lọc là 43% breakout /
+> 74% ở ≥10d, nên 40%/75% **không** phải bằng chứng cổng chạy được.
+
+## 23. Backtest controls — và `flow_z` chính là `flow_raw` — 2026-08-23
+
+→ Nguyên văn: [`docs/doctrine/23-backtest-controls.md`](docs/doctrine/23-backtest-controls.md)
+
+- **Chi phí đã mô hình hoá trong backtest engine**: phí mỗi chiều, thuế bán
+  0,1%, slippage **0,3%/chiều phẳng**, biên ±7% HOSE. Slippage từng là
+  `max(0,3%, 0,5×ATR%)`; khi ATR ngành được sửa (2026-09-25, trước đó chỉ bằng
+  1/5 thật nên số hạng ATR không bao giờ vượt sàn) công thức thành ~1,4%/chiều —
+  `flow_z` khung 20 tốn 66% vốn 2024-01→2026-09 thay vì 26%. **Tom chọn 0,3%
+  phẳng** (`BACKTEST_SLIPPAGE_ATR_MULT = 0`), cùng mô hình với bench mã. Chiến
+  lược ngành vẫn thua VNINDEX ở cả hai giả định (khung 20: −22,1% vs +60,0%). **§18.2/9, 10 đóng ở
+  backtest**, còn mở ở `risk_service` — nơi sizing vị thế **không có** cost model.
+  T+2 (§18.2/7) **bỏ 2026-09-25**: danh mục tái cơ cấu mỗi 20 hoặc 40 phiên
+  (`config.HOLD_SESSIONS`), khớp ở phiên **sau** phiên công bố tín hiệu.
+  Đừng viết lại caveat "chưa mô hình hoá": một caveat sai dạy người đọc chiết
+  khấu một con số vốn đã net.
+- **`flow_z` xếp hạng trên `flow_z20`** (z của ngành so với *chính lịch sử 20d
+  của nó*). Bản cross-sectional cũ là ánh xạ affine dương → **giữ nguyên thứ tự
+  raw VND**, tức `flow_z` và `flow_raw` từng là một chiến lược.
+- **§23.5 đóng về cấu trúc 2026-09-25:** 45% ma sát trên 844 lệnh/năm là
+  turnover của việc tái cơ cấu **mỗi phiên**. Nay chỉ tái cơ cấu mỗi 20 hoặc 40
+  phiên: `flow_z` 2024-01→2026-09 còn 163 lệnh ở khung 20 và 81 ở khung 40 (đo
+  trên bản DB 2026-09-24, trước khi sửa dữ liệu ngành — §4 review 2026-09-24).
+
+## 24. Filter, preset và giá của tranh cãi P1-1 — 2026-08-23
+
+→ Nguyên văn: [`docs/doctrine/24-filters-presets.md`](docs/doctrine/24-filters-presets.md)
+
+- **§24.1** — `lib/filters.tsx` là nguồn duy nhất cho search / lọc action / sort / CSV.
+  State nằm trong **URL**, không trong component — một view đã chỉnh là thứ gửi
+  được cho người khác, và F5 không được xoá nó. **Lọc trước, sort sau.**
+  **CSV mang BOM UTF-8**, nếu không Excel locale VN mở "Ngân hàng" thành mojibake.
+- **§24.2** — preset stealth **Chặt / Vừa / Rộng** mở mặc định ở **Vừa** (≥4/5, N=3 — thứ
+  đang chạy). Chặt (5/5, N=5) giữ lại **để nhìn thấy nó trả về 0**.
+- **§24.3** — `POST /api/state/report/send` chạy `generate_report.py` bằng **subprocess**,
+  và guard double-click nằm ở **backend**, không phải ở nút bị disable: nút
+  disable là gợi ý, hai email là sự thật.
+
+## 25. Regime confidence — model sập báo cáo sự chắc chắn — 2026-08-24
+
+→ Nguyên văn: [`docs/doctrine/25-regime-confidence.md`](docs/doctrine/25-regime-confidence.md)
+
+- **Số 1,00 là model sập, không phải model tự tin**: 3/4 state chạm trần
+  covariance vì feature chưa chuẩn hoá. `fit()` nay **từ chối** một fit sập
+  (>1 state rỗng) và rơi về heuristic thay vì publish số 1,0 của nó.
+### 25.2 Công thức — `confidence` nghĩa là gì
+
+- **ĐÍNH CHÍNH 2026-09-25 — mọi số calibration ở §25 là in-sample** (đo trên
+  fit toàn mẫu). Replay đúng cách publish (refit hằng tuần, filtered): "giữ nhãn
+  5 phiên" báo 0,69-0,85, thực tế 0,28-0,58; Brier skill **âm mọi năm**; sau
+  ngày `risk_on`, VNINDEX 20 phiên tới còn *thấp hơn* các ngày khác (review
+  2026-09-24 §4.1/7). `confidence_phrase()` nay luôn kết thúc bằng "chưa kiểm
+  chứng ngoài mẫu"; hedge đầu thấp giữ nguyên vì nó chỉ đúng chiều.
+- **`confidence` = P(nhãn này còn giữ sau `CONF_HORIZON` = 5 phiên)**, không
+  phải state posterior. Đây là định nghĩa phải nói ra mỗi khi hiển thị —
+  `analysis.regime.confidence_phrase()` là **renderer duy nhất**, và nó sống
+  cạnh công thức chứ không ở report generator: ai đổi ý nghĩa con số thì sở hữu
+  luôn câu chữ mô tả nó.
+- **Hedge ở đầu THẤP, không phải đầu cao** (<0,55). Đo trên 300 bar thì ngược
+  lại — đó là artefact giai đoạn, và bài học tổng quát hơn con số: **một đường
+  calibration khớp trên lát gần nhất của chuỗi phi dừng chỉ đo lát đó.**
+- **Không calibrator nào được ship**: isotonic và Platt đều thua raw ở Brier
+  walk-forward. Một lớp fit mà thua out-of-sample là một lớp fit tốn tiền.
+- **`CONF_HORIZON`=5** vì là horizon dài nhất **dương ở cả ba** giai đoạn, không
+  phải vì tối ưu — gộp lại thì H=13 thắng, và đó chính là cái bẫy §16.12.
+- **Đoạn gần đây sập là do tape, không do model** — chia theo tercile vol: AUC
+  0,827 / 0,790 / 0,694, đơn điệu, và lịch chỉ là proxy cho vol.
+- **§25.10 còn mở:** `CONF_HORIZON` theo vol (đo rồi, chưa ship); đo lại khi
+  panel dài thêm.
+
+## 26. Picks theo mã xếp hạng ngược — 2026-09-16
+
+→ Nguyên văn §26.1-26.10: [`docs/doctrine/26-ticker-picks.md`](docs/doctrine/26-ticker-picks.md)
+
+### 26.4 Công thức đang ship
+
+`services/picks_scoring.py::score_ticker` trả float ~−9..+7, `UNTRENDED_FLOOR`
+= −20 cho mã không xác nhận được uptrend:
 
 ```
-README.md · CLAUDE.md · ARCHITECTURE.md · MODIFICATION_LOG.md · AGENTS.md   ← root, entry points
-docs/PATCHES.md         ← plan lifecycle: what is running, what is done (2026-08-24)
-specs/                  ← one topic per file, referenced from 5 .py docstrings; untouched
-docs/reference/         ← ALGORITHM.md, GLOSSARY_VI.md
-docs/reviews/           ← the dated reviews (§21: dated records keep their names)
+score = −1
+      + (50 − RSI(2)) / 10                 quá bán — Connors
+      + clip(−ret_1d / ATR, −2, +2)        nhịp giảm đo bằng ATR của CHÍNH mã đó
+      + 2   nếu trên SMA50
+      − 1.5 nếu ATR% > 3.5
+      sàn −20 trừ khi trên SMA200
 ```
 
-**No Python file moved.** `scripts/jobs/*.bat` invoke `main.py` from the repo
-root under Task Scheduler, and `MODIFICATION_LOG.md` 2026-07-19 already records
-one path move that left shortcuts pointing at a dead directory.
+- **Một luật mua cho mọi bề mặt — `long_shortlist` (2026-09-25):** cổng SMA200
+  (`score > UNTRENDED_FLOOR`) → thứ tự blend → top-5. Daily Insight, email 17:00
+  và bản tin 17:30 cùng gọi nó; **không** lọc theo tín hiệu ngành. Danh sách
+  chỉ rỗng khi không mã nào trên SMA200 — phần vốn đó mua ETF chỉ số.
+- **`MIN_BUY_SCORE` 2,5 đã bỏ làm cổng** (Tom: *"bỏ ngay, giữ cổng SMA200"*). Nó
+  đặt theo phân vị 78 của điểm, chưa từng đo lợi nhuận; đo rồi thì tốn
+  −0,39%/lệnh ở 20 phiên, −0,44% ở 40 (t −1,5…−1,6, in-sample). Hằng số còn lại
+  **chỉ** để `daily_watch` ghi danh sách luật cũ vào kho (`shortlist_with_cutoff`)
+  — `daily_watch/audit.py` chấm hai luật ngoài mẫu. `MAX_5D_DROP_PCT` (−12%, chỉ
+  email) cũng bỏ: đo ra ±0,01%/lệnh.
+- **Tie-break theo symbol, không theo dollar volume**: `dv_20d` không trung tính
+  mà **có hại** (−0,06% → −0,15%) — trong mỗi bậc điểm nó luôn trả về mã to
+  nhất, chậm nhất. Thanh khoản thuộc về bộ lọc cứng ở thượng nguồn.
+- **Thứ tự do tầng cross-sectional quyết**: `blended_rank_scores` (blend rank
+  50/50 giữa score và OBV trend) chạy một lần mỗi build, ghi `TickerRow.rank_score`.
+  **Cổng SMA200 quyết định được vào hay không; blend quyết định thứ tự.** Bản cộng
+  OBV theo từng dòng thua rõ — cộng giá trị thô để dispersion một ngày quyết
+  định số hạng đó át hay biến mất.
+- Bench **import** hệ số chứ không gõ lại (§22.11).
 
-> **2026-08-24 (10) — the four documents now divide cleanly.** Tom asked for
-> "một file update patch chung" and for the repo to say **what the current plan
-> is**, which nothing did: a finished plan left a `MODIFICATION_LOG.md` entry
-> and a `CLAUDE.md` section, and an *unfinished* one left nothing at all. So
-> "what are we doing now" was only answerable by reading a plan file outside the
-> repo, in `~/.claude/plans/`, which no reviewer or agent would ever find.
+### 26.6 Phần không phải bài toán thuật toán
+
+> **ĐÍNH CHÍNH 2026-09-16 — con số 0,70% dưới đây sai, đúng là 1,00%.**
+> §26.6 lấy "15bps slippage mỗi chiều", nhưng §18.2/9 quy định slippage là
+> `max(0,3%, 0,5×ATR%)` và `config.BACKTEST_SLIPPAGE_MIN_PCT = 0.003` thi hành
+> đúng điều đó — **0,30%/chiều, không phải 0,15%**. Hai bench đã implement hai
+> số khác nhau suốt thời gian qua: `ticker_alpha_bench.py` lấy từ config
+> (**1,00%/vòng**), `ticker_ranker_experiment.py` gõ tay `0.0015`
+> (**0,70%/vòng**). Nay cả hai import `analysis/bench.py` — một định nghĩa.
 >
-> | file | answers | shape |
+> | khung | 0,70% (số cũ, sai) | **1,00% (đúng)** |
 > |---|---|---|
-> | `CLAUDE.md` | what the system **must** be | doctrine, amended in place |
-> | `ARCHITECTURE.md` | what the contracts **are** | layers + dated changelog |
-> | `MODIFICATION_LOG.md` | what **changed**, and why | append-only, one entry per change |
-> | `docs/PATCHES.md` | which plan is **running**, which is **done** | two tables, one line per plan |
+> | T+3 | 58,8%/năm | **84,0%/năm** |
+> | T+10 | 17,6% | **25,2%** |
+> | T+20 (4 tuần) | 8,8% | **12,6%** |
+> | T+40 (8 tuần) | 4,4% | **6,3%** |
+> | T+60 | 2,9% | **4,2%** |
 >
-> `PATCHES.md` deliberately holds **one line per plan** and points elsewhere for
-> the reasoning. A patch index that grows into a second changelog is a second
-> changelog, and two changelogs disagree — which is the exact failure §21 logged
-> for versioned filenames and §20.4 logged for plan-vs-code drift.
+> **Mọi con số `excess` không đổi** — excess là hiệu hai lợi suất gộp nên chi phí
+> triệt tiêu. Chỉ cột **net/lệnh và quy năm** sai, và sai đúng bằng 0,30%/lệnh.
+> §26.9's "vẫn không thắng index" vì thế **mạnh lên chứ không yếu đi**.
 >
-> **The audit that came with it found the retired docs were mostly not retired.**
-> Of 23 stale-looking matches, 19 are dated changelog entries in
-> `ARCHITECTURE.md` / `CLAUDE.md` / `ALGORITHM.md` recording that OpenClaw *was*
-> retired and the 170-symbol system *was* replaced — §21 protects those, and
-> rewriting them would erase the record that the change happened. The genuinely
-> wrong content was concentrated elsewhere and is fixed: two specs describing
-> things that never shipped or shipped differently (`SPEC_INTRADAY_VNSTOCK.md`,
-> `REDESIGN_PHASE15.md`), one spec carrying Ollama defaults dropped a day
-> earlier (`trader_agent.md`), one spec naming an endpoint that was never built
-> (`daily-insight.md` §4.4 `send-gmail`), and `GLOSSARY_VI.md`.
+> Và 1,00% **vẫn là phía nhẹ**: §26.9 kiểm bằng web rằng phí thật VPS là
+> 0,2%/chiều chứ không phải 0,15% như config.
+
+Ở 0,70%/vòng (`BACKTEST_FEE_BPS`×2 + `BACKTEST_SELL_TAX_BPS` + 15bps slippage
+mỗi chiều), chi phí xoay vòng mỗi năm: **T+3 → 58,8%** · T+10 17,6% · T+20 8,8%
+· T+60 2,9%. Universe đủ điều kiện trả **+12,5%/năm**.
+
+> **Nói thẳng: xoay vòng T+3 không thể có lãi trên universe này ở mức phí này,
+> bằng bảng xếp hạng nào cũng vậy.** Rule tốt nhất đo được đáng +0,21%/lệnh —
+> không phải suýt trượt, mà lệch **hai bậc độ lớn**. Cách dùng trung thực của
+> danh sách hằng ngày là **shortlist 3-4 tuần**.
+
+### 26.9 Khung thời gian đáng giá gấp mười lần thuật toán
+
+> **ĐÍNH CHÍNH 2026-09-25 — thước đo dưới đây phóng đại edge; đọc khối này
+> trước.** Bench cũ so factor có cổng SMA200 với base cũng có cổng và bỏ các
+> phiên factor có dưới 30 mã; t coi cửa sổ chồng nhau là độc lập; "vượt VNINDEX"
+> so quy năm số học với hằng số 15,7%. Chấm lại đúng (base NO GATE mọi phiên,
+> NW t, danh mục staggered cùng ngày — `ticker_alpha_bench.py` nay làm đúng thế):
+> - **"1/41 sống sót" bị rút:** không luật nào dương đủ 4 năm, kể cả `X_prop_obv`.
+> - **Luật đang ship** (cổng SMA200 → blend, `X_shipped_rule`): excess +0,69%/lệnh
+>   (NW t 1,55) ở 20 phiên, +1,01% (t 1,91) ở 40; danh mục **7,2% / 11,7%/năm**,
+>   Sharpe 0,44 / 0,65, so với **VNINDEX 17,5%, Sharpe 0,98** cùng kỳ 2023-01 →
+>   2026-09. Số 5,9% / 11,7% cũ là quy năm số học của luật có ngưỡng 2,5 (danh
+>   mục thật của nó: 2,7% / 9,3%).
+> - **"Trên 40 phiên không factor nào sống sót" bị rút:** danh mục đi ngang sau
+>   ~40 phiên (60: 10,6%, 120: 10,9%) — giữ lâu hơn không thêm gì đo được, và đó là
+>   lý do 40 là mặc định (Tom 2026-09-25: chỉ dùng khung 4 và 8 tuần).
+> → Bảng đầy đủ: `docs/reviews/ALGO_REVIEW_2026-09-24.md` §1-§3.
+
+Base rate **không xếp hạng**, quy năm: T+3 **−40,6%** · T+10 −4,9% · T+15
+**+1,3%** (hoà phí) · T+20 +4,7% · T+40 +10,2%.
+
+> **Tần suất giao dịch là thuế thuần và là số hạng lớn nhất trong cả hệ thống.**
+> T+3 → 4 tuần đáng ~**+45 điểm %/năm** trước mọi kỹ năng xếp hạng; rule tốt
+> nhất đáng +0,5-0,8 điểm %/lệnh.
+
+**Vẫn không thắng index.** Cấu hình tốt nhất đo được ≈ +14,4%/năm với 5 mã tập
+trung, so với **VNINDEX +15,7% CAGR, Sharpe 0,91, MaxDD −18,1%**. Cái đo được là
++13 điểm %/năm **so với thứ chạy hôm trước**, không phải lý do chọn cổ phiếu
+thay vì index.
+
+> **ĐO LẠI 2026-09-16 dưới chi phí đúng (§26.6) — khoảng cách rộng hơn.** Mọi
+> con số quy năm ở mục này tính ở 0,70%/vòng; ở 1,00% thì trừ đi 3,8 điểm %/năm
+> tại khung 20 phiên. Thứ tự đang ship (`X_prop_obv`), đo trên panel
+> 2022-01→2026-09, 789 lát ngày:
 >
-> **`GLOSSARY_VI.md` was the dangerous one**, because it is the file written for
-> the person who is not reading the code. It still taught the 5/5 stealth gate
-> (unreachable — §16.1), still defined `confidence` as "how sure the model is"
-> (it is P(label survives 5 sessions) — §25.2), described the kill-switch as
-> firing *automatically* after three sentinel hits (it is manual — §22.10), and
-> said T+2.5 in calendar days (it is 2 *sessions*, holiday-aware). Every one of
-> those would have led a reader to act. Corrected, each pointing at the section
-> that governs it.
+> | | §26.9 ghi (0,70%) | **đo lại (1,00%)** |
+> |---|---|---|
+> | excess/lệnh | +0,49% | **+0,49%** (không đổi — chi phí triệt tiêu) |
+> | net/lệnh | +0,77% | **+0,47%** |
+> | quy năm | +10,1% | **+5,9%** |
+>
+> **Nó vẫn là thứ duy nhất sống sót.** Chấm cả 41 factor trong bench theo hai
+> tiêu chí bắt buộc (§16.12 từng năm + §18.7 đơn điệu): **1/41 qua**, và đó là
+> `X_prop_obv`. Kết quả này đến từ tiêu chí, không từ việc tôi chọn.
+>
+> **Bài học của bộ khung, đọc ở đúng một dòng:** `Y_shipped_plus_small` quy năm
+> **+7,5%** — cao hơn — nhưng **âm 2025 (−0,80)** nên trượt. Xếp theo tiền thì
+> chọn nhầm; hai tiêu chí bắt buộc là thứ chặn lại. Đây chính là điều §16.12
+> nói, nay được thi hành tự động thay vì phải nhớ.
 
+- **Book sim là nhiễu, và đó là phát hiện, không phải lời than.** Cùng một rule,
+  quét khung giữ 15/20/25/30/40/60 cho +25,9 / −17,1 / +78,8 / +127,2 / +170,2 /
+  −30,7 — đổi dấu hai lần. **Mọi kết luận lấy từ bench cross-sectional**
+  (789-1.126 lát ngày, chia theo năm). **Đừng chọn rule từ book sim.**
+- **Vào lệnh ở giá mở phiên sau bỏ mất drift qua đêm** — 0,145 điểm % mỗi lệnh,
+  như nhau ở mọi khung từ 2 đến 20 phiên, tức ~1/5 toàn bộ chi phí vòng. Đo
+  được, **cố ý chưa làm** (cần chấm trước phiên ATC 14:45).
 
-### 22.8 One design system, one action vocabulary — 2026-08-23
-The four "Ra quyết định" pages were wired on 2026-08-23 (§12) but had never
-been through the redesign, so they still shipped raw Tailwind while the five
-"Theo dõi" pages used the `@theme` tokens. They are on the tokens now — class
-swaps only, no new design.
+### 26.10 Stop đang tốn nhiều hơn phần nó bảo vệ
 
-The bigger fix is vocabulary. Three pages spoke three alphabets, and none was
-the five-state enum §16.3 defines. `frontend/src/lib/actions.tsx` is now the
-single source, and it separates two things that were being conflated:
+Ở khung 4 tuần, 3.542 lệnh: **mọi** hình học có stop đều lỗ; chỉ bản **không
+stop** có lãi (+0,72%/lệnh vs −0,14% của SWING 2.5/1.8 đang ship). 40% chạm
+target, **44% chạm stop** — stop nổ ngang tần suất target là đang kết thúc luận
+điểm chứ không bảo vệ nó.
 
-| component | means | source | states |
-|---|---|---|---|
-| `ActionBadge` | what to do with money | `sector_signal_service.py` (§16.3) | ACCUMULATE · BUY · TRIM · SELL · HOLD |
-| `FlowBadge` | what the tape is doing | `api/routers/flow.py:176`, from `flow_z` alone | HOT · COOL · NEUTRAL |
+Một lệnh đơn tệ hơn 3 lần khi bỏ stop (−47% vs −15%), **nhưng ở book 5 mã thì
+vừa lời hơn vừa drawdown thấp hơn** (+36,2% / −18,8% vs −5,2% / −21,5%): số
+lượng vị thế đã chặn đuôi rồi.
 
-`FlowBadge` is styled flatter on purpose: a HOT tape is an observation, not an
-instruction, and it must never read like a BUY. **TRIM is rendered but never
-emitted** — the signal service has no path to it, so §16.3 is still four states
-in practice. That is a doctrine-vs-code gap of the same family as P1-1.
+> **QUYẾT ĐỊNH ĐẢO LẠI, CÙNG NGÀY — Tom bỏ stop.** *"bỏ stop nhưng phải đưa
+> khuyến nghị range bán (range có thể thay đổi theo thời gian nếu bạn cảm thấy
+> nó vẫn có sóng lên)."* Đây là quyết định đang có hiệu lực; đoạn bên dưới giữ
+> lại vì nó ghi lý lẽ của lần quyết đầu, và cả hai lần đều là quyết định của
+> Tom chứ không phải của phép đo.
+>
+> **Đã ship:** `is_valid_long_pick` và sàn R:R giữ nguyên (chúng là bộ lọc
+> *sàng lọc*, không phải lệnh bán), nhưng **sổ vị thế không còn stop và không
+> còn cảnh báo stop**. Thay bằng `daily_watch/sell_range.py`: một **cửa sổ thời
+> gian** (luật) và một **range giá trượt lên** (tham chiếu).
+>
+> **Range bán trượt cũng được đo, và nó cũng thua.** Câu hỏi tự nhiên là liệu
+> một băng neo ở *đỉnh* có tốt hơn một stop neo ở *giá vào* không.
+> `scripts/tplus_strategy_bench.py --trail` chấm 7 hình học, chi phí 1,00%/vòng,
+> khung 40 phiên. **Đo lại 2026-09-25** sau khi sửa hai lỗi nhìn trước của bench
+> (đỉnh cập nhật bằng giá đóng trước khi so giá thấp cùng phiên; phiên mở dưới
+> băng vẫn khớp ở băng — review 2026-09-24 §3.2); cột "bản lỗi" là số cũ:
+>
+> | hình học thoát | luật cũ, bản lỗi | luật cũ, sửa | **luật ship, sửa** |
+> |---|---|---|---|
+> | **KHÔNG stop, giữ hết khung** | +1,77 | +1,77 | **+2,23** |
+> | range nhả 3,5×ATR | +1,07 | +1,14 | +1,54 |
+> | chỉ gãy trend thì bán | +0,87 | +0,88 | +1,21 |
+> | range nhả 2,5×ATR | +0,18 | +0,87 | +1,26 |
+> | range nhả 1,5×ATR | −1,29 | +0,45 | +0,70 |
+>
+> **Giữ hết khung vẫn thắng, và càng chặt càng thấp — nhưng cái giá của băng nhỏ
+> hơn 2-3 lần con số cũ.** Cùng chiều ở khung 20. Như một danh mục thật,
+> `give_back` 3,5×ATR tốn ~0,7 điểm %/năm nếu tiền bán ra đặt vào index. Kết luận
+> tổng quát vẫn đứng: **một luật thoát bằng mức giá, dù neo ở đâu, vẫn tốn tiền**
+> — ít hơn đã tưởng.
+>
+> Nên `sell_range.py` tách bạch hai thứ và chỉ gọi **một** trong hai là luật:
+> `sell_from`/`sell_by` (giữ 20-40 phiên — **luật đo được**) và
+> `band_lo`/`band_hi` (±1×ATR quanh đỉnh — **tham chiếu, không phải luật**).
+> `give_back` 3,5×ATR dưới đỉnh là mức **ít tốn nhất** trong các băng đo được,
+> không phải mức tốt; nó được báo như một tin về *luận điểm* ("sóng lên đã kết
+> thúc"), không phải một lệnh bán.
 
-### 22.9 Nav merged 9 → 5 — 2026-08-23
-Nine nav doors for 15 sectors was more navigation than data, and every merge
-below removes a context switch rather than a page. Nothing was deleted: every
-pre-merge path redirects, including `/flow/:code`.
+<details><summary>Lý lẽ của lần quyết đầu, cùng ngày — Tom giữ stop (đã đảo)</summary>
 
-| nav | contains | why together |
+> **QUYẾT ĐỊNH 2026-09-16 — Tom giữ stop.** *"tôi vẫn nghĩ cần stoploss."*
+> Câu hỏi đóng lại: `is_valid_long_pick` giữ nguyên yêu cầu `stop < entry`, sàn
+> R:R giữ nguyên, thẻ Daily Insight giữ thang stop→target, sổ vị thế giữ
+> `hit_stop`. **Không đổi dòng code nào.**
+>
+> Đây là một lựa chọn hợp lệ trên chứng cứ chứ không phải bỏ qua chứng cứ:
+> backtest **không nhìn thấy** margin call, gap-down theo tin, hay ngày Tom
+> không ngồi trước màn hình — ba thứ mà stop tồn tại để chặn, và không thứ nào
+> xuất hiện trong bảng trên. Bảng đo tail per-trade (−47% khi bỏ stop vs −15%
+> khi giữ) là phần chứng cứ đứng về phía quyết định này.
+>
+> **Cái giá được chấp nhận có ý thức: ~0,86 điểm %/lệnh**, lớn hơn toàn bộ cải
+> tiến thuật toán §26.9. Nó không biến mất vì đã quyết; nó chuyển từ "defect
+> chưa biết" sang "chi phí đã biết", và đó là lý do con số này phải nằm lại đây.
+>
+> **Việc còn mở, và giờ mới là việc đáng làm:** đã chốt giữ stop thì câu hỏi
+> không còn là *có hay không* mà là **hình học nào rẻ nhất**. Mới đo 4 hình học
+> cố định; chưa đo trailing stop, stop theo thời gian, stop chỉ kích hoạt sau
+> khi lãi, hay stop theo ATR động. Một trong số đó có thể lấy lại phần lớn
+> 0,86pp mà vẫn chặn được đuôi.
+>
+> *(Việc đó đã làm, cùng ngày, và câu trả lời là **không cái nào** — xem bảng ở
+> trên. Đó là lý do quyết định bị đảo.)*
+
+</details>
+
+## 27. Tách file — 2026-09-16
+
+`CLAUDE.md` được khai là CACHED và *"DO NOT modify mid-session"*, nhưng đã tới
+**135.718 B ≈ 33.400 token nạp lại mỗi lượt** — gấp 13 lần ngân sách 10 KB mà
+`claude/CLAUDE.md` mẹ đặt ra — và **72% là hậu kiểm có ngày tháng**, không phải
+luật đang có hiệu lực. Hậu quả đo được trong transcript: `4b2f418e` hết context
+**5 lần trong một ngày**, `9245140a` 3 lần.
+
+Nguyên tắc cắt: **giữ thứ một agent phải tuân mỗi lượt; chuyển thứ chỉ giải
+thích vì sao luật đó có.** Mọi heading §NN ở lại, nên mọi tham chiếu (§16.1 bị
+trỏ 104 lần, §18.2 99 lần, §22.11 23 lần) vẫn giải được.
+
+| file | chứa | nguyên văn từ |
 |---|---|---|
-| Daily Insight | (unchanged) | the screen you open every morning |
-| Dòng tiền | Money Flow Monitor + Sector Detail | clicking a sector used to leave the page and drop your interval, `flow_z_hot` and chart selection |
-| Luân chuyển | Stealth Watch + Rotation Map | one question, two phases — §16.1 accumulation (early) vs. the handoff that already happened |
-| Rủi ro & Vị thế | Risk + Flow Pulse | also removes the last way the two exposure panels of §22.1/A4 could disagree |
-| Nghiên cứu | Xếp hạng + Regime + Backtest | none of the three is a daily job |
+| [`16-stealth-measurements.md`](docs/doctrine/16-stealth-measurements.md) | kế hoạch §16.4-16.8/16.10 + toàn bộ phép đo §16.11-16.15 | §16 |
+| [`18-trader-review.md`](docs/doctrine/18-trader-review.md) | 24 finding | §18.1-18.5 |
+| [`19-testing-history.md`](docs/doctrine/19-testing-history.md) | vì sao từng bài test tồn tại | §19 |
+| [`20-code-review.md`](docs/doctrine/20-code-review.md) | defect trung tâm + 15 mục đã sửa | §20.1-20.2 |
+| [`22-frontend-audit.md`](docs/doctrine/22-frontend-audit.md) | audit frontend | §22 |
+| [`23-backtest-controls.md`](docs/doctrine/23-backtest-controls.md) | backtest controls | §23 |
+| [`24-filters-presets.md`](docs/doctrine/24-filters-presets.md) | filter + preset | §24 |
+| [`25-regime-confidence.md`](docs/doctrine/25-regime-confidence.md) | regime confidence | §25 |
+| [`26-ticker-picks.md`](docs/doctrine/26-ticker-picks.md) | picks theo mã | §26 |
 
-Tabs live in the URL (`?tab=`, `components/Tabs.tsx`) with `replace: true` —
-a merged page must keep the deep links its old routes had, and switching tabs
-must not stack history entries.
+**Luật từ nay:** một phép đo mới ghi vào `docs/doctrine/`; `CLAUDE.md` chỉ nhận
+**kết luận** của nó, và chỉ khi kết luận đó đổi một luật. Nếu một mục ở đây dài
+quá ~15 dòng thì phần thừa thuộc về `docs/doctrine/`.
 
-`SectorDetailPage` was the last page still on raw Tailwind (37 `slate-*` hits
-plus 20 hardcoded SVG hexes); it was tokenised in the same pass, so §22.8's
-claim now holds for the whole app.
+### 27.1 Bảng tra mục con đã chuyển
 
-Daily Insight also gained a sticky jump bar: the buy/sell list — the thing
-people open the page for — sat below the gauge, the spectrum and Minh's memo,
-about two laptop screens down.
+Mọi `§NN.M` dưới đây **không còn thân bài ở file này**; kết luận đang có hiệu lực
+đã gộp vào mục cha ở trên, nguyên văn ở file bên phải.
 
-Bundle: main **376.43 → 371.12 kB**. `PositionsPage` (12.7 kB) and
-`ResearchPage` (1.05 kB) are lazy, and recharts stays in its own 346 kB chunk
-that only loads when you select the Backtest tab.
-
-### 22.10 Operator state — kill-switch, book, watchlist — 2026-08-23
-
-Everything on every page was model output. The app knew what it thought and
-nothing about what Tom did, which showed up in four places at once:
-
-| symptom | cause |
-|---|---|
-| stopping the 17:00 publish meant editing `.env` and restarting | §18.4/20's kill-switch was an env var |
-| "Vị thế đang mở" on the Risk page was not your book | `current_exposure()` equal-weights today's BUY/SELL signals — model suggestions wearing a book's name |
-| the "Vốn 50-500tr" slider reset to 100tr on every F5 | it only split weights; nothing stored it |
-| eight of nine routes never said how old the data was | `FlowMonitorPage` was the only page fetching `/flow/freshness` |
-
-`services/trading_state.py` is one JSON file (`data/trading_state.json`,
-gitignored) with four keys — halt, capital, positions, watchlist — behind
-`/api/state/*`. **Not a table on purpose:** three keys do not justify migration
-12, and the scheduler process has no HTTP client, so it must read the halt flag
-directly off disk. If a second machine or a second trader ever appears this
-becomes a table and the read path becomes a query; the API shape above it does
-not have to change.
-
-The halt has **two sources, OR'd**. `TRADING_HALT` stays a hard override a
-browser cannot clear; the runtime flag is what the UI toggles. `halt_env` and
-`halt_effective` are returned so that asymmetry is visible rather than
-surprising — the toggle disables itself, with a title saying why, when the env
-var is the one holding the halt. `publish()` reads the answer **once before the
-loop**, so toggling mid-run cannot publish half a batch.
-
-The banner is app-wide and un-dismissable. A halt you can only see on the page
-where you set it is a halt you will forget about, and forgetting it means
-trading picks the 17:00 job has already stopped publishing. Below it sits a
-data-age bar on the same principle: quiet when fresh, warn-coloured with the
-session gap when behind.
-
-`lib/tradingState.ts` is a `useSyncExternalStore` module store, not Context —
-Layout would otherwise own state it never reads, and one object does not justify
-a state library. Marking a pick is idempotent on `(symbol, side)` and drops the
-symbol from the watchlist: you cannot be watching something you have bought.
-
-The book stores no exit price, so there is no P&L yet. That is the next thing to
-add if performance attribution is wanted — it is a deliberate stop, not an
-oversight.
-
-> **2026-08-24 — half of that is now done.** The book was a list, not a control:
-> you could mark a pick but not correct the price, and the price it stamped is
-> the *previous close*, which is almost never your fill. `PATCH
-> /api/state/positions/{symbol}` edits entry price and quantity in place, and
-> `GET /api/state/positions/pnl` marks the book against the picks snapshot.
->
-> `update_position` is deliberately **not** `add_position`: that one restamps
-> `opened_at` to today and drops the symbol from the watchlist, both wrong when
-> you are fixing a typo. `None` means "leave this field alone", so clearing one
-> takes an explicit negative — the alternative silently wipes `qty` on every
-> price edit.
->
-> The response carries `priced` and `count` separately, because a P&L over 1 of
-> 3 rows is not the book's P&L, and the header says so when they differ.
-> Unrealised only: **still no exit price**, so realised attribution remains the
-> next thing to add.
-
-> **2026-08-24 (3) — and now it is added, which finishes the book.**
-> `POST /api/state/positions/{symbol}/close` moves a row from `positions` to a
-> new `closed` list with realised P&L; `GET /api/state/positions/realised`
-> totals it. The UI gets an "Đã bán" button that asks for the fill price, and a
-> closed-trades panel that hides itself when empty.
->
-> **The distinction that makes this worth a second verb:** `DELETE` still
-> deletes. "I mis-clicked" and "I sold at 28" were the same operation before
-> today, and both destroyed the row — so the app was structurally incapable of
-> answering the one question a book exists to answer. The ✕ is still there,
-> smaller, for the mis-click.
->
-> Realised P&L is **net of the §18.2/10 costs**, imported from `config.py`
-> (`BACKTEST_FEE_BPS` × 2 + `BACKTEST_SELL_TAX_BPS`, ≈0.40% round trip) rather
-> than retyped. A book quoting a gross number the backtest would call a loss is
-> worse than no book, and at these levels the costs routinely decide whether a
-> small win is a win — a +0.20% gross scalp books at −0.20%.
-> `pnl_pct` is computed even without `qty`, because cost-in-percent is
-> size-independent; `pnl_vnd` is not, and stays null rather than being invented.
->
-> `closed` is a key, not migration 12 — `_read()` merges `_DEFAULT`, so every
-> state file written before today loads unchanged. Still no partial exits: a
-> close takes the whole position (`ponytail:` in the source names the upgrade).
-
-> **2026-08-24 (9) — the book can now follow a trade, not only record one.**
-> Tom: *"chưa có view để … tiếp tục theo dõi các ngày sau đó."* The data existed
-> at every layer and was destroyed at exactly one line.
-> `picks_scoring.compute_stop_target_rr` computes a stop and a target,
-> `PickEntry` carries them, the Daily Insight card renders them and draws a
-> stop→target ladder — and the "Đã vào lệnh" button sent `entry_price` alone,
-> into a `trading_state` row with no field to receive them. **So the book could
-> not answer the one question worth asking the day after a buy: is this trade
-> still valid.** `stop` / `target` / `thesis` are stored now, and editable in
-> place on the same `NumCell` the entry price uses.
->
-> `GET /positions/pnl` gained `path`, `hit_stop`, `hit_target`,
-> `dist_to_*_pct`, `sessions_held`, `sellable_on`. **No new endpoint on
-> purpose:** `/pnl` already read the book, already called `.peek()`, already
-> looped the positions, and `MyBookPanel` already called it — a second route is
-> two route-ordering tests and two places to drift. **No new data source
-> either:** the price path is `TickerRow.daily_prices`, 30 sessions the
-> snapshot already carries and already persists.
->
-> Two definitions that are load-bearing rather than incidental:
-> - **`hit_stop` is "ever touched since entry"**, not "today's close is
->   through the level". A stop breached on Tuesday and recovered by Friday is
->   still a breach, and a book that forgets that tells you the trade is fine.
-> - **T+ counts sessions.** `tPlusDays()` used `setDate(+i)`, so a Thursday buy
->   claimed a Sunday settlement; it is also T+**2** now, not T+3, matching
->   `BACKTEST_SETTLEMENT_LAG` and §18.2/7. The book row takes the
->   holiday-aware date from the new `utils/clock.next_trading_day`.
->
-> Not migration 12 — but `_DEFAULT` merges at the *top level only*, so rows
-> written before today omitted the key entirely and shipped a shape the TS
-> `Position` type forbids. `_POSITION_DEFAULT` is merged per row in `_read()`.
->
-> The sparkline is hand-rolled SVG: recharts sits in a 362 kB chunk that only
-> loads on the Backtest tab (§22.3), and a 64×22 polyline must not drag it onto
-> every page — the built chunk list is unchanged.
->
-> **Deliberately not built** (Tom picked two of four): stop/target *alerts* and
-> a full T+ calendar panel. Both fields are computed already, so the UI is
-> cheap when wanted. `path` is closes only — `daily_prices` has no high/low — so
-> an intraday wick through a stop that closed back above does not register.
-
-### 22.11 The stealth history was a stub, not an empty table — 2026-08-24
-
-`/api/stealth/history` returned a hardcoded `{"rows": []}` from the day it was
-written. §22.1 filed it under "correct code with no data", which was wrong in
-the same way the Flow Pulse row in that table was wrong — and for a worse
-reason: **the stub was indistinguishable from the truth for months**, because
-the §16.1 AND gate genuinely produced zero events. The moment §16.1 became a
-score and 53 rows carried `accumulation_age > 0`, the endpoint kept saying zero
-and nothing in the app could notice.
-
-**Derived from `sector_flow_daily.accumulation_age`, not from
-`sector_accumulation_events`.** That table has existed since migration 9 with no
-writer in four months, so reading it returns the same empty list by a longer
-route. More to the point, the column *already* encodes every run — it is what
-the scanner writes and what the Stealth Watch badge renders — so writing the
-table too would create a second representation of one fact, and two
-representations disagree.
-
-`analysis.stealth.stealth_events()` turns the column into one record per
-maximal run of `accumulation_age > 0`, scored forward over `BREAKOUT_WINDOW`:
-
-| classification | meaning |
-|---|---|
-| `hit` | price cleared the bar inside the window |
-| `false_positive` | the run ended and price never did |
-| `dry_powder_timeout` | reached §16.9's 30-session max age without breaking out |
-| `null` | still open, or too close to the panel edge to judge |
-
-**The null case is the design.** An event whose forward window has not elapsed
-has not failed, and classifying it as one would understate the gate on every
-refresh, forever. `summary.scored` therefore excludes it, so the hit rate is not
-diluted by events that have not had their chance.
-
-`BREAKOUT_WINDOW`, `BREAKOUT_ATR_MULT` and the two bar functions **moved out of
-`scripts/stealth_leadtime_experiment.py` into `analysis/stealth.py`** — the
-bench and the endpoint are now the second caller of each other's definition, and
-a breakout bar living in two files is two bars that drift. The drift would be
-invisible: the bench would keep reporting a number the page had stopped using.
-`test_the_bench_and_the_endpoint_share_one_breakout_definition` asserts
-*identity*, not equality of output. The extraction was verified
-behaviour-preserving by re-running the bench and matching §16.15's recorded
-table byte-for-byte.
-
-Live: **21 events, 20 scored, hit_rate 0.40, median lead 21 sessions, 75% at
-≥10d** — exactly the bench's shipped-gate row, which is what the shared
-definition buys. One event (STEEL, 2026-08-11→13) is open and correctly
-unscored.
-
-**The page renders §16.14 next to the numbers**, in warn colour: the
-unconditional base rate is 43% breakout / 74% at ≥10d, so 40%/75% is *not*
-evidence the gate works. Without that line a reader takes a respectable-looking
-hit rate as a reason to buy. `ACCUMULATE` is still a watchlist.
-
-> **A negative control caught a test that proved nothing.** The first
-> `test_an_open_run_is_not_scored_as_a_failure` used a 3-session run at the
-> panel edge — which has no forward bars, so `judgeable` was already False and
-> the test passed with the `still_running` guard deleted. Deleting the guard
-> left all 13 tests green. Replaced by
-> `test_a_long_open_run_is_not_scored_even_though_it_could_be`: a 25-session
-> open run has 24 forward bars of its own, clears the bar, and only
-> `still_running` keeps it unscored. That one goes red without the guard. A test
-> that passes against the broken code is worse than no test — it reports
-> coverage it does not have.
-
-**Still open, same family:** `api/routers/sectors_flow.py:80` builds its
-`history` key from `SectorAccumulationEvent` — the same write-less table — so
-`/api/sectors/stealth` still returns an empty history. It should read
-`stealth_events()` too.
-
-## 23. Backtest controls — and `flow_z` was `flow_raw` in disguise — 2026-08-23
-
-### 23.1 What was unreachable
-`services/backtest_service.py` has modelled the whole of §18.2/7–10 since
-2026-08-22 — T+2 settlement, per-side broker fee, the 0.1% sell tax, slippage
-`max(0.3%, 0.5×ATR%)` and the ±7% HOSE band — and returns each of them on the
-result. None of it reached a human:
-
-| existed in the service | why nobody saw it |
-|---|---|
-| three strategies (`signals` / `flow_z` / `flow_raw`) | the router's request model carried no `strategy`, so every run the UI could trigger was the default |
-| per-run fee / tax / settlement overrides | same — no field in |
-| ten realism fields on the result | `client.ts`'s `BacktestResult` type omitted them |
-| `trade_log` | fetched and discarded by the page |
-| VNINDEX | returned as a **scalar total only**, so the chart could draw one line |
-
-All five are now surfaced (`api/routers/sectors_backtest.py`, `client.ts`,
-`BacktestPage.tsx`). `strategy` is a Pydantic `Literal`, not `str`: unvalidated,
-a typo fell through the `if/elif` to the `flow_raw` branch — the one behaviour
-nobody wants by accident. Costs are clamped at the service (`max(0.0, …)`); a
-negative fee would otherwise pay the trader to trade.
-
-### 23.2 The defect shipping the selector exposed
-`flow_z` and `flow_raw` were **the same strategy**. Measured over
-2026-04-09→08-23: both −25.06%, both 330 trades, byte-identical.
-
-`_cross_sectional_z` computes `(v − mean)/sd` **within the same day the rows are
-then sorted in**. That is a positive affine map, and a positive affine map
-preserves order — so it always produced the raw-VND permutation. Verified twice:
-a five-row worked example and 2000/2000 random days identical.
-
-So §20.2's P0-4 row was half true. The signals replay was real; the size-bias
-fix it claimed for the flow baseline never changed a single ordering.
-
-`flow_z` now ranks on **`flow_z20`** — the z of a sector against *its own* 20d
-history, which is what §16.2 means by flow z and the only version that can make
-a small sector reachable. Three genuinely distinct strategies now:
-`signals −6.14% / flow_z −26.07% / flow_raw −25.06%`. Two tests pin both the fix
-and the proof.
-
-### 23.3 The false caveat, removed
-The Sharpe tile said T+2, fees, tax and the price band were **not** modelled.
-That was written from §18.6's open-BLOCKER list without reading the service,
-which had modelled all four for a day. It now names the resolved figures the run
-actually used. A caveat that is false is worse than none: it teaches the reader
-to discount a number that is already net.
-
-Consequence for doctrine: **§18.2/7, 9, 10 and §18.6's P0 row for them are
-closed in the backtest engine.** They remain open in `risk_service`, which sizes
-positions without a cost model.
-
-### 23.4 The default range guaranteed a silent fallback
-The page opened on `2025-01-01 → 2025-12-31`. `sector_signals` starts
-2026-04-09, so the default range had zero of them and the page opened on a
-strategy it could not run — falling back to the flow baseline with only a
-`print()` to say so. Defaults are now `2026-04-09 → today`, and a fallback
-raises a visible banner instead of a server-side log line.
-
-### 23.5 Open, logged, not fixed
-- **45% friction on 844 trades a year** at default costs. Not a cost-model bug —
-  daily rebalance turnover. It says the simulated strategy is uninvestable, and
-  no §18.7 net-of-cost Sharpe target is credible until it changes.
-- `macro_anchors` has **no VNINDEX rows for 2025**, so those ranges label the
-  benchmark `sector_mean` rather than the §11-mandated VNINDEX.
-- Zero-VND trade-log rows want a minimum-allocation floor.
-- `_cross_sectional_z` is kept only because `_persist` and the P0-4 tests refer
-  to it; it has no caller that depends on its ordering.
-
-## 24. Filters, presets and the P1-1 price tag — 2026-08-23
-
-### 24.1 One filter vocabulary
-Every sector table drew all 15 rows in one fixed order. `lib/filters.tsx` is
-now the single source for search, action filter, "chỉ ngành tôi đang nắm",
-column sorting and CSV, used by Ranking and Money Flow Monitor.
-
-State lives in the **URL**, not in component state (`?rk_act=BUY&rk_sort=score`,
-`replace: true`, one prefix per table). A tuned view is a thing you send to
-someone, and F5 must not clear it — the same reasoning as §22.9's tabs.
-
-Two details that are load-bearing rather than incidental:
-- **Filter, then sort.** The other order sorts rows you are about to discard.
-- **CSV carries a UTF-8 BOM.** Without it Excel on a Vietnamese locale opens
-  "Ngân hàng" as mojibake, which makes the export useless to its only user.
-
-"Chỉ ngành tôi đang nắm" is answered entirely from the §22.10 store — the app
-already knew the book, no page had ever asked it a question.
-
-### 24.2 The stealth presets are an argument, not a convenience
-**Chặt / Vừa / Rộng**, not tight/loose. The presets were shipped to price the
-§20.3 P1-1 doctrine-vs-code disagreement **in sectors** — the only unit in which
-anyone would care enough to close it.
-
-**They did their job on the day they shipped, and the answer killed the
-question.** Running all three returned `active: []` at *every* setting,
-including maximally-wide. Both sides of P1-1 were worth zero sectors, because
-the AND gate underneath them was unreachable (§16.1). The conflict was
-three-way, not two — `api/routers/stealth.py` had its own third set of defaults
-— so the page could show a sector the scanner would never record.
-
-Rewritten 2026-08-23 around the knob that now matters, `min_conditions`:
-
-| preset | numbers | what it is |
+| § | nội dung | file |
 |---|---|---|
-| Chặt | 5/5, N=5 | the original doctrine, **kept so you can watch it return 0** |
-| Vừa | ≥4/5, N=3 | what runs now — 23 events / 11 sectors in 3.5 years |
-| Rộng | ≥3/5, N=1, mọi ngưỡng hạ | a probe — "ngành nào gần đạt", not a buy list |
+| 16.4-16.8, 16.10 | target 20d + classifier head · 3 job stealth · entry-timing attribution · cột DB · halo + trang `/accumulation` · thứ tự dựng 11-18 | `16-stealth-measurements.md` |
+| 16.11 | ba tiêu chí thành công, và vì sao tiêu chí lead-time không sống sót | `16-stealth-measurements.md` |
+| 16.12 | base rate — gate thua cả việc không lọc | `16-stealth-measurements.md` |
+| 16.13 | 2026 sập chủ yếu là do thị trường | `16-stealth-measurements.md` |
+| 16.14 | §16 nói chung: không có edge đo được | `16-stealth-measurements.md` |
+| 16.15 | bar breakout là 1,15% chứ không phải 8% — lỗi đơn vị | `16-stealth-measurements.md` |
+| 20.1 | defect trung tâm: `sector_flow_daily` thiếu `close_idx` | `20-code-review.md` |
+| 20.2 | 15 mục đã sửa trong lượt review | `20-code-review.md` |
+| 22.1 | 4 luồng không render gì — 2 trong số đó chẩn đoán sai | `22-frontend-audit.md` |
+| 22.2 | client gọi route đã xoá 4 tháng (`/api/agent/*`) | `22-frontend-audit.md` |
+| 22.3 | hiệu năng: `lookback` 400 ở **client** ghi đè default backend | `22-frontend-audit.md` |
+| 22.4 | dev server bind mọi adapter → `host: 'localhost'`, `npm run dev:lan` | `22-frontend-audit.md` |
+| 22.5 | suite vitest đỏ trong khi §19 ghi là xanh | `22-frontend-audit.md` |
+| 22.6 | trang chủ rỗng sau mỗi lần restart — snapshot chỉ nằm trong RAM | `22-frontend-audit.md` |
+| 23.1-23.4 | 5 thứ service đã làm mà UI không với tới; `flow_z` = `flow_raw` | `23-backtest-controls.md` |
+| 24.1, 24.5 | một bộ từ vựng filter; phần chưa làm | `24-filters-presets.md` |
+| 25.1 | ba defect chồng nhau: feature chưa chuẩn hoá → 3/4 state sập | `25-regime-confidence.md` |
+| 25.3 | filtered chứ không smoothed — đóng §20.3 P1-4 | `25-regime-confidence.md` |
+| 25.4 | nhánh heuristic cũng đang nói dối (4 số hardcode) | `25-regime-confidence.md` |
+| 25.5 | một đính chính của tôi, và defect hẹp hơn nằm dưới nó | `25-regime-confidence.md` |
+| 25.6 | câu chữ: "HMM confidence 0.65" → "~65% khả năng giữ 5 phiên tới" | `25-regime-confidence.md` |
+| 25.7 | `CONF_HORIZON` được suy ra, và đáp án gộp bị bác | `25-regime-confidence.md` |
+| 25.8 | *(không tồn tại — §25.7 nhảy thẳng sang §25.9)* | — |
+| 25.9 | đoạn gần đây sập: là tape, không phải model; lịch là proxy cho vol | `25-regime-confidence.md` |
+| 26.1 | không có gì trong repo trả lời được câu hỏi của Tom | `26-ticker-picks.md` |
+| 26.2 | xếp hạng tệ hơn ngẫu nhiên: −42,9% trong khi VNINDEX +71,3% | `26-ticker-picks.md` |
+| 26.3 | picks không chậm — thẻ lệnh chưa từng ghi khung thời gian | `26-ticker-picks.md` |
+| 26.5 | feed foreign-room quét sạch universe, 0 ticker | `26-ticker-picks.md` |
+| 26.7 | vào lệnh ở giá mở phiên sau bỏ mất drift qua đêm | `26-ticker-picks.md` |
+| 26.8 | phần còn mở của §26 | `26-ticker-picks.md` |
 
-The page **opens on Vừa**, not Chặt: a default that shows a gate nobody is
-running is a default that misleads. Selecting Chặt raises the warning now,
-naming the 2-session measurement that retired it.
-
-Two other things this pass reconciled:
-- `api/routers/stealth.py` classified `active` only at `passes == 5`. Both
-  knobs are now imported from `analysis/stealth.py`, so the page and the
-  scanner cannot drift apart again without a test failing.
-- The endpoint's cond4 compared a **raw** `atr_pct` (~0.006) against a
-  threshold literally named `atr_rank_max` (0.5) — it passed for free on all 15
-  sectors, so the endpoint's "five-condition" gate was really four. It takes a
-  0..1 percentile within the sector's own window now, which is what §16.1
-  condition 4 means.
-
-### 24.3 Send the report without a terminal
-`POST /api/state/report/send` runs `generate_report.py` as a **subprocess**.
-Importing it would send mail as a side effect of the `import` statement, once
-per process and never again, because it is 1,629 module-level lines driven by
-`sys.argv` with no `main()` (§20.3 P3-2). A subprocess is the honest way to
-call a script that is a script.
-
-It sits under `/api/state/*` rather than a new router because it is an operator
-action — the same category as the kill-switch and the position book.
-
-The double-click guard is on the **backend** (`already_running`), not on the
-disabled button. A disabled button is a hint; two emails is a fact.
-
-### 24.4 Words on the screen
-`lib/glossary.tsx` defines 13 column names behind a native `title`. The
-definitions existed only in `CLAUDE.md` §16.2 and `docs/reference/GLOSSARY_VI.md`
-— neither of which is open while you are reading the table.
-
-`foreign_hit_20d`'s entry said out loud that `foreign_net` was zero across the
-whole history (§20.3 P0-5) — a tooltip that explains a column doing nothing,
-without saying so, is worse than no tooltip. **That warning was already false
-when it shipped**: the backfill had landed the same morning. Corrected the same
-day, along with a new `conditions_met` entry for the §16.1 score.
-
-### 24.5 Not done
-- `Th` / `FilterBar` are on two tables. Risk, Stealth and Regime still have
-  their own headers.
-- Native `title`: no touch support, ~1s delay. Fine for a definition, not for
-  a formula or a link.
-- Report run history is in memory only. It survives no restart; the log file on
-  disk is the durable record.
-
-## 25. Regime confidence — a collapsed model reporting certainty — 2026-08-24
-
-Tom: *"do tin cay cua thi truong luon la 100% la sai"*. Correct, and the
-reported symptom was the **third** defect in the chain, not the first.
-
-### 25.1 What was actually wrong
-
-| # | defect | consequence |
-|---|---|---|
-| 1 | features fed **raw** to a diagonal Gaussian HMM | 3 of 4 states blew up to hmmlearn's ceiling covariance (1000); all 111 bars landed in the survivor |
-| 2 | **180 days** of history (~111 bars) for a 40-parameter model | fitted inside a single regime — a regime model that has never seen a regime change |
-| 3 | `confidence` = the **state posterior** | answers "which state is this bar in", not "is this call worth acting on" |
-
-Defect 1 is why the number was 1.0: **with one live state the posterior is 1.0
-by construction.** The model was not confident, it was degenerate. Feature
-scales differ ~6× (5d return sd 0.028 vs 20d vol sd 0.005) and diagonal
-Gaussian EM is not scale-invariant — the wide column dominates the likelihood,
-the narrow states never win an observation, their covariances run to the
-ceiling. Standardising gives occupancy `[154 177 470 251]`, max covariance 2.7.
-
-History is now 1500 days (~1050 bars, back to 2022). `fit()` **refuses** a
-collapsed fit (>1 empty state) and falls back rather than publishing its 1.0.
-
-### 25.2 The formula
-
-Even with 1 and 2 fixed, the state posterior sits at ~0.95 — a Gaussian HMM is
-near-certain which state a bar is in whenever the states separate at all. That
-is a property of the fit, not a reason to size a position. Meanwhile the label
-flipped 26 times in 260 sessions.
-
-`confidence` now means **P(this label still holds in `CONF_HORIZON` = 5
-sessions)** — the filtered posterior propagated through the transition matrix,
-summed over every state sharing the label.
-
-| | value |
-|---|---|
-| range over 300 sessions | 0.46 – 0.91 (was: 0.9999998 on nearly every row) |
-| mean predicted | 0.69 |
-| mean realised (label actually held) | 0.60 |
-| live 2026-08-24 | `risk_on 0.6472` |
-
-Calibration by bucket: `[0.55,0.70)` predicted 0.64 / actual 0.63,
-`[0.70,0.85)` 0.81 / 0.79 — good in the middle. **The top bucket is
-overconfident: 0.90 predicted, 0.70 actual.** Read >0.85 as "likely", not
-"certain". Isotonic calibration would fix it and needs more than 300 sessions
-to fit honestly.
-
-> **2026-08-24 (3) — that last paragraph was measured on too short a window and
-> is wrong.** Re-run over the full 900 walk-forward bars
-> (`scripts/regime_horizon_experiment.py`), the top bucket is fine — 0.895
-> predicted vs **0.906** realised, n=406 — and the *bottom* is the biased end:
-> below 0.55 it predicts 0.487 against a realised **0.370**. That gap widens the
-> nearer you get to today (+0.012 early, +0.110 mid, +0.243 late), which is what
-> the 300-bar window was actually seeing: it put the whole degrading stretch
-> under a magnifying glass and read a **period**-specific miss as a **level**-
-> specific one. The lesson generalises past this number: a calibration curve
-> fitted on the most recent slice of a non-stationary series measures the slice.
->
-> Direction matters more than size here. A low reading **overstates** survival,
-> so "50%" means less than half — a reader who trusts it sizes on a call that
-> holds ~37% of the time. The hedge in `confidence_phrase()` moved accordingly:
-> it fires below 0.55 and points downward. The high end carries none.
->
-> **And no calibrator ships.** Isotonic and Platt were both fitted walk-forward
-> (train on the past, score the next 100 bars) against raw: raw wins the mean
-> Brier — 0.1464 vs 0.1540 isotonic, 0.1479 Platt — and each method wins some
-> folds. A calibrator that loses out of sample is a fitted layer that costs
-> money. The mitigation stays a sentence, on purpose.
-
-### 25.3 Filtered, not smoothed — this closes §20.3 P1-4
-
-P1-4: *"Regime labels are back-painted — Viterbi re-decodes the whole history
-each run, so yesterday's label can change. Use the filtered posterior for the
-last bar."*
-
-`predict_proba` over the whole panel is forward-backward, so it re-decodes
-history with hindsight. The last bar of a **prefix** has no future to smooth
-over, so `predict_proba(X[:t+1])[-1]` *is* the filtered posterior — using
-public API only (hmmlearn 0.3.3 has no `_do_forward_pass`).
-
-### 25.4 The heuristic fallback was lying too
-
-It returned hardcoded 0.6 / 0.6 / 0.5 / 0.5 — four made-up numbers wearing the
-same field name as a measured one. It now reports the share of the last 10
-sessions carrying the same label: the same question the HMM path answers,
-measured directly, so the two are comparable.
-
-This matters more than it looks: **`hmmlearn` was absent from the interpreter
-running pytest** while production resolves `.venv` through `uv run`, where it is
-installed. Every regime test before 2026-08-24 exercised the fallback while the
-scheduled job ran the HMM.
-
-### 25.5 A correction, and the narrower defect underneath it
-
-Mid-investigation this session I claimed `config.DATA_SOURCE = KBS` answers
-"VNINDEX" with ~1.79 and that this poisoned the classifier. **Both halves were
-wrong.** Measured: KBS returns 1784.24 and VCI 1784.29 for the same day *when
-given a date range*. And `classify_regime` overwrites `macro_df` with
-`fetch_vnindex_daily()` before use, so `macro_anchors.vnindex` never reached the
-classifier at all.
-
-The real defect is narrower and still worth fixing. `MacroService._fetch_vnindex`
-asked for `today..today`; one bad read on 2026-04-16 returned 1.82; and
-`ingest_now`'s carry-forward — which **cannot distinguish a missing value from a
-wrong one** — copied it into the next 613 of 623 rows. Fixed with a 10-day
-window plus `VNINDEX_MIN_PLAUSIBLE = 200.0`, so a bad read returns None and
-carry-forward keeps the last *good* value. The 613 existing rows are left as-is
-and marked `ponytail:`: nothing reads that column, so a backfill would be
-tidying, not repair.
-
-### 25.6 The wording — closed 2026-08-24 (late)
-
-The four stance strings in `generate_report.py` plus the banner and the plain
--text body rendered `"HMM confidence {:.2f}"`. After the rewrite they printed
-0.65 instead of 1.00, which is the intended change and also the dangerous one:
-the word "confidence" invites a reader to size on it, and the number is no
-longer a confidence. It is P(this label survives 5 sessions).
-
-`analysis.regime.confidence_phrase()` is the one renderer now — six call sites
-across the banner, the memo and the email body:
-
-```
-was:  Tape đang risk-on (HMM confidence 0.65)
-now:  Tape đang risk-on (~65% khả năng giữ 5 phiên tới)
-```
-
-**It lives in `analysis/regime.py`, not in the report generator**, and that
-placement is the point: the sentence is a property of the formula, so whoever
-changes what the number means owns the words describing it. It is also the only
-way it could be tested — `generate_report.py` is 1,629 module-level lines that
-send mail on `import` (§20.3 P3-2).
-
-~~Above 0.85 the phrase appends a hedge.~~ **Below 0.55** — see §25.2's
-correction. The direction is pinned by
-`test_the_phrase_hedges_at_the_low_end_not_the_high_end`, which asserts the
-*side* rather than the boundary, so putting it back on the high end fails a test
-instead of shipping.
-
-### 25.7 `CONF_HORIZON` — derived 2026-08-24 (3), and the pooled answer rejected
-
-It was an assertion for months. `scripts/regime_horizon_experiment.py` walks the
-filtered posterior over 900 bars and scores every horizon by Brier skill against
-a base-rate forecast.
-
-Pooled, skill rises to a flat plateau at H=8-13 (+0.207…+0.212) and **H=13
-wins**. Split in thirds it does not:
-
-| H | early | mid | late (2025-06 → 2026-08) |
-|---|---|---|---|
-| 5 | +0.223 | +0.229 | **+0.060** |
-| 8 | +0.262 | +0.224 | −0.003 |
-| 13 | +0.172 | +0.297 | −0.020 |
-| 20 | +0.161 | +0.298 | **−0.166** (AUC 0.510 — a coin) |
-
-The entire H≥8 advantage comes from the middle stretch. **5 is the only horizon
-positive in all three thirds**, so it stays — not because it is optimal, but
-because it is the longest horizon that has not been shown to break. Same
-methodological point as §16.12: pooling let one strong stretch mask a recent one
-that matches random.
-
-AUC is ~0.80 across H=1-13 and carries no opinion — it ranks, it does not
-calibrate, which is why skill is the deciding metric here.
-
-### 25.9 The late-third degradation — diagnosed 2026-08-24 (4)
-
-§25.8 flagged it as the highest-value open question: the horizon sweep here and
-the §16.1 stealth gate (§16.13) both fall apart over the same recent stretch,
-and *"a defect common to two unrelated models is more likely the tape or the
-data than either model."* `scripts/late_period_diagnosis.py` runs the four
-checks. Result: **it is the tape, and the calendar was a proxy for it.**
-
-**Not data.** Every 2026 quarter carries 15 sectors, ~0 missing `close_idx`,
-96-100% non-zero `foreign_net`. Coverage matches the years that work. The one
-thin quarter in the panel is 2023Q1 (36% missing closes), at the opposite end.
-
-**Not a stale transition matrix.** `transmat_` is fitted once over the whole
-panel, so it encodes average persistence — a plausible reason the late third
-overpredicts survival by +9.3pt (0.695 predicted vs 0.602 realised). Testing it
-by re-estimating transitions on a trailing window, emissions untouched:
-
-| window | late bias | late Brier | late AUC | Brier, all 900 |
-|---|---|---|---|---|
-| whole panel (shipped) | **+0.093** | 0.2266 | **0.678** | **0.1607** |
-| 250 bars | −0.045 | 0.2196 | 0.665 | 0.1916 |
-| 500 bars | **+0.018** | 0.2289 | 0.637 | 0.1887 |
-| 120 bars | −0.103 | 0.2615 | 0.583 | 0.2118 |
-
-A trailing window fixes the *bias* and costs *discrimination* and overall Brier.
-So the late failure is not miscalibration that a fresher matrix repairs — it is
-**lost discrimination**: late AUC 0.673 against 0.816/0.828 earlier. Nothing
-ships from this check; it is recorded so nobody re-runs it hoping.
-
-**It is volatility.** Bucketing all 900 bars by 20d VNINDEX vol, ignoring date:
-
-| vol tercile | n | base rate | AUC | share of rows in the late third |
-|---|---|---|---|---|
-| low | 298 | 0.836 | **0.827** | 0.12 |
-| mid | 298 | 0.735 | 0.790 | 0.46 |
-| high | 299 | 0.592 | **0.694** | 0.42 |
-
-Monotone, and the high-vol bucket is spread across periods rather than being a
-relabelling of "late". Crossed both ways, low-vol *late* bars still score 0.699
-while high-vol *early* bars score 0.619 — vol tracks the failure, the calendar
-does not. 2026 is simply where the high-vol bars concentrate (§16.13's amended
-table: ann vol 0.42 vs 0.21-0.29).
-
-**What this means, stated so it is not over-read.** A regime model is least
-certain when regimes are least stable, which is not a defect — it is the
-model reporting a harder problem. The honest response is to let confidence fall
-in choppy tape, which it does. But it means:
-
-- **`CONF_HORIZON` is not one number.** 5 is the longest horizon positive in all
-  three thirds *pooled across vol*; in the high-vol bucket even 5 is marginal.
-  A vol-conditioned horizon is the obvious next experiment and is **not** shipped
-  — it needs its own walk-forward, and §25.2 is the standing warning about
-  fitting a layer on a recent slice.
-- **§16's story is different from this one.** The stealth gate's 2026 collapse
-  shares a cause *class* (the tape) but not the mechanism: §16.13's breakout
-  test is pinned to 2×ATR, so a rising ATR raises the bar exactly when the moves
-  it must clear are shrinking. That is a definition that moves with what it
-  measures — a real defect in the metric, worth fixing on its own terms, and it
-  is not fixed by anything here.
-
-### 25.10 Open
-- **A vol-conditioned `CONF_HORIZON`** (§25.9). Measured as needed, not shipped.
-- ~~**§16.13's 2×ATR breakout definition scales with the tape it measures.**~~
-  **Measured 2026-08-24 (5) — the suspicion was wrong and the real defect is
-  worse. See §16.15.**
-- `CONF_HORIZON` should be re-measured when the panel grows; 900 bars split
-  three ways is 300 per cell, and §25.9 now wants it split by vol as well.
+`§25.10`, `§23.5`, `§24.2-24.4`, `§22.7-22.11`, `§26.4`, `§26.6`, `§26.9`,
+`§26.10` **vẫn có thân bài ở file này** — chúng chứa luật đang thi hành.

@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 
 import pandas as pd
 from sqlalchemy.orm import Session
@@ -14,19 +13,33 @@ from sqlalchemy.orm import Session
 from analysis.regime import RegimeClassifier
 from services.macro_service import fetch_vnindex_daily
 from config import ROTATION_TARGET_HORIZON_DAYS
-from database.models import MacroAnchor, ModelRun, SectorRegime
+from database.models import ModelRun, SectorRegime
 from models.rotation_ranker import RotationRanker
 from services.flow_feature_service import FEATURE_COLS, FlowFeatureService
+from utils import clock
+from utils.clock import today_str
 
 # Dynamic target label (§16.4: 20d). Used for ModelRun bookkeeping + to
 # deactivate the right prior runs on retrain.
 TARGET_COL = f"fwd_{ROTATION_TARGET_HORIZON_DAYS}d_sector_return"
 
 
+#: Fewest daily VNINDEX bars a label is published from -- the heuristic's own
+#: floor (20-session return + 20-session vol). Below it there is no label to give.
+REGIME_MIN_BARS = 25
+
+
+class FeaturesMissingError(RuntimeError):
+    """The latest session has a feature column that was never computed."""
+
+
 class RotationModelService:
     def __init__(self, session: Session):
         self.session = session
         self.ranker = RotationRanker()
+        #: `model_runs.id` of the model that will score today -- stored on each
+        #: published signal so it can be traced (review 2026-09-24 §4.1/10).
+        self.active_run_id: int | None = None
         self._load_active_model()
 
     def _load_active_model(self) -> None:
@@ -43,6 +56,7 @@ class RotationModelService:
         )
         if run is not None and run.model_path:
             self.ranker.load(run.model_path)
+            self.active_run_id = run.id
 
     # ----- training -----
     def train_ranker(self) -> ModelRun:
@@ -79,11 +93,23 @@ class RotationModelService:
         )
         self.session.add(run)
         self.session.commit()
+        self.active_run_id = run.id
         return run
 
     # ----- prediction -----
     def predict_today(self) -> pd.DataFrame:
         feat_svc = FlowFeatureService(self.session)
+        # Refuse to rank on columns that were never computed. `build()` fills
+        # NULL with 0 so training survives warm-up rows; on the PREDICTION day
+        # that turns "not computed" into "exactly average" for every sector,
+        # which is how a month of signals came from zeros (review 2026-09-24
+        # §4.1/1). Raise, and let the caller decide what to publish instead.
+        day, missing = feat_svc.unfilled_columns_on_latest()
+        if missing:
+            raise FeaturesMissingError(
+                f"{day}: {', '.join(missing)} NULL for every sector -- run "
+                "`main.py --eod-rollup` (it rebuilds the leading features) "
+                "before predicting")
         latest = feat_svc.latest_features()
         if latest.empty:
             return latest
@@ -106,12 +132,14 @@ class RotationModelService:
 
     # ----- regime -----
     def classify_regime(self) -> SectorRegime:
-        rows = self.session.query(MacroAnchor).order_by(MacroAnchor.time).all()
-        macro_df = pd.DataFrame([{
-            "time": r.time, "vnindex": r.vnindex, "usdvnd": r.usdvnd,
-            "brent": r.brent, "us10y": r.us10y, "gold": r.gold,
-        } for r in rows]).set_index("time") if rows else pd.DataFrame()
+        """Fit and publish today's regime label -- from a DAILY VNINDEX series only.
 
+        2026-09-25: when the daily fetch failed, this used to fit on the hourly
+        `macro_anchors` rows instead. Those are snapshots, not sessions, and
+        613 of them were 1.82 -- 2026-09-22's `risk_off 0.9961` was fitted on
+        them (review 2026-09-24 §4.1/4, §8 P0-3). No daily series, no new
+        label: the latest stored one is returned unchanged, under its own date.
+        """
         # The hourly macro_anchors vnindex column is sparse/unreliable here, so
         # the classifier kept falling back to a flat "chop/0.5". Anchor it on a
         # real daily VNINDEX series from vnstock so the label is meaningful.
@@ -124,24 +152,49 @@ class RotationModelService:
         # where `confidence = 0.9999998` came from. 1500 days is ~1050 bars
         # back to 2022 and spans more than one regime, which a regime model
         # needs to see. analysis/regime.py now also refuses a collapsed fit.
-        vn_daily = fetch_vnindex_daily(days=1500)
-        if not vn_daily.empty and vn_daily.notna().sum() > 5:
-            macro_df = vn_daily.to_frame()  # date-indexed 'vnindex' column
+        closed = clock.closed_today()
+        if closed:
+            # Same rule as the signals: no session, no new dated row.
+            last = (self.session.query(SectorRegime)
+                    .order_by(SectorRegime.date.desc()).first())
+            print(f"[regime] {closed} is not a trading day -- keeping "
+                  f"{last.date if last else 'no'} label")
+            if last is not None:
+                return last
+            return SectorRegime(date=None, regime_label="chop", confidence=0.0,
+                                model_version="unavailable")
 
-        if macro_df.empty or "vnindex" not in macro_df.columns or macro_df["vnindex"].notna().sum() <= 5:
-            label, conf = "chop", 0.0
-        else:
-            clf = RegimeClassifier().fit(macro_df)
-            label, conf = clf.predict(macro_df)
+        vn_daily = fetch_vnindex_daily(days=1500)     # per-value plausibility-filtered
+        if vn_daily.notna().sum() < REGIME_MIN_BARS:
+            last = (self.session.query(SectorRegime)
+                    .order_by(SectorRegime.date.desc()).first())
+            print(f"[regime] *** NOT PUBLISHING: {vn_daily.notna().sum()} usable daily "
+                  f"VNINDEX bars (need {REGIME_MIN_BARS}); keeping "
+                  f"{last.date if last else 'no'} label ***")
+            if last is not None:
+                return last
+            # Nothing stored yet: an unsaved placeholder, so callers that print
+            # the result still work. Nothing is written.
+            return SectorRegime(date=None, regime_label="chop", confidence=0.0,
+                                model_version="unavailable")
 
-        today = datetime.now().strftime("%Y-%m-%d")
+        macro_df = vn_daily.to_frame()  # date-indexed 'vnindex' column
+        clf = RegimeClassifier().fit(macro_df)
+        label, conf = clf.predict(macro_df)
+        # The fit refuses a collapsed HMM and predict() then answers from the
+        # heuristic -- say which one answered instead of stamping "hmm" on both.
+        version = "hmm" if clf.model is not None else "heuristic"
+
+        # Market-local date, like every other published row (P1-6).
+        today = today_str()
         rec = self.session.query(SectorRegime).filter_by(date=today).one_or_none()
         if rec is None:
-            rec = SectorRegime(date=today, regime_label=label, confidence=conf, model_version="hmm")
+            rec = SectorRegime(date=today, regime_label=label, confidence=conf,
+                               model_version=version)
             self.session.add(rec)
         else:
             rec.regime_label = label
             rec.confidence = conf
-            rec.model_version = "hmm"
+            rec.model_version = version
         self.session.commit()
         return rec

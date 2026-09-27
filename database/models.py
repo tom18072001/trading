@@ -141,42 +141,12 @@ class SectorFlowDaily(Base):
     )
 
 
-# ============================================
-# 4b. SECTOR_ACCUMULATION_EVENTS — stealth-phase journal (§16.7)
-# ============================================
-class SectorAccumulationEvent(Base):
-    __tablename__ = "sector_accumulation_events"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    sector_code = Column(String(16), ForeignKey("sectors.sector_code"), nullable=False)
-    start_date = Column(String(20), nullable=False)
-    end_date = Column(String(20))
-    peak_return_pct = Column(Float)
-    lead_days_to_price = Column(Integer)
-    resolved = Column(Integer, default=0)
-
-    __table_args__ = (
-        UniqueConstraint("sector_code", "start_date", name="uq_accum_sector_start"),
-        Index("ix_accum_events_sector", "sector_code", "start_date"),
-    )
-
-
-# ============================================
-# 4c. SECTOR_FLOW_HANDOFF — rotation matrix (flow leaving A, entering B)
-# ============================================
-class SectorFlowHandoff(Base):
-    __tablename__ = "sector_flow_handoff"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    date = Column(String(20), nullable=False)
-    from_sector = Column(String(16), nullable=False)
-    to_sector = Column(String(16), nullable=False)
-    handoff_score = Column(Float, nullable=False)
-
-    __table_args__ = (
-        UniqueConstraint("date", "from_sector", "to_sector", name="uq_handoff"),
-        Index("ix_handoff_date", "date"),
-    )
+# 4b/4c. `SectorAccumulationEvent` and `SectorFlowHandoff` lived here until
+# 2026-08-26. Neither ever had a writer, and both facts are derived instead:
+# stealth runs from `sector_flow_daily.accumulation_age` (§22.11), handoffs by
+# `analysis/flow_handoff.compute_handoff` on request. Dropped in migration 12.
+# The classes had to go with the tables -- `init_db()` calls `create_all` before
+# `run_migrations()`, so a leftover model recreates what the migration drops.
 
 
 # ============================================

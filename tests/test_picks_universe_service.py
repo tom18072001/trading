@@ -307,3 +307,51 @@ def test_empty_build_is_not_persisted():
          patch.object(svc, "_build", return_value=empty):
         svc.get_snapshot(force=True)
     assert PicksUniverseService()._load_from_disk().tickers, "good file must survive"
+
+
+# ---------------------------------------------------------------------------
+# foreign_room: a zero that means "missing" vs a zero that means "none left"
+# ---------------------------------------------------------------------------
+
+def test_an_all_zero_foreign_block_is_unknown_not_no_room(monkeypatch):
+    """The defect that emptied the universe, live, on 2026-09-16.
+
+    The KBS price board came back with foreign_room = 0 for every name --
+    VCB, FPT, HPG, SSI, DCM included -- and the capability filter is
+    `room > MIN_FOREIGN_ROOM_PCT` with that constant at 0.0. So every blue chip
+    on HOSE read as foreign-full, `cap1_pass` was 0, and the build finished with
+    0 tickers and is_valid=False.
+
+    `None` is the right answer, because `None` means "could not verify" and the
+    filter deliberately keeps unverified names. The judgement has to be made on
+    the COLUMN, not the cell: one full name among normal ones is ordinary, every
+    name full at once is a dead feed.
+    """
+    import services.picks_universe_service as mod
+
+    board = pd.DataFrame({
+        "symbol": ["VCB", "FPT", "HPG"],
+        "foreign_room": [0, 0, 0],
+        "foreign_buy_volume": [0, 0, 0],
+    })
+    monkeypatch.setattr(mod, "_fetch_price_board_chunk", lambda chunk: board)
+    got = mod.PicksUniverseService()._fetch_foreign_room(["VCB", "FPT", "HPG"])
+    assert got == {"VCB": None, "FPT": None, "HPG": None}
+
+
+def test_a_single_genuinely_full_name_is_still_reported_as_zero(monkeypatch):
+    """The guard must not throw away real information.
+
+    A board where one name is full and the others are not is a working feed
+    saying something true, and that name should still be filtered out.
+    """
+    import services.picks_universe_service as mod
+
+    board = pd.DataFrame({
+        "symbol": ["VCB", "FPT", "HPG"],
+        "foreign_room": [0, 1_200_000, 800_000],
+    })
+    monkeypatch.setattr(mod, "_fetch_price_board_chunk", lambda chunk: board)
+    got = mod.PicksUniverseService()._fetch_foreign_room(["VCB", "FPT", "HPG"])
+    assert got["VCB"] == 0.0
+    assert got["FPT"] == 1_200_000

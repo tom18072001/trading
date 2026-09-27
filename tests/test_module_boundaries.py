@@ -77,7 +77,11 @@ ALLOWED: dict[str, set[str]] = {
     "features": {"ingest"},
     "decide": {"ingest", "features", "decide"},
     "book": set(),
-    "report": {"decide", "book"},
+    # "report" includes itself: composing two read-models is normal and does not
+    # create an upward edge. Added 2026-09-16 when position_tracking built on
+    # trading_state; both have since moved to daily_watch/, but the rule is right
+    # and the next report module should not have to re-argue it.
+    "report": {"decide", "book", "report"},
     "agent": {"decide", "agent"},
 }
 
@@ -220,3 +224,23 @@ def test_the_book_layer_stays_dependency_free():
             continue
         deps = {d for d in (_service_dep(m) for m, _ in _imports(path)) if d and d != name}
         assert not deps, f"{path.relative_to(REPO)} must not depend on services: {deps}"
+
+
+def test_services_never_import_the_daily_watch_module():
+    """`daily_watch/` left services/ on 2026-09-16 at Tom's request, so it is no
+    longer covered by the layer table above. The property that still has to hold
+    is DIRECTION: daily_watch reads services/, never the other way round.
+
+    Without this the move quietly trades a checked boundary for an unchecked one,
+    and the first `from daily_watch import ...` inside services/ would create
+    exactly the cycle the layer table exists to prevent.
+    """
+    bad = []
+    for _name, path in _modules():
+        for mod, ln in _imports(path):
+            if mod.split(".")[0] == "daily_watch":
+                bad.append(f"{path.name}:{ln} imports {mod}")
+    assert not bad, (
+        f"services/ must not import daily_watch/: {bad}. "
+        "daily_watch is a consumer of services, not a dependency of it."
+    )

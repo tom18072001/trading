@@ -71,15 +71,20 @@ const REGIME_VN: Record<string, string> = {
   risk_on: 'Risk-On', rotation: 'Luân chuyển', chop: 'Đi ngang', risk_off: 'Risk-Off',
 };
 
-function RegimeGauge({ label, confidence, buy, sell }: {
-  label: string; confidence: number; buy: number; sell: number;
+// 2026-09-25 (review 2026-09-24 §8 P0-6): the gauge printed "Độ tin cậy 85%"
+// and a "Tư thế tấn công / phòng thủ" chip -- an instruction hung on a label
+// with no out-of-sample edge (after a risk_on day VNINDEX did WORSE over the
+// next 20 sessions). It now prints the backend's phrase for the number (the
+// one renderer, analysis/regime.py) and says the label is unverified.
+export function RegimeGauge({ label, confidence, phrase, note, buy, sell }: {
+  label: string; confidence: number; phrase?: string; note?: string;
+  buy: number; sell: number;
 }) {
   const base = REGIME_BASE[label] ?? 0.5;
   const tilt = clamp(((buy - sell) / Math.max(buy + sell, 1)) * 0.15, -0.15, 0.15);
   const score = clamp(base + tilt, 0.05, 0.95);
   const needleDeg = 180 - score * 180; // 180°(left/red) → 0°(right/green)
   const n = polar(100, 100, 72, needleDeg);
-  const defensive = label === 'risk_off' || label === 'chop';
 
   return (
     <div className="flex flex-col items-center justify-center">
@@ -94,17 +99,14 @@ function RegimeGauge({ label, confidence, buy, sell }: {
         <div className="font-display text-[19px] font-bold text-hi leading-tight">
           {REGIME_VN[label] ?? (label || '—')}
         </div>
-        <div className="text-[11px] text-mid font-mono mt-0.5">
-          Độ tin cậy {((confidence ?? 0) * 100).toFixed(0)}%
+        <div className="text-[11px] text-mid mt-0.5 leading-snug">
+          {phrase ?? `~${((confidence ?? 0) * 100).toFixed(0)}% khả năng giữ nhãn`}
         </div>
         <div
-          className={`inline-block mt-2 px-2.5 py-1 rounded-md text-[10.5px] font-semibold ${
-            defensive
-              ? 'bg-warn/[0.12] text-warn border border-warn/30'
-              : 'bg-buy/[0.13] text-buy border border-buy/30'
-          }`}
+          className="inline-block mt-2 px-2.5 py-1 rounded-md text-[10.5px] font-semibold bg-warn/[0.12] text-warn border border-warn/30"
+          title={note}
         >
-          {defensive ? 'Tư thế phòng thủ' : 'Tư thế tấn công'}
+          Chưa kiểm chứng — không đổi tỷ trọng theo nhãn
         </div>
       </div>
     </div>
@@ -114,7 +116,9 @@ function RegimeGauge({ label, confidence, buy, sell }: {
 // ===================================================================
 //  Count tiles  (NÊN MUA / NÊN BÁN / TÍCH LUỸ NGẦM)
 // ===================================================================
-function CountTile({ n, label, tone }: { n: number; label: string; tone: 'buy' | 'sell' | 'warn' }) {
+export function CountTile({ n, label, tone, note }: {
+  n: number; label: string; tone: 'buy' | 'sell' | 'warn'; note?: string;
+}) {
   const map = {
     buy:  { c: 'text-buy',  wash: 'rgba(51,212,154,.10)' },
     sell: { c: 'text-sell', wash: 'rgba(255,93,115,.10)' },
@@ -127,6 +131,7 @@ function CountTile({ n, label, tone }: { n: number; label: string; tone: 'buy' |
     >
       <div className="section-label">{label}</div>
       <div className={`font-display text-[42px] font-bold leading-none mt-3 tabular ${map.c}`}>{n}</div>
+      {note && <div className="text-[10.5px] text-mid mt-2 leading-snug" title={note}>Chưa kiểm chứng</div>}
     </div>
   );
 }
@@ -314,34 +319,38 @@ export function AgentReport({ report }: { report: any }) {
 }
 
 // ===================================================================
-//  Pick cards  (Thẻ — default view): ladder + T+3 + sizing
+//  Pick cards  (Thẻ — default view): ladder + hold schedule + sizing
 // ===================================================================
-/** T0..T+3 in SESSIONS, not calendar days.
- *
- *  It used to be `setDate(base.getDate() + i)`, so a Thursday buy claimed a
- *  Sunday settlement. T+ is a count of trading days — that is what settlement
- *  means — and the backend now returns `sellable_on` on the same basis
- *  (utils/clock.next_trading_day) for positions already in the book.
- *
- *  ponytail: weekends only. VN holidays live in config.VN_MARKET_HOLIDAYS_2026
- *  and are not worth a second copy in TypeScript for a 4-box preview; the book
- *  row, which is the one you act on, gets the holiday-aware date from the API.
- */
-function tPlusDays(date: string | undefined): { label: string; date: string; sub: string; state: 'now' | 'future' | 'sell' }[] {
-  const base = date ? new Date(date) : new Date();
-  const out: { label: string; date: string; sub: string; state: 'now' | 'future' | 'sell' }[] = [];
+/** `n` trading sessions after `base`, weekends skipped. */
+function addSessions(base: Date, n: number): Date {
   const d = new Date(base);
-  for (let i = 0; i < 4; i++) {
-    if (i > 0) do { d.setDate(d.getDate() + 1); } while (d.getDay() === 0 || d.getDay() === 6);
-    out.push({
-      label: i === 0 ? 'T0' : `T+${i}`,
-      date: `${d.getDate()}/${d.getMonth() + 1}`,
-      // T+2: HOSE cash settlement, the same lag the backtest models (§18.2/7).
-      sub: i === 0 ? 'Mua' : i === 2 ? 'Bán được' : '',
-      state: i === 0 ? 'now' : i === 2 ? 'sell' : 'future',
-    });
+  for (let i = 0; i < n; i++) {
+    do { d.setDate(d.getDate() + 1); } while (d.getDay() === 0 || d.getDay() === 6);
   }
-  return out;
+  return d;
+}
+
+const ddmm = (d: Date) => `${d.getDate()}/${d.getMonth() + 1}`;
+const isoDdmm = (iso: string) => ddmm(new Date(`${iso}T00:00:00`));
+
+/** Buy → window opens (+20 sessions) → hold limit (+40), in SESSIONS.
+ *
+ *  Replaces the T0..T+3 boxes (Tom, 2026-09-25: "bỏ T+2, chỉ sử dụng 4 tuần và 8
+ *  tuần"). The dates come from the backend (`sell_from` / `sell_by`, from
+ *  picks_scoring.hold_window — holiday-aware, the same function the book and the
+ *  17:30 bulletin use). The weekend-only fallback is for snapshots written
+ *  before those fields existed; VN holidays are not worth a second copy in
+ *  TypeScript for a preview, and the book row gets the exact dates.
+ */
+function holdSchedule(p: { sell_from?: string | null; sell_by?: string | null }) {
+  const buy = addSessions(new Date(), 1);
+  return [
+    { label: 'Mua', date: ddmm(buy), sub: 'ATO phiên tới', state: 'now' as const },
+    { label: '+20 phiên', date: p.sell_from ? isoDdmm(p.sell_from) : ddmm(addSessions(buy, 20)),
+      sub: 'mở cửa sổ bán', state: 'future' as const },
+    { label: '+40 phiên', date: p.sell_by ? isoDdmm(p.sell_by) : ddmm(addSessions(buy, 40)),
+      sub: 'mặc định bán (ATO)', state: 'sell' as const },
+  ];
 }
 
 /**
@@ -423,8 +432,9 @@ function PickCard({ p, kind, alloc }: { p: any; kind: 'BUY' | 'SELL'; alloc: num
 
       {isBuy ? (
         <>
-          {/* price ladder + T+3 */}
-          <div className="flex gap-4">
+          {/* price ladder + hold schedule. Target/stop are the SWING screening
+              geometry, not orders: the book has had no stop since 26.10. */}
+          <div className="flex gap-4" title="Target/Stop: hình học sàng lọc (SWING), không phải lệnh — sổ không dùng stop">
             <div className="relative w-1.5 rounded-full bg-raise self-stretch min-h-[88px]">
               <span className="absolute -left-1 top-0 w-3.5 h-0.5 bg-buy rounded" />
               <span className="absolute -left-1 bottom-0 w-3.5 h-0.5 bg-sell rounded" />
@@ -440,9 +450,9 @@ function PickCard({ p, kind, alloc }: { p: any; kind: 'BUY' | 'SELL'; alloc: num
             </div>
           </div>
 
-          {/* T+3 schedule */}
-          <div className="grid grid-cols-4 gap-1.5">
-            {tPlusDays(undefined).map((d, i) => (
+          {/* 4-8 week schedule */}
+          <div className="grid grid-cols-3 gap-1.5">
+            {holdSchedule(p).map((d, i) => (
               <div
                 key={i}
                 className={`rounded-lg px-1.5 py-1.5 text-center border ${
@@ -478,7 +488,7 @@ function PickCard({ p, kind, alloc }: { p: any; kind: 'BUY' | 'SELL'; alloc: num
         <div className="rounded-xl bg-sell/[0.08] border border-sell/30 p-3 text-[12px] text-sell/90 leading-snug">
           ⚠ Cắt/tránh — stop-out <span className="font-mono font-semibold">{fmtNum(p.stop)}</span>
           {p.atr_pct != null && <> · ATR {p.atr_pct.toFixed(1)}%</>}
-          {p.score != null && <> · score {p.score >= 0 ? '+' : ''}{p.score}</>}
+          {p.score != null && <> · điểm {p.score >= 0 ? '+' : ''}{p.score.toFixed(1)}</>}
         </div>
       )}
 
@@ -527,13 +537,22 @@ function PickCard({ p, kind, alloc }: { p: any; kind: 'BUY' | 'SELL'; alloc: num
   );
 }
 
+/** Empty-state copy. The BUY list is the shared shortlist rule (SMA200 gate →
+ *  rank blend, 2026-09-25) — it no longer depends on any sector being BUY, so
+ *  "no BUY sector today" would be the wrong explanation for an empty list. */
+function emptyText(kind: 'BUY' | 'SELL'): string {
+  return kind === 'BUY'
+    ? 'Không mã nào trên SMA200 hôm nay — phần vốn định mua: ETF theo chỉ số thay vì tiền mặt.'
+    : 'Không có ngành nào ở trạng thái SELL hôm nay.';
+}
+
 function PickCards({ picks, kind, capital }: { picks: any[]; kind: 'BUY' | 'SELL'; capital: number }) {
   const convSum = picks.reduce((a, p) => a + convictionOf(p), 0) || 1;
   const deployable = capital * 0.5;
   if (!picks.length) {
     return (
       <div className="rounded-2xl bg-panel border border-line p-6 text-center text-[13px] text-lo italic">
-        Không có ngành nào ở trạng thái {kind === 'BUY' ? 'BUY/ACCUMULATE' : 'SELL'} hôm nay.
+        {emptyText(kind)}
       </div>
     );
   }
@@ -567,14 +586,14 @@ export function PickTable({ title, subtitle, kind, picks }: {
         <div className="section-label">{title}</div>
         <div className="text-[11px] text-lo mt-0.5">{subtitle}</div>
         <div className="mt-3 text-sm text-lo italic">
-          Không có ngành nào ở trạng thái {kind === 'BUY' ? 'BUY/ACCUMULATE' : 'SELL'} hôm nay.
+          {emptyText(kind)}
         </div>
       </div>
     );
   }
 
   const headClr = kind === 'BUY' ? 'text-buy' : 'text-sell';
-  const colCount = 7;
+  const colCount = kind === 'BUY' ? 8 : 7;
 
   return (
     <div className="bg-panel border border-line rounded-2xl overflow-hidden">
@@ -593,6 +612,7 @@ export function PickTable({ title, subtitle, kind, picks }: {
                 <th className="p-2 text-right">Target</th>
                 <th className="p-2 text-right">Stop</th>
                 <th className="p-2 text-right">R:R</th>
+                <th className="p-2 text-right">Cửa sổ bán</th>
               </>
             ) : (
               <>
@@ -636,6 +656,9 @@ export function PickTable({ title, subtitle, kind, picks }: {
                       <td className={`p-2 text-right font-mono ${(pRr(p) ?? 0) >= 2 ? 'text-buy' : 'text-warn'}`}>
                         {pRr(p) != null ? pRr(p).toFixed(1) : '—'}
                       </td>
+                      <td className="p-2 text-right font-mono text-mid text-[11px]">
+                        {p.sell_from && p.sell_by ? `${isoDdmm(p.sell_from)} → ${isoDdmm(p.sell_by)}` : '—'}
+                      </td>
                     </>
                   ) : (
                     <>
@@ -645,7 +668,7 @@ export function PickTable({ title, subtitle, kind, picks }: {
                       </td>
                       <td className="p-2 text-right font-mono text-hi">{p.atr_pct != null ? p.atr_pct.toFixed(1) : '—'}</td>
                       <td className={`p-2 text-right font-mono ${p.score < 0 ? 'text-sell' : 'text-hi'}`}>
-                        {p.score >= 0 ? '+' : ''}{p.score}
+                        {p.score >= 0 ? '+' : ''}{p.score.toFixed(1)}
                       </td>
                     </>
                   )}
@@ -869,8 +892,8 @@ export default function DailyInsightPage() {
           <h1 className="font-display text-[29px] font-bold text-hi tracking-tight">Daily Insight</h1>
           <p className="text-[13px] text-mid mt-0.5">
             Hôm nay nên <span className="text-buy font-semibold">MUA</span> mã nào,{' '}
-            <span className="text-sell font-semibold">BÁN</span> mã nào — thực thi trong{' '}
-            <span className="text-acc font-semibold">T+3</span>
+            <span className="text-sell font-semibold">TRÁNH</span> mã nào — giữ{' '}
+            <span className="text-acc font-semibold">4-8 tuần</span> (20-40 phiên)
           </p>
           {genTime && <p className="text-[11px] text-lo mt-1 font-mono">cập nhật {genTime}</p>}
         </div>
@@ -967,14 +990,21 @@ export default function DailyInsightPage() {
             <RegimeGauge
               label={mc.regime?.label || 'chop'}
               confidence={mc.regime?.confidence ?? 0}
+              phrase={mc.regime?.phrase}
+              note={mc.unverified?.regime}
               buy={mc.buy_count ?? 0}
               sell={mc.sell_count ?? 0}
             />
           </div>
+          {/* SECTOR counts (ranker / §16.1 gate) -- "Nên mua" here read as the
+              ticker list, which is a different rule (2026-09-25). */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-[22px]">
-            <CountTile n={mc.buy_count ?? 0} label="Nên mua" tone="buy" />
-            <CountTile n={mc.sell_count ?? 0} label="Nên bán" tone="sell" />
-            <CountTile n={mc.stealth_count ?? 0} label="Tích luỹ ngầm" tone="warn" />
+            <CountTile n={mc.buy_count ?? 0} label="Ngành BUY" tone="buy"
+              note={mc.unverified?.ranker ?? 'chưa kiểm chứng'} />
+            <CountTile n={mc.sell_count ?? 0} label="Ngành SELL" tone="sell"
+              note={mc.unverified?.ranker ?? 'chưa kiểm chứng'} />
+            <CountTile n={mc.stealth_count ?? 0} label="Ngành tích luỹ ngầm" tone="warn"
+              note={mc.unverified?.stealth ?? 'chưa kiểm chứng'} />
           </div>
         </section>
       )}
@@ -1025,14 +1055,14 @@ export default function DailyInsightPage() {
 
         {pickView === 'cards' ? (
           <>
-            <div className="section-label text-buy/80">⚡ Nên MUA — Swing 3-5 phiên</div>
+            <div className="section-label text-buy/80">⚡ Nên MUA — giữ 4-8 tuần, mặc định tới ~40 phiên</div>
             <PickCards picks={buyPicks} kind="BUY" capital={capital} />
             <div className="section-label text-sell/80 mt-2">⚠ Nên BÁN / TRÁNH — stop-out levels</div>
             <PickCards picks={sellPicks} kind="SELL" capital={capital} />
           </>
         ) : (
           <>
-            <PickTable title="Nên MUA (T+)" subtitle="⚡ Swing 3-5 phiên — mua tại giá / limit, tôn trọng stop" kind="BUY" picks={buyPicks} />
+            <PickTable title="Nên MUA — giữ 4-8 tuần" subtitle="⚡ Mua ATO phiên tới · giữ tới ~40 phiên (phiên 20 chỉ mở cửa sổ) · bán ATO ngày thoát" kind="BUY" picks={buyPicks} />
             <PickTable title="Nên BÁN / TRÁNH" subtitle="⚠ Stop-out levels — thoát nếu đang nắm, tránh mua mới" kind="SELL" picks={sellPicks} />
           </>
         )}

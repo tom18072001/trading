@@ -16,16 +16,18 @@ from __future__ import annotations
 from statistics import median
 
 import pandas as pd
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from analysis.stealth import (
     STEALTH_MIN_CONDITIONS,
     STEALTH_MIN_SESSIONS,
+    panel_from_rows,
     stealth_events,
 )
 from config import SECTORS
-from database.connection import SessionLocal
+from database.connection import get_session_dependency
 from database.models import SectorFlowDaily
 
 router = APIRouter(prefix="/api/stealth", tags=["stealth-watch"])
@@ -108,31 +110,27 @@ def stealth_active(
     close_pct_60d_max: float = Query(0.4),
     min_sessions: int = Query(STEALTH_MIN_SESSIONS),
     min_conditions: int = Query(STEALTH_MIN_CONDITIONS, ge=1, le=5),
+    sess: Session = Depends(get_session_dependency),
 ):
     """Returns ALL 15 sectors classified into active / warming / inactive."""
-    sess = SessionLocal()
-    try:
-        # Get the latest date
-        latest_date = sess.query(func.max(SectorFlowDaily.date)).scalar()
-        if not latest_date:
-            return {"as_of": None, "active": [], "warming": [], "inactive": []}
+    # Get the latest date
+    latest_date = sess.query(func.max(SectorFlowDaily.date)).scalar()
+    if not latest_date:
+        return {"as_of": None, "active": [], "warming": [], "inactive": []}
 
-        # Get latest row per sector
-        latest_rows = (
-            sess.query(SectorFlowDaily)
-            .filter(SectorFlowDaily.date == latest_date)
-            .all()
-        )
+    # Get latest row per sector
+    latest_rows = (
+        sess.query(SectorFlowDaily)
+        .filter(SectorFlowDaily.date == latest_date)
+        .all()
+    )
 
-        # Also get 60-day window per sector to compute close_pct
-        window_rows = (
-            sess.query(SectorFlowDaily)
-            .filter(SectorFlowDaily.date >= str(pd.Timestamp(latest_date) - pd.Timedelta(days=90)))
-            .all()
-        )
-    finally:
-        sess.close()
-
+    # Also get 60-day window per sector to compute close_pct
+    window_rows = (
+        sess.query(SectorFlowDaily)
+        .filter(SectorFlowDaily.date >= str(pd.Timestamp(latest_date) - pd.Timedelta(days=90)))
+        .all()
+    )
     # Build 60d high/low per sector for close_pct computation, and the ATR%
     # sample the cond4 percentile rank is taken against.
     close_range: dict[str, tuple[float, float]] = {}  # sector -> (min_close, max_close)
@@ -235,7 +233,8 @@ def stealth_active(
 
 
 @router.get("/history")
-def stealth_history(limit: int = Query(50, ge=1, le=500)):
+def stealth_history(limit: int = Query(50, ge=1, le=500),
+                    sess: Session = Depends(get_session_dependency)):
     """Past stealth runs, newest first, each scored against §16.15's bar.
 
     Until 2026-08-24 this returned a hardcoded `{"rows": []}` — the same shape
@@ -250,25 +249,11 @@ def stealth_history(limit: int = Query(50, ge=1, le=500)):
     two places that can disagree. The column is already the thing the scanner
     writes and the Stealth Watch badge renders.
     """
-    sess = SessionLocal()
-    try:
-        rows = (
-            sess.query(SectorFlowDaily)
+    events = stealth_events(panel_from_rows(
+        sess.query(SectorFlowDaily)
             .order_by(SectorFlowDaily.sector_code, SectorFlowDaily.date)
             .all()
-        )
-        panel = [{
-            "sector_code": r.sector_code,
-            "date": r.date,
-            "accumulation_age": r.accumulation_age or 0,
-            "close_idx": r.close_idx or 0.0,
-            "atr_pct": r.atr_pct or 0.0,
-            "stealth_score": r.stealth_score or 0.0,
-        } for r in rows]
-    finally:
-        sess.close()
-
-    events = stealth_events(panel)
+    ))
     scored = [e for e in events if e["classification"]]
     hits = [e for e in scored if e["classification"] == "hit"]
     leads = [e["lead_days_to_price"] for e in hits if e["lead_days_to_price"]]

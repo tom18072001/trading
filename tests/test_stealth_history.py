@@ -216,3 +216,76 @@ def test_the_bench_and_the_endpoint_share_one_breakout_definition():
     assert bench._bar_atr_scaled is S.breakout_bar_scaled
     assert bench._bar_atr_baseline is S.breakout_bar_baseline
     assert bench.BREAKOUT_WINDOW == S.BREAKOUT_WINDOW
+
+# --------------------------------------------------------------------------
+# /api/sectors/stealth — the second reader of the same write-less table
+# --------------------------------------------------------------------------
+# `stealth_history` above was fixed on 2026-08-24, but `sectors_flow.py` kept
+# building its `history` key from `SectorAccumulationEvent`, which has had no
+# writer since migration 9 created it. So one endpoint reported 21 events and
+# the other reported 0 from the same panel, and nothing could tell you which
+# was lying. These pin them to one derivation.
+
+@pytest.fixture
+def client(seeded_session):
+    from fastapi.testclient import TestClient
+
+    from api.main import app
+    from database.connection import get_session_dependency
+    app.dependency_overrides[get_session_dependency] = lambda: seeded_session
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.clear()
+
+def _seed_daily(session, rows):
+    from database.models import SectorFlowDaily
+    for r in rows:
+        session.add(SectorFlowDaily(**r))
+    session.flush()
+
+def test_sectors_stealth_history_is_not_permanently_empty(client, seeded_session):
+    """The defect: a panel with a completed run reported zero events.
+
+    `SectorAccumulationEvent` is empty and always has been, so this endpoint
+    answered "this sector has never accumulated" when the truth was "nobody
+    fills that table".
+    """
+    ages = [1, 2, 3, 4] + [0] * 50
+    closes = [100.0] * 20 + [130.0] * 34
+    _seed_daily(seeded_session, _rows(ages, closes, code="BANK"))
+
+    body = client.get("/api/sectors/stealth").json()
+    assert len(body["history"]) == 1
+    assert body["history"][0]["sector_code"] == "BANK"
+
+def test_both_stealth_endpoints_derive_the_same_events(client, seeded_session):
+    """One fact, one derivation. Two readers of one panel must agree.
+
+    Equality of the event list, not just of the count: a route that finds the
+    right number of the wrong runs is the failure this is guarding against.
+    """
+    ages = [1, 2, 3] + [0] * 10 + [1, 2, 3, 4, 5] + [0] * 40
+    closes = [100.0] * 30 + [140.0] * 28
+    _seed_daily(seeded_session, _rows(ages, closes, code="BANK"))
+
+    a = client.get("/api/sectors/stealth").json()["history"]
+    b = client.get("/api/stealth/history").json()["rows"]
+
+    key = lambda e: (e["sector_code"], e["start_date"], e["end_date"])  # noqa: E731
+    assert [key(e) for e in a] == [key(e) for e in b]
+    assert len(a) == 2
+
+def test_an_open_run_reports_no_end_date_here_too(client, seeded_session):
+    """`resolved` is False and `end_date` is None while the run is live.
+
+    Reporting today's date would make every live event look closed the moment
+    the page refreshes — the same trap `stealth_events()` avoids, which is why
+    this endpoint must not re-derive its own.
+    """
+    _seed_daily(seeded_session,
+                _rows(list(range(1, 26)), [100.0] * 25, code="BANK"))
+
+    ev = client.get("/api/sectors/stealth").json()["history"]
+    assert len(ev) == 1
+    assert ev[0]["end_date"] is None
+    assert ev[0]["resolved"] is False

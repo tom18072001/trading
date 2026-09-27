@@ -17,6 +17,8 @@ import {
   fmtPct,
   AgentReport,
   PickTable,
+  RegimeGauge,
+  CountTile,
 } from './DailyInsightPage';
 
 // ---------------- formatters ----------------
@@ -133,7 +135,15 @@ describe('PickTable', () => {
   ];
 
   it('shows empty-state when no picks', () => {
+    // The BUY list is the shared shortlist (SMA200 gate), not "BUY sectors":
+    // an empty list means nothing is in an uptrend, and the copy says so.
     render(<PickTable title="Top BUY" subtitle="x" kind="BUY" picks={[]} />);
+    expect(screen.getByText(/trên SMA200/i)).toBeInTheDocument();
+    expect(screen.queryByText(/không có ngành/i)).toBeNull();
+  });
+
+  it('keeps the sector wording for an empty SELL list', () => {
+    render(<PickTable title="SELL" subtitle="x" kind="SELL" picks={[]} />);
     expect(screen.getByText(/không có ngành/i)).toBeInTheDocument();
   });
 
@@ -146,6 +156,16 @@ describe('PickTable', () => {
     expect(screen.getByText(/^R:R$/)).toBeInTheDocument();
     // Technical bit chip
     expect(screen.getByText('RSI 55')).toBeInTheDocument();
+  });
+
+  it('shows the 4-8 week sell window on BUY rows, and no T+ day', () => {
+    // 2026-09-25: the T+ mode is gone (Tom: "chỉ sử dụng 4 tuần và 8 tuần").
+    // The dates come from the backend's holiday-aware hold_window().
+    const withWindow = [{ ...buyPicks[0], sell_from: '2026-10-23', sell_by: '2026-11-20' }];
+    render(<PickTable title="BUY" subtitle="x" kind="BUY" picks={withWindow} />);
+    expect(screen.getByText(/^Cửa sổ bán$/)).toBeInTheDocument();
+    expect(screen.getByText('23/10 → 20/11')).toBeInTheDocument();
+    expect(screen.queryByText(/T\+\d/)).toBeNull();
   });
 
   it('falls back to legacy field names (price / r_r / sector)', () => {
@@ -192,5 +212,28 @@ describe('PickTable', () => {
     expect(screen.getByText(/Stop-out/i)).toBeInTheDocument();
     expect(screen.getByText(/^Score$/)).toBeInTheDocument();
     expect(screen.getByText(/ATR%/)).toBeInTheDocument();
+  });
+});
+
+// ---------------- unverified sector signals (2026-09-25) ----------------
+
+describe('RegimeGauge', () => {
+  it('prints the backend phrase and says the label is unverified', () => {
+    const phrase = '~72% khả năng giữ 5 phiên tới — chưa kiểm chứng ngoài mẫu';
+    render(<RegimeGauge label="risk_on" confidence={0.72} phrase={phrase} buy={3} sell={1} />);
+    expect(screen.getByText(phrase)).toBeInTheDocument();
+    expect(screen.getByText(/Chưa kiểm chứng/)).toBeInTheDocument();
+  });
+
+  it('no longer tells the reader to attack or defend', () => {
+    const { container } = render(<RegimeGauge label="risk_on" confidence={0.9} buy={3} sell={0} />);
+    expect(container.textContent).not.toMatch(/Tư thế|Độ tin cậy/);
+  });
+});
+
+describe('CountTile', () => {
+  it('marks a sector count as unverified when given a note', () => {
+    render(<CountTile n={3} label="Ngành BUY" tone="buy" note="ranker chưa kiểm chứng" />);
+    expect(screen.getByText('Chưa kiểm chứng')).toBeInTheDocument();
   });
 });

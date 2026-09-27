@@ -4,7 +4,7 @@ import {
 } from 'recharts';
 import {
   sectorsApi,
-  type BacktestResult, type BacktestRunRow, type BacktestStrategy,
+  type BacktestResult, type BacktestRunRow, type BacktestStrategy, type HoldSessions,
 } from '../api/client';
 
 // The selector is the whole point of backlog step 5. All three strategies have
@@ -23,6 +23,14 @@ const STRATEGY_LABEL: Record<BacktestStrategy, string> = {
 
 const vnd = (n: number) => n.toLocaleString('vi-VN', { maximumFractionDigits: 0 });
 
+// 4 or 8 weeks, nothing else (Tom, 2026-09-25: "bỏ T+2, chỉ sử dụng 4 tuần và 8
+// tuần"). This replaces the "Thanh toán T+" box: the book is now re-cut on a
+// calendar, and at a 20-session hold a settlement lag can never bind.
+const HOLDS: { sessions: HoldSessions; label: string }[] = [
+  { sessions: 20, label: '4 tuần (20 phiên)' },
+  { sessions: 40, label: '8 tuần (40 phiên)' },
+];
+
 export default function BacktestPage() {
   const [name, setName] = useState('rotation_default');
   // Defaulted to 2025 until 2026-08-23, which guaranteed the "Tín hiệu đã phát"
@@ -35,7 +43,7 @@ export default function BacktestPage() {
   const [strategy, setStrategy] = useState<BacktestStrategy>('signals');
   const [feeBps, setFeeBps] = useState(15);
   const [sellTaxBps, setSellTaxBps] = useState(10);
-  const [settlementLag, setSettlementLag] = useState(2);
+  const [holdSessions, setHoldSessions] = useState<HoldSessions>(20);
   const [result, setResult] = useState<BacktestResult | null>(null);
   // Compare = pin the run you just looked at, then run another. Kept in page
   // state rather than re-fetched: the stored runs table has no equity curve,
@@ -57,7 +65,7 @@ export default function BacktestPage() {
       const r = await sectorsApi.runBacktest({
         name, start_date: start, end_date: end, initial_capital: capital,
         strategy, fee_bps: feeBps, sell_tax_bps: sellTaxBps,
-        settlement_lag: settlementLag,
+        hold_sessions: holdSessions,
       });
       setResult(r.data);
       loadHistory();
@@ -135,11 +143,22 @@ export default function BacktestPage() {
             <input type="number" min={0} max={500} className={inputCls}
               value={sellTaxBps} onChange={(e) => setSellTaxBps(Number(e.target.value))} />
           </label>
-          <label className="space-y-1">
-            <div className="section-label">Thanh toán T+</div>
-            <input type="number" min={0} max={10} className={inputCls}
-              value={settlementLag} onChange={(e) => setSettlementLag(Number(e.target.value))} />
-          </label>
+          <div className="space-y-1">
+            <div className="section-label">Khung giữ (tái cơ cấu mỗi)</div>
+            <div className="flex rounded-lg bg-panel2 border border-line p-0.5">
+              {HOLDS.map((h) => (
+                <button
+                  key={h.sessions}
+                  onClick={() => setHoldSessions(h.sessions)}
+                  className={`flex-1 px-2 py-1.5 rounded-md text-[12px] font-medium transition ${
+                    holdSessions === h.sessions ? 'bg-raise text-hi shadow-sm' : 'text-mid hover:text-hi'
+                  }`}
+                >
+                  {h.label}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="flex justify-end gap-2">
             {result && (
               <button
@@ -160,8 +179,9 @@ export default function BacktestPage() {
           </div>
         </div>
         <p className="text-[10.5px] text-lo leading-snug">
-          Trượt giá (max 0,3% / 0,5×ATR) và biên độ ±7% HOSE là cấu trúc thị trường, không sửa được ở đây —
-          chỉ phí, thuế và chu kỳ thanh toán là thoả thuận với môi giới.
+          Trượt giá (0,3% mỗi chiều, như bench mã) và biên độ ±7% HOSE là cấu trúc thị trường, không sửa được ở đây —
+          chỉ phí và thuế là thoả thuận với môi giới. Danh mục được tái cơ cấu theo lịch khung giữ; lệnh
+          khớp ở giá đóng phiên <b>sau</b> phiên công bố tín hiệu (tín hiệu ra lúc 17:00).
         </p>
       </section>
 
@@ -200,7 +220,7 @@ export default function BacktestPage() {
               positive={Math.abs(result.sharpe_ratio) > 5 ? undefined : result.sharpe_ratio >= 1}
               note={Math.abs(result.sharpe_ratio) > 5
                 ? 'kiểm tra dữ liệu'
-                : `đã trừ phí ${result.fee_bps}bps, thuế ${result.sell_tax_bps}bps, T+${result.settlement_lag}, trượt giá, biên ±7%`}
+                : `đã trừ phí ${result.fee_bps}bps, thuế ${result.sell_tax_bps}bps, trượt giá, biên ±7% · giữ ${result.hold_sessions} phiên`}
             />
             <Metric label="Sụt giảm tối đa" value={`${result.max_drawdown_pct.toFixed(2)}%`} positive={result.max_drawdown_pct > -15} />
             <Metric label="Số lệnh" value={String(result.total_trades)} />

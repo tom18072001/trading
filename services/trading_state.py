@@ -54,9 +54,23 @@ _DEFAULT: dict[str, Any] = {
 #: read (see _read) instead of migrated — same reason `closed` was: this is one
 #: JSON file for one operator, and a missing key is indistinguishable from a
 #: null one once it is filled.
-_POSITION_DEFAULT: dict[str, Any] = {"stop": None, "target": None, "thesis": ""}
+# stop_set_at / target_set_at (2026-09-16): NGÀY mức đó bắt đầu có hiệu lực.
+# Thiếu nó thì `hit_stop` ("đã từng chạm kể từ lúc vào lệnh") sẽ chấm một mức
+# vừa đặt hôm nay lên cả quãng giá TRƯỚC khi nó tồn tại — back-painting, đúng
+# họ lỗi §25.3. Nó nổ thật ngay lần đầu dùng: một lệnh đang lãi, giá trên stop, mà bản
+# tin báo ĐÃ CHẠM STOP chỉ vì hai tuần trước giá từng xuống dưới mức vừa đặt.
+# None = rơi về `opened_at`, nên mọi dòng ghi trước hôm nay vẫn đúng: mức của
+# chúng quả thật có hiệu lực từ lúc mở lệnh.
+_POSITION_DEFAULT: dict[str, Any] = {"stop": None, "target": None, "thesis": "",
+                                     "stop_set_at": None, "target_set_at": None}
 
 _lock = threading.Lock()
+
+
+def _today_str() -> str:
+    """Hôm nay theo giờ thị trường — utils.clock là định nghĩa duy nhất (§20.2 P1-6)."""
+    from utils.clock import today
+    return today().isoformat()
 
 
 def _read() -> dict[str, Any]:
@@ -132,7 +146,8 @@ def set_capital(capital_mn: float) -> dict[str, Any]:
 def add_position(symbol: str, sector_code: str = "", side: str = "BUY",
                  entry_price: float | None = None, qty: float | None = None,
                  note: str = "", stop: float | None = None,
-                 target: float | None = None, thesis: str = "") -> dict[str, Any]:
+                 target: float | None = None, thesis: str = "",
+                 opened_at: str | None = None) -> dict[str, Any]:
     """Idempotent on (symbol, side): re-marking a pick updates it, not duplicates.
 
     `stop` / `target` / `thesis` are the recommendation the pick was made on.
@@ -157,7 +172,16 @@ def add_position(symbol: str, sector_code: str = "", side: str = "BUY",
         "stop": float(stop) if stop is not None else None,
         "target": float(target) if target is not None else None,
         "thesis": thesis.strip(),
-        "opened_at": today_str(),
+        # Mở lệnh: mức có hiệu lực ngay từ đầu, nên None là đúng (track() rơi về
+        # opened_at). Chỉ khi SỬA mức mới cần đóng dấu ngày.
+        "stop_set_at": None,
+        "target_set_at": None,
+        # `opened_at` quyết định cửa sổ bán 20-40 phiên, nên đóng dấu hôm nay cho
+        # một lệnh đã mua từ lâu là **bịa một ngày**: cửa sổ sẽ nói "mở sau 20
+        # phiên" cho một vị thế đáng lẽ đã tới hạn. Nhận ngày thật nếu caller
+        # biết; chuỗi rỗng = "không biết", và `sell_range.advise()` để cửa sổ là
+        # None thay vì đoán.
+        "opened_at": today_str() if opened_at is None else (opened_at.strip() or None),
     }
     with _lock:
         s = _read()
@@ -173,7 +197,8 @@ def update_position(symbol: str, side: str = "BUY", *,
                     entry_price: float | None = None, qty: float | None = None,
                     note: str | None = None, opened_at: str | None = None,
                     stop: float | None = None,
-                    target: float | None = None) -> dict[str, Any]:
+                    target: float | None = None,
+                    thesis: str | None = None) -> dict[str, Any]:
     """Edit a position in place. Only the fields passed are touched.
 
     Deliberately NOT add_position(): that one stamps `opened_at` to today and
@@ -198,14 +223,31 @@ def update_position(symbol: str, side: str = "BUY", *,
                 p["entry_price"] = None if entry_price < 0 else float(entry_price)
             if qty is not None:
                 p["qty"] = None if qty < 0 else float(qty)
+            # Sửa một mức là đặt một mức MỚI, và nó chỉ có hiệu lực từ hôm nay.
+            # Đóng dấu ngày, nếu không `hit_stop` sẽ chấm nó lên quá khứ.
             if stop is not None:
-                p["stop"] = None if stop < 0 else float(stop)
+                new_stop = None if stop < 0 else float(stop)
+                if new_stop != p.get("stop"):
+                    p["stop_set_at"] = _today_str()
+                p["stop"] = new_stop
             if target is not None:
-                p["target"] = None if target < 0 else float(target)
+                new_target = None if target < 0 else float(target)
+                if new_target != p.get("target"):
+                    p["target_set_at"] = _today_str()
+                p["target"] = new_target
             if note is not None:
                 p["note"] = note.strip()
+            # thesis được thêm 2026-09-16: trước đó nó chỉ ghi được lúc MỞ lệnh
+            # và không sửa được ở đâu cả — mà luận điểm là đúng thứ phải sửa khi
+            # lệnh tiến triển (vào lệnh rồi, giờ sát target). Một trường viết-một-lần
+            # rồi cũ đi là một trường sẽ nói dối. Cùng lỗi §22.10 đã ghi cho giá
+            # vào lệnh: đánh dấu được nhưng không sửa được.
+            if thesis is not None:
+                p["thesis"] = thesis.strip()
             if opened_at is not None:
-                p["opened_at"] = opened_at.strip()
+                # Chuỗi rỗng = xoá về "không biết", cùng quy ước với số âm ở các
+                # trường giá. Không có nó thì một ngày đã đóng dấu nhầm là vĩnh viễn.
+                p["opened_at"] = opened_at.strip() or None
         if not found:
             raise ValueError(f"no open {side} position for {sym}")
         _write(s)

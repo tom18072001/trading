@@ -132,19 +132,12 @@ def test_cost_overrides_reach_the_simulation(seeded_session):
 
 
 def test_defaults_are_used_when_no_override_is_given(seeded_session):
-    from config import BACKTEST_FEE_BPS, BACKTEST_SELL_TAX_BPS, BACKTEST_SETTLEMENT_LAG
+    from config import BACKTEST_FEE_BPS, BACKTEST_HOLD_SESSIONS, BACKTEST_SELL_TAX_BPS
     dates = _seed(seeded_session)
     res = SectorBacktestService(seeded_session).run("def", dates[0], dates[-1])
     assert res.fee_bps == BACKTEST_FEE_BPS
     assert res.sell_tax_bps == BACKTEST_SELL_TAX_BPS
-    assert res.settlement_lag == BACKTEST_SETTLEMENT_LAG
-
-
-def test_settlement_lag_override_is_reported(seeded_session):
-    dates = _seed(seeded_session)
-    res = SectorBacktestService(seeded_session).run(
-        "t0", dates[0], dates[-1], settlement_lag=0)
-    assert res.settlement_lag == 0
+    assert res.hold_sessions == BACKTEST_HOLD_SESSIONS
 
 
 def test_negative_costs_are_clamped_not_credited(seeded_session):
@@ -152,9 +145,91 @@ def test_negative_costs_are_clamped_not_credited(seeded_session):
     dates = _seed(seeded_session)
     _seed_signals(seeded_session, dates)
     res = SectorBacktestService(seeded_session).run(
-        "neg", dates[0], dates[-1], fee_bps=-50, sell_tax_bps=-50, settlement_lag=-3)
-    assert res.fee_bps == 0 and res.sell_tax_bps == 0 and res.settlement_lag == 0
+        "neg", dates[0], dates[-1], fee_bps=-50, sell_tax_bps=-50)
+    assert res.fee_bps == 0 and res.sell_tax_bps == 0
     assert res.total_cost_pct >= 0
+
+
+# --------------------------------------------------------------------------
+# 4 and 8 weeks only; t+1; carry the last signal (2026-09-25)
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("hold", [20, 40])
+def test_the_book_is_recut_only_on_the_hold_calendar(seeded_session, hold):
+    """Rebalancing every session was §23.5's 844 trades/year. Now the book is
+    re-cut on session 1 and every `hold` sessions after it, nowhere else."""
+    dates = _seed(seeded_session, days=90)
+    res = SectorBacktestService(seeded_session).run(
+        "cal", dates[0], dates[-1], strategy="flow_z", hold_sessions=hold)
+    assert res.hold_sessions == hold
+    allowed = {dates[t] for t in range(1, len(dates), hold)}
+    traded = {t["date"] for t in res.trade_log}
+    assert traded and traded <= allowed
+    assert res.rebalance_count == len(allowed)
+
+
+@pytest.mark.parametrize("bad", [2, 3, 5, 10, 60])
+def test_a_t_plus_horizon_is_refused(seeded_session, bad):
+    """Tom, 2026-09-25: "chỉ sử dụng 4 tuần và 8 tuần". A 3-session backtest is
+    not a smaller version of the product, it is a different product."""
+    dates = _seed(seeded_session)
+    with pytest.raises(ValueError, match="hold_sessions"):
+        SectorBacktestService(seeded_session).run(
+            "bad", dates[0], dates[-1], hold_sessions=bad)
+
+
+def test_a_signal_is_traded_the_session_after_it_is_published(seeded_session):
+    """Signals go out at 17:00, after the close they were computed from, so the
+    first fill can only be the NEXT session's close (review 2026-09-24 §4.1/6)."""
+    dates = _seed(seeded_session)
+    _seed_signals(seeded_session, dates[:1])
+    res = SectorBacktestService(seeded_session).run("t1", dates[0], dates[-1])
+    buys = [t for t in res.trade_log if t["side"] == "BUY"]
+    assert buys and buys[0]["date"] == dates[1]
+    assert all(t["date"] != dates[0] for t in res.trade_log)
+
+
+def test_a_session_without_a_new_signal_keeps_the_last_one(seeded_session):
+    """The old engine read "no row today" as "sell everything" and did, on 66 of
+    114 sessions. One signal on day 0 must hold FISH to the end."""
+    dates = _seed(seeded_session, days=60)
+    _seed_signals(seeded_session, dates[:1])
+    res = SectorBacktestService(seeded_session).run(
+        "carry", dates[0], dates[-1], hold_sessions=20)
+    sells = [t for t in res.trade_log if t["side"] == "SELL"]
+    assert not sells, f"sold on a day with no new signal: {sells}"
+    assert res.final_capital > res.initial_capital   # FISH trends +1%/session
+
+
+def test_garbage_vnindex_rows_do_not_become_the_benchmark(seeded_session, monkeypatch):
+    """613 rows of vnindex ~ 1.82 printed a "+97,432%" benchmark. A series that
+    is mostly garbage must fall back to the flagged sector mean."""
+    import services.backtest_service as bs
+    monkeypatch.setattr(bs, "_panel_vnindex", lambda: None)
+    dates = _seed(seeded_session)
+    for row in seeded_session.query(MacroAnchor).all():
+        row.vnindex = 1.82
+    seeded_session.commit()
+    res = SectorBacktestService(seeded_session).run("junk", dates[0], dates[-1])
+    assert res.benchmark_source == "sector_mean"
+    assert abs(res.benchmark_return_pct) < 100
+
+
+def test_the_price_panel_index_is_used_before_the_sector_mean(seeded_session, monkeypatch):
+    """`macro_anchors` has no VNINDEX before 2026-04-09 (23.5). The price panel's
+    ^VNINDEX is the same index; falling to the sector mean first was a choice."""
+    import pandas as pd
+
+    import services.backtest_service as bs
+    dates = _seed(seeded_session)
+    seeded_session.query(MacroAnchor).delete()
+    seeded_session.commit()
+    monkeypatch.setattr(bs, "_panel_vnindex", lambda: pd.Series(
+        [1000.0 * 1.001 ** i for i in range(len(dates))], index=dates))
+    res = SectorBacktestService(seeded_session).run("panel", dates[0], dates[-1])
+    assert (res.benchmark_source, res.benchmark_origin) == ("vnindex", "price_panel")
+    assert res.benchmark_return_pct == pytest.approx((1.001 ** (len(dates) - 1) - 1) * 100,
+                                                     rel=1e-6)
 
 
 # --------------------------------------------------------------------------
@@ -185,10 +260,19 @@ def test_router_forwards_cost_overrides(client, seeded_session):
     dates = _seed(seeded_session)
     r = client.post("/api/sectors/backtest", json={
         "name": "fees", "start_date": dates[0], "end_date": dates[-1],
-        "fee_bps": 42, "sell_tax_bps": 7, "settlement_lag": 3,
+        "fee_bps": 42, "sell_tax_bps": 7, "hold_sessions": 40,
     })
     body = r.json()
-    assert (body["fee_bps"], body["sell_tax_bps"], body["settlement_lag"]) == (42, 7, 3)
+    assert (body["fee_bps"], body["sell_tax_bps"], body["hold_sessions"]) == (42, 7, 40)
+
+
+def test_router_rejects_a_t_plus_hold(client, seeded_session):
+    dates = _seed(seeded_session)
+    r = client.post("/api/sectors/backtest", json={
+        "name": "t3", "start_date": dates[0], "end_date": dates[-1],
+        "hold_sessions": 3,
+    })
+    assert r.status_code == 422
 
 
 def test_router_rejects_an_unknown_strategy(client, seeded_session):
@@ -225,3 +309,15 @@ def test_trade_log_rows_have_the_shape_the_client_types(client, seeded_session):
         assert ("alloc" in t) == (t["side"] == "BUY")
         assert ("proceeds" in t) == (t["side"] == "SELL")
         assert "ret" not in t
+
+
+def test_slippage_is_a_flat_three_tenths_per_side_like_the_ticker_bench():
+    """Tom, 2026-09-25. With the sector ATR fixed (it was 1/5 of the truth),
+    `max(0.3%, 0.5 x ATR%)` became ~1.4% per side -- 66% of capital in costs
+    for `flow_z` at a 20-session hold. One slippage model for the sector
+    backtest and the ticker bench now: 0.3% per fill, whatever the ATR."""
+    from analysis.bench import SLIPPAGE_PER_SIDE
+
+    for atr in (None, 0.0, 0.0057, 0.028, 0.08):
+        assert SectorBacktestService._slippage(atr) == pytest.approx(0.003)
+    assert SLIPPAGE_PER_SIDE == pytest.approx(0.003)

@@ -11,6 +11,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from daily_watch import positions as position_tracking
 from services import report_runner, trading_state
 
 log = logging.getLogger(__name__)
@@ -42,6 +43,7 @@ class PositionPatch(BaseModel):
     opened_at: str | None = None
     stop: float | None = None
     target: float | None = None
+    thesis: str | None = None
 
 
 class PositionClose(BaseModel):
@@ -92,7 +94,7 @@ def update_position(symbol: str, body: PositionPatch, side: str = "BUY"):
         return trading_state.update_position(
             symbol, side, entry_price=body.entry_price, qty=body.qty,
             note=body.note, opened_at=body.opened_at,
-            stop=body.stop, target=body.target,
+            stop=body.stop, target=body.target, thesis=body.thesis,
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
@@ -121,133 +123,15 @@ def remove_position(symbol: str, side: str = "BUY"):
     return trading_state.remove_position(symbol, side)
 
 
-#: T+2 cash settlement on HOSE — you may sell on the 2nd session after the buy.
-SETTLEMENT_SESSIONS = 2
-
-
-def _track(p: dict, daily: list[dict], last: float | None) -> dict:
-    """Everything the book needs to answer "is this trade still valid".
-
-    `daily` is the 30-session OHLCV tail PicksUniverseService already carries on
-    every TickerRow and already round-trips to disk — no new data source. It
-    keys the date as "time"; the rest of the API says "date", so the rename
-    happens here, once.
-
-    `hit_stop` / `hit_target` are EVER TOUCHED since entry, not "today's close
-    is through the level": a stop that was breached on Tuesday and recovered by
-    Friday is still a stop that was breached, and a book that forgets that is
-    telling you the trade is fine.
-    """
-    from utils.clock import next_trading_day, sessions_between, to_market_date
-
-    stop, target = p.get("stop"), p.get("target")
-    out: dict = {
-        "path": [], "hit_stop": False, "hit_target": False,
-        "dist_to_stop_pct": None, "dist_to_target_pct": None,
-        "sessions_held": None, "sellable_on": None,
-    }
-
-    opened = p.get("opened_at")
-    if opened:
-        try:
-            d0 = to_market_date(opened)
-            out["sessions_held"] = sessions_between(d0)
-            out["sellable_on"] = next_trading_day(d0, SETTLEMENT_SESSIONS).isoformat()
-        except (ValueError, TypeError):
-            pass   # a hand-edited opened_at must not 500 the whole book
-
-    for bar in daily:
-        d = bar.get("time") or bar.get("date")
-        if not d or (opened and str(d)[:10] < str(opened)[:10]):
-            continue
-        close = bar.get("close")
-        if close is None:
-            continue
-        out["path"].append({"date": str(d)[:10], "close": float(close)})
-
-    # ponytail: closes only — daily_prices carries open/close/volume, no high or
-    # low, so an intraday wick through the stop that closed back above it does
-    # not register. Widen the tail to OHLC in picks_universe_service if that
-    # matters; on a swing book judged on closes it does not.
-    closes = [b["close"] for b in out["path"]]
-    if closes:
-        if stop:
-            out["hit_stop"] = min(closes) <= stop
-        if target:
-            out["hit_target"] = max(closes) >= target
-
-    if last:
-        if stop:
-            out["dist_to_stop_pct"] = (last / stop - 1) * 100
-        if target:
-            out["dist_to_target_pct"] = (target / last - 1) * 100
-    return out
-
-
 @router.get("/positions/pnl")
 def positions_pnl():
-    """The book marked to the last close the app already knows.
+    """Sổ được chấm theo giá đóng gần nhất — logic ở daily_watch/positions.py.
 
-    Prices come from the PicksUniverseService snapshot — the same cache that
-    feeds Daily Insight — via `.peek()`, never `get_snapshot()`. A cold cache
-    must return the book with `last=None` in a few milliseconds, not block a
-    request for minutes behind the 18 req/min KBS throttle (the trap
-    api/routers/insight.py documents at its `/daily` handler).
-
-    ponytail: last close, not intraday, and no fees or the 0.1% sell tax from
-    §18.2/10 — this is a position tracker, not the backtest cost model. Add
-    them here if this number ever drives a decision rather than describing one.
+    Nó rời khỏi file này ngày 2026-09-16 vì job cảnh báo stop hằng ngày cần đúng
+    định nghĩa "đã chạm stop chưa", mà một job Task Scheduler không gọi được một
+    route. Viết lại ở hai chỗ là hai định nghĩa sẽ lệch (§22.11).
     """
-    state = trading_state.get_state()
-    rows = state["positions"]
-
-    prices: dict[str, float] = {}
-    paths: dict[str, list] = {}
-    as_of = None
-    try:
-        from services.picks_universe_service import PicksUniverseService
-        snap = PicksUniverseService().peek()
-        if snap:
-            as_of = str(snap.as_of)
-            prices = {sym: t.close for sym, t in snap.tickers.items()
-                      if getattr(t, "close", None)}
-            paths = {sym: (getattr(t, "daily_prices", None) or [])
-                     for sym, t in snap.tickers.items()}
-    except Exception:  # noqa: BLE001 - a price lookup must never break the book
-        log.exception("[state] price lookup failed; returning book unmarked")
-
-    out = []
-    total_cost = total_value = 0.0
-    for p in rows:
-        last = prices.get(p.get("symbol", ""))
-        entry, qty = p.get("entry_price"), p.get("qty")
-        row = {**p, "last": last, "pnl_pct": None, "pnl_vnd": None, "value": None,
-               **_track(p, paths.get(p.get("symbol", "")) or [], last)}
-        if last and entry:
-            # A SELL mark is a short in the book's own terms; VN cash cannot
-            # short (§18.2/12), so this is really "I exited" — sign it anyway
-            # so the number means the same thing on both sides.
-            direction = 1 if p.get("side") == "BUY" else -1
-            row["pnl_pct"] = direction * (last / entry - 1) * 100
-            if qty:
-                row["value"] = last * qty
-                row["pnl_vnd"] = direction * (last - entry) * qty
-                total_cost += entry * qty
-                total_value += last * qty
-        out.append(row)
-
-    return {
-        "as_of": as_of,
-        "positions": out,
-        "total_cost": total_cost or None,
-        "total_value": total_value or None,
-        "total_pnl_vnd": (total_value - total_cost) if total_cost else None,
-        "total_pnl_pct": ((total_value / total_cost - 1) * 100) if total_cost else None,
-        # How much of the book is actually measurable — a P&L computed over 2 of
-        # 9 positions must not be read as the book's P&L.
-        "priced": sum(1 for r in out if r["pnl_pct"] is not None),
-        "count": len(out),
-    }
+    return position_tracking.mark_book()
 
 
 @router.get("/positions/realised")

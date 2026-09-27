@@ -16,8 +16,9 @@ from config import (
     TRADING_HALT,
 )
 from database.models import SectorFlowDaily, SectorSignal
-from services.rotation_model_service import RotationModelService
+from services.rotation_model_service import FeaturesMissingError, RotationModelService
 from services import trading_state
+from utils import clock
 from utils.clock import today_str
 
 
@@ -25,7 +26,14 @@ class SectorSignalService:
     def __init__(self, session: Session):
         self.session = session
 
-    def _persistence_ok(self, sector_code: str) -> bool:
+    def _persistence_ok(self, sector_code: str, direction: int = 1) -> bool:
+        """Net flow held the SAME sign as the trade for the last N sessions.
+
+        `direction` is +1 for a long (BUY) and -1 for a short (SELL). It used to
+        accept any run of equal signs, so a BUY could go out after three
+        sessions of net OUTflow -- 24 of the 96 BUYs published had (review
+        2026-09-24 §4.1/8).
+        """
         rows = (
             self.session.query(SectorFlowDaily)
             .filter(SectorFlowDaily.sector_code == sector_code)
@@ -36,7 +44,7 @@ class SectorSignalService:
         if len(rows) < PERSISTENCE_FILTER_SESSIONS:
             return False
         signs = [1 if (r.net_dollar_flow or 0) > 0 else -1 for r in rows]
-        return all(s == signs[0] for s in signs)
+        return all(s == direction for s in signs)
 
     def _stealth_sectors(self) -> dict[str, int]:
         """{sector_code: accumulation_age} for sectors whose LATEST daily row
@@ -72,10 +80,30 @@ class SectorSignalService:
         }
 
     def publish(self, model_run_id: int | None = None) -> pd.DataFrame:
+        # §4.1/11 of review 2026-09-24: 14 of 62 signal dates were weekends or
+        # holidays, each a copy of the last session's features under a new
+        # date (the Task Scheduler triggers are -Daily, CLAUDE.md §8). No
+        # session, no signal.
+        closed = clock.closed_today()
+        if closed:
+            print(f"[signals] {closed} is not a trading day -- nothing to publish")
+            return pd.DataFrame()
+
         rms = RotationModelService(self.session)
-        ranked = rms.predict_today()
+        try:
+            ranked = rms.predict_today()
+        except FeaturesMissingError as e:
+            # Publish NOTHING rather than a ranking of zeros. The email still
+            # goes out (its buy list no longer depends on sector signals) and
+            # shows the last published signals under their own date.
+            print(f"[signals] *** NOT PUBLISHING: {e} ***")
+            return pd.DataFrame()
         if ranked.empty:
             return ranked
+        if model_run_id is None:
+            # Every one of the 929 published signals had model_run_id NULL, so
+            # no signal could be traced to the model that made it (§4.1/10).
+            model_run_id = getattr(rms, "active_run_id", None)
 
         date = today_str()          # P1-6: market-local, not host-local
         n = len(ranked)
@@ -118,22 +146,26 @@ class SectorSignalService:
         out_rows = []
         for _i, row in ranked.iterrows():
             rank = int(row["rank"])
-            persistence = self._persistence_ok(row["sector_code"])
             code = row["sector_code"]
+            long_ok = self._persistence_ok(code, +1)
+            short_ok = self._persistence_ok(code, -1)
             # §16.3 action precedence: ACCUMULATE > BUY > SELL > HOLD
             if halted:
                 action = "HOLD"
             elif code in stealth:
                 action = "ACCUMULATE"
-            elif rank <= MAX_LONG_SECTORS and persistence:
+            elif rank <= MAX_LONG_SECTORS and long_ok:
                 action = "BUY"
             elif (ALLOW_SHORT_SIGNALS and rank > n - MAX_SHORT_SECTORS
-                    and persistence):
+                    and short_ok):
                 # §18.2/12 says the cash leg cannot short; set
                 # ALLOW_SHORT_SIGNALS=0 to stop publishing this.
                 action = "SELL"
             else:
                 action = "HOLD"
+            # Stored flag: persistence in the direction of the action taken
+            # (long for BUY/ACCUMULATE/HOLD, short for SELL).
+            persistence = short_ok if action == "SELL" else long_ok
 
             existing = (
                 self.session.query(SectorSignal)

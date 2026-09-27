@@ -212,9 +212,19 @@ def test_the_phrase_hedges_at_the_low_end_not_the_high_end():
     assert hedge in confidence_phrase(0.54)
     assert hedge not in confidence_phrase(0.55)
     assert hedge not in confidence_phrase(0.91), (
-        "the high end is calibrated on the full panel — hedging it re-introduces "
-        "the 300-bar artefact"
+        "the high end is calibrated IN SAMPLE on the full panel — this specific "
+        "hedge there re-introduces the 300-bar artefact; the out-of-sample caveat "
+        "is a separate suffix (test below)"
     )
+
+
+def test_every_phrase_says_the_number_is_not_validated_out_of_sample():
+    """2026-09-25 (review 2026-09-24 §4.1/7): the calibration was measured on a
+    full-panel fit. Replayed as published, "holds 5 sessions" read 0.69-0.85
+    against a realised 0.28-0.58 -- at every level, not only the low end."""
+    from analysis.regime import UNVERIFIED_SUFFIX
+    for c in (None, 0.2, 0.54, 0.55, 0.91, 1.0):
+        assert confidence_phrase(c).endswith(UNVERIFIED_SUFFIX)
 
 
 def test_the_low_hedge_says_reality_is_worse_not_better():

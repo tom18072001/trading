@@ -62,3 +62,36 @@ def test_relative_strength_too_short_returns_nan():
     s = pd.Series([100, 101])
     b = pd.Series([100, 101])
     assert np.isnan(relative_strength(s, b, lookback=10))
+
+
+# ---- 2026-09-25: the sector ATR was divided by n twice (review §4.1/3) ------
+
+def test_sector_atr_is_the_mean_of_its_constituents_not_a_fifth_of_it():
+    """Five identical names must give the sector exactly their own ATR%. The
+    old code added atr*(1/n) and then divided by n again: 1/5 of the truth,
+    which is how §16.15 came to believe the median daily ATR was 0.57%."""
+    from analysis.flow_aggregation import _atr_pct
+    one = _df([10, 11, 12, 13, 14] * 12)
+    agg = aggregate_sector("BANK", {s: one.copy() for s in "ABCDE"})
+    assert agg.atr_pct == pytest.approx(_atr_pct(one), rel=1e-12)
+
+
+def test_sector_atr_weights_the_names_that_have_an_atr():
+    """A name too short for a 14-bar ATR drops out of the mean; it does not
+    drag it towards zero."""
+    from analysis.flow_aggregation import _atr_pct
+    long_ = _df([10, 11, 12, 13, 14] * 12)
+    short = _df([20, 21, 22])
+    agg = aggregate_sector("BANK", {"A": long_, "B": short})
+    assert agg.atr_pct == pytest.approx(_atr_pct(long_), rel=1e-12)
+
+
+def test_chain_close_idx_moves_only_by_the_basket_return():
+    """The stored level is chained, so a constituent that fails to fetch
+    changes nothing but that day's return -- the raw price sum jumped +62%
+    then -39% on STEEL when one did (2026-09-22/23)."""
+    from analysis.flow_aggregation import chain_close_idx
+    assert chain_close_idx(200.0, 0.01) == pytest.approx(202.0)
+    assert chain_close_idx(None, 0.01) == pytest.approx(101.0)        # new chain at 100
+    assert chain_close_idx(200.0, None) == 200.0                      # no move invented
+    assert chain_close_idx(float("nan"), -0.02) == pytest.approx(98.0)
