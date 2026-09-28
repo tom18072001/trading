@@ -135,10 +135,11 @@ describe('PickTable', () => {
   ];
 
   it('shows empty-state when no picks', () => {
-    // The BUY list is the shared shortlist (SMA200 gate), not "BUY sectors":
-    // an empty list means nothing is in an uptrend, and the copy says so.
+    // The BUY list is the shared shortlist (the momentum order since
+    // 2026-09-28), not "BUY sectors": it ranks every liquid name with 6 months
+    // of prices, so an empty list is a data problem and the copy says so.
     render(<PickTable title="Top BUY" subtitle="x" kind="BUY" picks={[]} />);
-    expect(screen.getByText(/trên SMA200/i)).toBeInTheDocument();
+    expect(screen.getByText(/6 tháng giá/i)).toBeInTheDocument();
     expect(screen.queryByText(/không có ngành/i)).toBeNull();
   });
 
@@ -151,20 +152,32 @@ describe('PickTable', () => {
     render(<PickTable title="BUY" subtitle="x" kind="BUY" picks={buyPicks} />);
     expect(screen.getByText('HPG')).toBeInTheDocument();
     expect(screen.getByText('NKG')).toBeInTheDocument();
-    // BUY-specific column headers present
-    expect(screen.getByText(/^Target$/)).toBeInTheDocument();
-    expect(screen.getByText(/^R:R$/)).toBeInTheDocument();
+    // 2026-09-28: the buy layer's columns, not the SWING target/stop
+    expect(screen.getByText(/^Vùng mua$/)).toBeInTheDocument();
+    expect(screen.getByText(/^4 tuần$/)).toBeInTheDocument();
+    expect(screen.getByText(/^8 tuần$/)).toBeInTheDocument();
+    expect(screen.queryByText(/^Target$/)).toBeNull();
     // Technical bit chip
     expect(screen.getByText('RSI 55')).toBeInTheDocument();
   });
 
-  it('shows the 4-8 week sell window on BUY rows, and no T+ day', () => {
+  it('prints the accept range and the measured 4/8-week band', () => {
+    const layered = [{ ...buyPicks[0], rank: 1, accept_lo: 26.88, accept_hi: 28.28,
+      outlook_4w: { p25: -0.05, median: 0.004, p75: 0.061, win: 0.5 },
+      outlook_8w: { p25: -0.07, median: 0.012, p75: 0.11, win: 0.54 } }];
+    render(<PickTable title="BUY" subtitle="x" kind="BUY" picks={layered} />);
+    expect(screen.getByText(/26,88 – 28,28|26.88 – 28.28/)).toBeInTheDocument();
+    expect(screen.getByText('-5.0% · +0.4% · +6.1%')).toBeInTheDocument();
+    expect(screen.getByText('-7.0% · +1.2% · +11.0%')).toBeInTheDocument();
+  });
+
+  it('shows the two review dates on BUY rows, and no T+ day', () => {
     // 2026-09-25: the T+ mode is gone (Tom: "chỉ sử dụng 4 tuần và 8 tuần").
-    // The dates come from the backend's holiday-aware hold_window().
+    // 2026-09-28: sessions 20 and 40 are reviews (keep while top 16), not exits.
     const withWindow = [{ ...buyPicks[0], sell_from: '2026-10-23', sell_by: '2026-11-20' }];
     render(<PickTable title="BUY" subtitle="x" kind="BUY" picks={withWindow} />);
-    expect(screen.getByText(/^Cửa sổ bán$/)).toBeInTheDocument();
-    expect(screen.getByText('23/10 → 20/11')).toBeInTheDocument();
+    expect(screen.getByText(/^Xem lại$/)).toBeInTheDocument();
+    expect(screen.getByText('23/10 · 20/11')).toBeInTheDocument();
     expect(screen.queryByText(/T\+\d/)).toBeNull();
   });
 

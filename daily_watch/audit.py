@@ -15,20 +15,22 @@ lưu ghi cả khuyến nghị lẫn `marks` — từ 2026-09-25 là giá đóng 
 universe**, không chỉ các mã được nhắc tới — nên N bản lưu tự cho một chuỗi giá,
 kể cả base rate. Không cần nguồn giá thứ hai, không cần panel cập nhật tay.
 
-## Hai luật, chấm cạnh nhau (2026-09-25)
+## Ba luật, chấm cạnh nhau
 
-Tom bỏ ngưỡng `MIN_BUY_SCORE` 2,5 và giữ cổng SMA200 ("bỏ ngay, giữ cổng
-SMA200"). Phép đo cho quyết định đó là in-sample, t ≈ 1,5 (review 2026-09-24
-§2.2). Nên mỗi bản lưu ghi cả danh sách luật cũ LẼ RA cho ra
-(`shortlist_with_cutoff`), và script này chấm cả hai trên cùng ngày, cùng base:
+Mỗi bản lưu ghi luật đang chạy (`shortlist`) và luật ngay trước nó LẼ RA cho ra
+gì, nên script này chấm các luật trên cùng ngày, cùng base:
 
-  - **luật đang chạy** — `shortlist`: cổng SMA200 → blend.
-  - **luật cũ** — `shortlist_with_cutoff`; với bản lưu trước 2026-09-25 thì
-    chính `shortlist` (khi đó đang chạy luật có ngưỡng).
+  - **luật động lượng** (từ 2026-09-29) — `shortlist`; bóng của nó là
+    `shortlist_previous_rule` (luật cổng SMA200).
+  - **luật cổng SMA200 → blend** (2026-09-25 .. 28) — `shortlist` của các bản
+    lưu có `shortlist_with_cutoff`, và `shortlist_previous_rule` về sau.
+  - **luật điểm ≥ 2,5** (trước 2026-09-25) — `shortlist_with_cutoff`, hoặc
+    chính `shortlist` của bản lưu cũ hơn.
   - **base** — mọi mã của universe có giá ở cả hai bản lưu (NO GATE, §16.12).
 
-Đây là phép đo **ngoài mẫu** đầu tiên của việc bỏ ngưỡng — dữ liệu chưa từng
-được dùng để chọn luật.
+Đây là phép đo **ngoài mẫu**: dữ liệu chưa từng được dùng để chọn luật. Với
+luật động lượng, nó là thứ duy nhất trả lời được câu *"con số 31%/năm có thật
+không"* (docs/reviews/STRATEGY_STUDY_2026-09-28.md).
 
 ## Cái script này KHÔNG làm
 
@@ -58,7 +60,10 @@ ARCHIVE = ROOT / "data" / "watch"
 #: này, in ra một con số là mời người đọc tin vào nhiễu.
 MIN_FORWARD = 2
 
-RUNNING, CUTOFF = "luật đang chạy (cổng SMA200)", "luật cũ (điểm ≥ 2,5)"
+MOMENTUM = "luật động lượng (từ 29/09)"
+RUNNING = "luật cổng SMA200 → blend"
+CUTOFF = "luật điểm ≥ 2,5"
+RULES = (MOMENTUM, RUNNING, CUTOFF)
 
 
 def load() -> list[dict]:
@@ -72,17 +77,21 @@ def load() -> list[dict]:
 
 
 def rule_lists(snap: dict) -> dict[str, list[str]]:
-    """{luật: [mã]} cho một bản lưu.
+    """{luật: [mã]} cho một bản lưu, theo cái bản lưu đó ghi.
 
-    Bản lưu trước 2026-09-25 không có `shortlist_with_cutoff` — khi đó
-    `shortlist` CHÍNH LÀ luật có ngưỡng, nên nó được chấm vào luật cũ, không
-    phải luật đang chạy.
+    Bản lưu trước 2026-09-25 không có bóng — khi đó `shortlist` CHÍNH LÀ luật
+    có ngưỡng. 2026-09-25 .. 28: `shortlist` là luật cổng SMA200, bóng là luật
+    có ngưỡng. Từ 2026-09-29: `shortlist` là luật động lượng, bóng là luật cổng
+    SMA200.
     """
     syms = [p["symbol"] for p in snap.get("shortlist") or []]
-    if "shortlist_with_cutoff" not in snap:
-        return {CUTOFF: syms}
-    return {RUNNING: syms,
-            CUTOFF: [p["symbol"] for p in snap.get("shortlist_with_cutoff") or []]}
+    if "shortlist_previous_rule" in snap:
+        return {MOMENTUM: syms,
+                RUNNING: [p["symbol"] for p in snap.get("shortlist_previous_rule") or []]}
+    if "shortlist_with_cutoff" in snap:
+        return {RUNNING: syms,
+                CUTOFF: [p["symbol"] for p in snap.get("shortlist_with_cutoff") or []]}
+    return {CUTOFF: syms}
 
 
 def _ret(m0: dict, m1: dict, sym: str) -> float | None:
@@ -133,7 +142,7 @@ def main() -> int:
               f"({pending} mã đang chờ).")
     else:
         print(f"  {'luật':34s} {'ngày':>5s} {'lệnh':>5s} {'TB/lệnh':>9s} {'vượt base':>10s}")
-        for rule in (RUNNING, CUTOFF):
+        for rule in RULES:
             got = [r for r in rows if r.get(rule) is not None]
             if not got:
                 print(f"  {rule:34s} {'—':>5s}")
@@ -147,12 +156,14 @@ def main() -> int:
         if based:
             print(f"  {'base: cả universe (NO GATE)':34s} {len(based):>5d} {'':>5s} "
                   f"{st.mean(r['base'] for r in based)*100:>+8.2f}%")
-        both = [r[RUNNING] - r[CUTOFF] for r in rows
-                if r.get(RUNNING) is not None and r.get(CUTOFF) is not None]
-        if both:
-            print(f"\n  hiệu cặp (đang chạy − cũ), cùng ngày: {st.mean(both)*100:+.2f}%/lệnh "
-                  f"trên {len(both)} ngày. Review 2026-09-24 §2.2 dự đoán dương "
-                  f"(+0,39 / +0,44 ở khung 20 / 40), đo in-sample.")
+        for new_rule, old_rule, note in (
+                (MOMENTUM, RUNNING, "STRATEGY_STUDY_2026-09-28 dự đoán dương, đo in-sample"),
+                (RUNNING, CUTOFF, "review 2026-09-24 §2.2 dự đoán dương (+0,39 / +0,44)")):
+            both = [r[new_rule] - r[old_rule] for r in rows
+                    if r.get(new_rule) is not None and r.get(old_rule) is not None]
+            if both:
+                print(f"\n  hiệu cặp ({new_rule} − {old_rule}), cùng ngày: "
+                      f"{st.mean(both)*100:+.2f}%/lệnh trên {len(both)} ngày. {note}.")
         print("\n  Đây là nhật ký, KHÔNG phải một biên độ alpha: cỡ mẫu này quá nhỏ")
         print("  để kết luận (§26.8). Dùng ticker_alpha_bench.py để đo edge.")
 

@@ -137,8 +137,8 @@ def _(f):
 
 @rule("shipped_rule_top5")
 def _(f):
-    """THE BUY RULE AS SHIPPED since 2026-09-25 (`long_shortlist`): SMA200 gate,
-    then the production rank blend over the whole liquid universe. Top 5."""
+    """THE BUY RULE AS SHIPPED (`long_shortlist`, `X_shipped_rule`): since
+    2026-09-28 risk-adjusted 6-month momentum over the liquid universe. Top 5."""
     from scripts.ticker_alpha_bench import FACTORS
     return FACTORS["X_shipped_rule"](f).rank(axis=1, ascending=False) <= 5
 

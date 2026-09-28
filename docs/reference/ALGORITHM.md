@@ -270,6 +270,23 @@ The retired readers on `_legacy_stocks` / `_legacy_stock_prices` /
 `_legacy_stock_features` are gone (`CLAUDE.md` §2). Those tables persist for
 the 2-week shadow window and drop in migration 10.
 
+**The buy rule since 2026-09-28** (`CLAUDE.md` §28,
+`docs/reviews/STRATEGY_STUDY_2026-09-28.md`). One function for every surface:
+`long_shortlist`.
+
+- **Ordering key.** `services.buy_layer.risk_adjusted_momentum`:
+  `(close[t−5] / close[t−126] − 1) / std(daily returns, last 126)`.
+- **Book.** Top 8, equal weight. Review every 20 sessions; keep a name while it
+  ranks in the top 16.
+- **No gates.** No SMA200 gate and no market switch. The switch lost 21.5% in
+  the holdout year.
+- **Annotation on every BUY** (`buy_layer.annotate`):
+  - accept range = [close × (1 − 2σ₆₃), close × 1.01];
+  - measured 4- and 8-week outcome band, standardised by the name's own σ and
+    split by VNINDEX above / below its 200-session average.
+- **Audit shadow.** The previous rule (SMA200 gate → score/OBV blend) is
+  `legacy_shortlist`, archived daily for `daily_watch/audit.py`.
+
 ## 9. TraderAgent "Minh"
 
 `services.trader_agent.TraderAgent` runs **in-process**. Since 2026-07-20 the

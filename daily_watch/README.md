@@ -23,7 +23,7 @@ Task `SectorFlow_daily_watch` chạy lệnh đầu lúc **17:30, T2–T6**.
 | `positions.py` | chấm sổ theo giá gần nhất, đường giá từ ngày vào lệnh |
 | `sell_range.py` | bán lúc nào — cửa sổ (luật) + range (tham chiếu) |
 | `holdings.py` | giá cho mã **đang nắm ngoài universe** — `refresh()` gọi mạng (chỉ job), `load()` chỉ đọc đĩa |
-| `audit.py` | đọc kho lưu trữ, chấm lại khuyến nghị cũ — luật đang chạy **và** luật cũ (ngưỡng 2,5, `shortlist_with_cutoff`) trên cùng base |
+| `audit.py` | đọc kho lưu trữ, chấm lại khuyến nghị cũ — luật đang chạy (động lượng, từ 29/09) **và** các luật trước nó (cổng SMA200 `shortlist_previous_rule`, ngưỡng 2,5 `shortlist_with_cutoff`) trên cùng base |
 
 ## Đầu ra: markdown + JSON, **không HTML**
 

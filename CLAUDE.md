@@ -17,7 +17,7 @@ Pivot the VN Trading system from per-symbol prediction to **sector-level money-f
 - REMOVE: 170-symbol universe, `stock_prices`, `stock_features`, `trade_setups`, `predictions`, symbol screener, T+3 scanner, symbol pages in frontend, per-symbol ML.
 - REPLACE: primary key `symbol` → `sector_code` everywhere.
 - **Per-ticker picks (2026-04-17 onward):** `generate_report.py` and `api/routers/insight.py` read per-ticker BUY/ACCUMULATE picks exclusively from `services.picks_universe_service.PicksUniverseService` (dynamic HOSE universe from vnstock Listing). They no longer read `_legacy_stocks`, `_legacy_stock_prices`, or `_legacy_stock_features`. These three tables stay in the DB during a 2-week shadow window then drop in migration 10.
-- **Email report (2026-04-23 onward):** `generate_report.py` is the **sole** daily email generator. **Since 2026-09-25 its BUY list is `snapshot.top_buys` verbatim** — one buy rule (`picks_universe_service.long_shortlist`: SMA200 gate → rank blend) shared with Daily Insight and the 17:30 bulletin; the ranker no longer gates or adds buys (no out-of-sample edge, review 2026-09-24 §4.2). The AVOID list still unifies `snapshot.top_sells` with the ranker's SELL sectors into one de-duped list, each entry tagged with its source (`BOTH` / `DAILY_INSIGHT` / `RANKER`). The HTML/PDF gains an Expert Trader Memo section at the top; the email body is plain text (buy symbols + reasons + Dashboard + news links). Recipients come from `REPORT_EMAIL_TO` in the local `.env` — **no list is committed and there is no fallback in code** (removed 2026-08-24 when the repo went public; a source file is the wrong place to publish an inbox). Empty means the HTML/PDF are written and no mail is sent. `scripts/jobs/job_sector_signal_publish.bat` calls `generate_report.py`.
+- **Email report (2026-04-23 onward):** `generate_report.py` is the **sole** daily email generator. **Since 2026-09-25 its BUY list is `snapshot.top_buys` verbatim** — one buy rule (`picks_universe_service.long_shortlist` — since 2026-09-28 risk-adjusted 6-month momentum, top 8, see §28) shared with Daily Insight and the 17:30 bulletin; the ranker no longer gates or adds buys (no out-of-sample edge, review 2026-09-24 §4.2). The AVOID list still unifies `snapshot.top_sells` with the ranker's SELL sectors into one de-duped list, each entry tagged with its source (`BOTH` / `DAILY_INSIGHT` / `RANKER`). The HTML/PDF gains an Expert Trader Memo section at the top; the email body is plain text (buy symbols + reasons + Dashboard + news links). Recipients come from `REPORT_EMAIL_TO` in the local `.env` — **no list is committed and there is no fallback in code** (removed 2026-08-24 when the repo went public; a source file is the wrong place to publish an inbox). Empty means the HTML/PDF are written and no mail is sent. `scripts/jobs/job_sector_signal_publish.bat` calls `generate_report.py`.
 - **One report generator, no versioned copies.** `generate_report.py` is the only
   daily-report generator in the repo. Every earlier numbered copy is gone:
   SecV2 on 2026-04-20, SecV3 + SecV4 on 2026-06-18 (they were kept only as
@@ -406,9 +406,9 @@ Run the two commands rather than trusting the numbers.
 
 | Suite | Count | Command |
 |---|---|---|
-| Backend (pytest) | 468 | `uv run pytest tests/` |
-| Frontend (vitest) | 18 | `cd frontend && npm test` |
-| **Total** | **486** | — |
+| Backend (pytest) | 487 | `uv run pytest tests/` |
+| Frontend (vitest) | 19 | `cd frontend && npm test` |
+| **Total** | **506** | — |
 > Vì sao từng bài test tồn tại — và 4 lần negative control bắt được test vô
 > dụng của chính tôi — ở [`docs/doctrine/19-testing-history.md`](docs/doctrine/19-testing-history.md).
 > Đọc nó trước khi xoá hoặc viết lại một bài test trông có vẻ thừa.
@@ -641,10 +641,10 @@ score = −1
       sàn −20 trừ khi trên SMA200
 ```
 
-- **Một luật mua cho mọi bề mặt — `long_shortlist` (2026-09-25):** cổng SMA200
-  (`score > UNTRENDED_FLOOR`) → thứ tự blend → top-5. Daily Insight, email 17:00
-  và bản tin 17:30 cùng gọi nó; **không** lọc theo tín hiệu ngành. Danh sách
-  chỉ rỗng khi không mã nào trên SMA200 — phần vốn đó mua ETF chỉ số.
+- **Một luật mua cho mọi bề mặt — `long_shortlist` (2026-09-25):** Daily Insight,
+  email 17:00 và bản tin 17:30 cùng gọi nó; **không** lọc theo tín hiệu ngành.
+  **Từ 2026-09-28 luật đó là động lượng (§28)**; cổng SMA200 → blend → top-5 bên
+  dưới là luật cũ, nay chỉ còn là bóng `legacy_shortlist` ghi vào kho để audit.
 - **`MIN_BUY_SCORE` 2,5 đã bỏ làm cổng** (Tom: *"bỏ ngay, giữ cổng SMA200"*). Nó
   đặt theo phân vị 78 của điểm, chưa từng đo lợi nhuận; đo rồi thì tốn
   −0,39%/lệnh ở 20 phiên, −0,44% ở 40 (t −1,5…−1,6, in-sample). Hằng số còn lại
@@ -899,3 +899,29 @@ Mọi `§NN.M` dưới đây **không còn thân bài ở file này**; kết lu�
 
 `§25.10`, `§23.5`, `§24.2-24.4`, `§22.7-22.11`, `§26.4`, `§26.6`, `§26.9`,
 `§26.10` **vẫn có thân bài ở file này** — chúng chứa luật đang thi hành.
+
+## 28. Luật mua động lượng + layer vùng mua / kỳ vọng — 2026-09-28
+
+Tom: *"7,2% / 11,7%/năm thấp hơn VNINDEX 17,5% — không ổn, kỳ vọng 20-30%/năm"*,
+*"toàn quyền quyết định"*, và *"layer gợi ý mua gì, accept range, expect 4 tuần
+8 tuần"*. Nghiên cứu: `docs/reviews/STRATEGY_STUDY_2026-09-28.md`.
+
+- **Luật** (`services/buy_layer.py`, `long_shortlist`):
+  - xếp mã theo lãi 6 tháng, bỏ 5 phiên gần nhất, chia cho độ lệch chuẩn 126 phiên;
+  - **top 8, chia đều**, xem lại mỗi 20 phiên; mã còn **top 16** thì giữ;
+  - **không** cổng SMA200, **không** công tắc thị trường.
+- **Số đo**: 2019-07 → 2026-09 được 31%/năm, VNINDEX 8,9%, luật cũ 4,6%; nhưng
+  2022 −31% và sụt tối đa −47%. Đây là số in-sample và lạc quan: rổ chọn năm
+  2026, chọn trong 394 biến thể. Kỳ vọng trung thực là VNINDEX + ~10 điểm/năm.
+- **Công tắc thị trường bị bỏ sau holdout.** Nó là lựa chọn trên DEV; trên 12
+  tháng để riêng nó lỗ −21,5% (VNINDEX +5,9%). Quyết định bỏ được đưa ra *sau khi*
+  đọc holdout, và điều này được ghi rõ.
+- **Layer — số đo, không phải dự báo.** Mỗi pick có:
+  - vùng mua = [giá × (1 − 2σ₆₃), giá × 1,01];
+  - dải P10-P90 cho 4 và 8 tuần, tính từ phân phối chuẩn hoá theo σ của từng mã,
+    tách theo VNINDEX trên/dưới SMA200.
+- **Thay số trong layer** chỉ bằng cách chạy lại
+  `docs/reviews/strategy_study_2026-09-28/layer.py`. Không gõ tay.
+- Snapshot schema 2: bản trên đĩa không có `momentum` bị từ chối, và build lại.
+- `daily_watch/audit.py` chấm luật mới với bóng `shortlist_previous_rule` ngoài
+  mẫu.

@@ -64,9 +64,14 @@ def horizon_note() -> str:
     horizon owns the sentence describing it -- the same placement argument
     25.6 made for `confidence_phrase`.
     """
+    # 2026-09-28: the momentum rule reviews the book every 4 weeks and keeps a
+    # name while it still ranks in the top 16 -- so session 20 is a REVIEW,
+    # not an exit, and a name still ranked at 40 stays (services.buy_layer).
+    from services.buy_layer import KEEP_TOP
     lo, hi = HOLD_SESSIONS
-    return (f"Giữ {lo}-{hi} phiên (4-8 tuần), mặc định tới ~{hi} phiên; "
-            f"phiên {lo} không phải tín hiệu bán. Mua ATO phiên sau, bán ATO ngày thoát.")
+    return (f"Mua ATO phiên sau. Xem lại ở phiên {lo} (4 tuần) và {hi} (8 tuần): "
+            f"còn trong top {KEEP_TOP} động lượng thì giữ tiếp, rơi khỏi top {KEEP_TOP} "
+            f"thì bán ATO phiên kế.")
 
 
 def hold_window(as_of: date) -> dict[str, str | None]:

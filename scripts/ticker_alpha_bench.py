@@ -537,14 +537,28 @@ def _production_score(f):
 
 @register("X_shipped_rule")
 def _(f):
-    """THE BUY RULE AS SHIPPED (2026-09-25, `long_shortlist`): production score
-    with the floor over every liquid name, the rank blend over that SAME
-    universe (Stage E), and only then the SMA200 gate. Top-k of this is the
-    list Daily Insight, the email and the bulletin print.
+    """THE BUY RULE AS SHIPPED (2026-09-28, `long_shortlist`): risk-adjusted
+    6-month momentum -- the 6-month return with the latest week left out,
+    over the daily volatility of the same 126 sessions -- over every liquid
+    name. Top-k of this is the list Daily Insight, the email and the bulletin
+    print. Chosen in docs/reviews/STRATEGY_STUDY_2026-09-28.md; the rule it
+    replaced is `X_rule_2026_09_25`.
+    """
+    from services.buy_layer import MOM_LOOKBACK, MOM_SKIP
+    c = f["close"]
+    mom = c.shift(MOM_SKIP) / c.shift(MOM_LOOKBACK) - 1.0
+    vol = c.pct_change(fill_method=None).rolling(MOM_LOOKBACK).std()
+    return (mom / vol).where(f["dv20"] > SHIPPED_MIN_DV)
+
+
+@register("X_rule_2026_09_25")
+def _(f):
+    """The buy rule 2026-09-25 .. 2026-09-28 (`legacy_shortlist`, now the audit
+    shadow): production score with the floor over every liquid name, the rank
+    blend over that SAME universe (Stage E), and only then the SMA200 gate.
 
     `X_prop_obv` is not this: it blends only among gated names, a different
-    cross-section, worth ~0.2 points per trade (review 2026-09-24 §2.2). Grade
-    the product by this row, not that one.
+    cross-section, worth ~0.2 points per trade (review 2026-09-24 §2.2).
     """
     from services.picks_scoring import UNTRENDED_FLOOR, blended_rank_scores
 

@@ -13,9 +13,13 @@ Pipeline (see specs/picks_universe.md for details):
   4. Capability2  — parallel OHLCV fetch (70 sessions), reject if
                     history < MIN_HISTORY_SESSIONS or dv_20d < MIN_DV_20D_VND.
   5. Indicators   — analysis.feature_engineering.build_feature_set.
-  6. Score        — services.picks_scoring.score_ticker.
+  6. Score        — services.picks_scoring.score_ticker (the 2026-09-25 rule,
+                    kept for the audit shadow) and, since 2026-09-28, the
+                    ordering key: services.buy_layer.risk_adjusted_momentum.
   7. Stop/Target  — services.picks_scoring.compute_stop_target_rr (SWING).
-  8. Group        — by sector_code, sorted desc by score.
+  8. Group        — by sector_code, sorted by momentum (`_rank_key`).
+  9. Buy list     — `long_shortlist` (top 8), each pick annotated by
+                    services.buy_layer against VNINDEX vs its SMA200.
 
 Freshness contract — is_valid == True iff:
   - as_of == latest SectorSignal.date, and signal ≤ 2 calendar days old
@@ -53,6 +57,7 @@ from config import (
 )
 from database.connection import SessionLocal
 from database.models import SectorConstituent, SectorSignal
+from services import buy_layer
 from services.picks_scoring import (
     UNTRENDED_FLOOR,
     PickProfile,
@@ -93,7 +98,13 @@ class TickerRow:
     bb_position: float | None = None
     volatility_20d: float | None = None
     obv_chg20: float | None = None        # OBV 20d change / 20d avg volume
-    rank_score: float | None = None       # cross-sectional ordering key
+    rank_score: float | None = None       # the 2026-09-25 rule's ordering key (shadow only)
+    # 2026-09-28: THE ordering key -- 6-month return (latest week left out)
+    # over its own daily volatility (services.buy_layer). None = under 127
+    # sessions of history: not ranked.
+    momentum: float | None = None
+    mom_6m: float | None = None           # the 6-month return behind it, percent units
+    vol_63d: float | None = None          # daily volatility, fraction (0.02 == 2%/session)
     dv_20d: float = 0.0
     foreign_room_pct: float | None = None
     score: float = 0.0
@@ -194,6 +205,15 @@ class PickEntry:
     # 2026-09-25 loadable.
     sell_from: str | None = None
     sell_by: str | None = None
+    # BUY only, 2026-09-28 (services.buy_layer): rank in the momentum order,
+    # the price range worth paying, and the measured 4/8-week outcome band.
+    rank: int | None = None
+    momentum: float | None = None
+    mom_6m: float | None = None
+    accept_lo: float | None = None
+    accept_hi: float | None = None
+    outlook_4w: dict[str, float] | None = None
+    outlook_8w: dict[str, float] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -216,6 +236,13 @@ class PickEntry:
             "news": self.news,
             "sell_from": self.sell_from,
             "sell_by": self.sell_by,
+            "rank": self.rank,
+            "momentum": self.momentum,
+            "mom_6m": self.mom_6m,
+            "accept_lo": self.accept_lo,
+            "accept_hi": self.accept_hi,
+            "outlook_4w": self.outlook_4w,
+            "outlook_8w": self.outlook_8w,
         }
 
 
@@ -231,6 +258,9 @@ class UniverseSnapshot:
     # when no sector has a BUY/SELL signal from the ranker.
     top_buys: list[PickEntry] = field(default_factory=list)
     top_sells: list[PickEntry] = field(default_factory=list)
+    # VNINDEX against its 200-session average at build time
+    # (buy_layer.market_state). Context for the buy layer, not a switch.
+    market: dict[str, Any] = field(default_factory=dict)
 
 
 # =====================================================================
@@ -247,12 +277,18 @@ class UniverseSnapshot:
 
 SNAPSHOT_PATH = Path(DATA_DIR) / "snapshots" / "picks_universe.json"
 
+#: 2 = rows carry `momentum` (2026-09-28). A schema-1 file has none, so the
+#: buy rule would return an empty list from it; it is refused like a corrupt
+#: file and the next get_snapshot() rebuilds.
+SNAPSHOT_SCHEMA = 2
+
 
 def _snapshot_to_json(snap: UniverseSnapshot) -> dict[str, Any]:
     # by_sector holds the same TickerRow objects as `tickers`; store symbols
     # only and re-point them on load, so the file does not double every row.
     return {
-        "schema": 1,
+        "schema": SNAPSHOT_SCHEMA,
+        "market": snap.market,
         "as_of": snap.as_of.isoformat() if snap.as_of else None,
         "built_at": snap.built_at.isoformat() if snap.built_at else None,
         "is_valid": snap.is_valid,
@@ -270,6 +306,8 @@ def _snapshot_to_json(snap: UniverseSnapshot) -> dict[str, Any]:
 def _snapshot_from_json(d: dict[str, Any]) -> UniverseSnapshot:
     """Rebuild a snapshot from `_snapshot_to_json` output. Raises on anything
     unexpected — the caller treats any exception as "no snapshot on disk"."""
+    if int(d.get("schema") or 0) < SNAPSHOT_SCHEMA:
+        raise ValueError(f"snapshot schema {d.get('schema')} predates the momentum rule")
     tickers = {s: TickerRow(**t) for s, t in d["tickers"].items()}
     fr_raw = dict(d["freshness"])
     fr_raw["as_of"] = date.fromisoformat(fr_raw["as_of"])
@@ -285,6 +323,7 @@ def _snapshot_from_json(d: dict[str, Any]) -> UniverseSnapshot:
         is_valid=bool(d.get("is_valid")),
         top_buys=[PickEntry(**p) for p in d.get("top_buys") or []],
         top_sells=[PickEntry(**p) for p in d.get("top_sells") or []],
+        market=dict(d.get("market") or {}),
     )
 
 
@@ -338,54 +377,65 @@ def _technical_bits(r: "TickerRow") -> list[str]:
     return bits
 
 
-def _rank_key(r: "TickerRow") -> tuple[float, str]:
-    """Sort key for a long shortlist -- ASCENDING, best first: score, then symbol.
+def _legacy_rank_key(r: "TickerRow") -> tuple[float, float, str]:
+    """The 2026-09-25 rule's order -- ASCENDING, best first: rank blend, score, symbol.
 
-    The score is negated so one `sort(key=_rank_key)` puts the highest score
-    first while leaving the symbol tie-break in normal A-Z order. Sorting the
-    un-negated tuple with `reverse=True` would flip BOTH halves and hand back
-    Z-A inside every tie.
-
-    The tie-break used to be 20d dollar volume, descending -- so inside every
-    score bucket the ranking handed back the largest, most-traded, slowest name
-    on the board. Measured over 143 names x 1,168 sessions
-    (`scripts/ticker_alpha_bench.py`, exit +3 sessions), that tie-break took the
-    ranking's excess over the base rate from -0.06% to -0.15%: it was not
-    neutral, it actively made the shortlist worse, in four of five years.
-
-    The replacement is the symbol, i.e. an arbitrary but STABLE order. That is
-    deliberate: a tie-break should not smuggle in a second, unmeasured factor,
-    and a stable one keeps the daily email from reshuffling equal-scored names
-    for no reason. Liquidity is already enforced upstream as a hard filter
-    (`MIN_DV_20D`), which is where a liquidity requirement belongs.
+    Kept for `legacy_shortlist` (the audit shadow) only. The symbol tie-break
+    replaced 20d dollar volume, which measured worse than arbitrary (-0.06% ->
+    -0.15% excess, `scripts/ticker_alpha_bench.py`); negating the numbers
+    rather than sorting with reverse=True keeps ties in A-Z order.
     """
     return (-(r.rank_score if r.rank_score is not None else 0.0), -r.score, r.symbol)
 
 
-def long_shortlist(rows: Iterable["TickerRow"], n: int = 5, *,
-                   exclude: Iterable[str] = (),
-                   min_score: float | None = None) -> list["TickerRow"]:
+def _rank_key(r: "TickerRow") -> tuple[float, str]:
+    """THE order since 2026-09-28 -- ASCENDING, best first: risk-adjusted
+    6-month momentum, then symbol (stable, and not a second factor).
+
+    A row without momentum (< 127 sessions of history) sorts last; the
+    shortlist leaves it out entirely.
+    """
+    return (-(r.momentum if r.momentum is not None else float("-inf")), r.symbol)
+
+
+def long_shortlist(rows: Iterable["TickerRow"], n: int = buy_layer.BUY_TOP_K, *,
+                   exclude: Iterable[str] = ()) -> list["TickerRow"]:
     """THE buy rule. Daily Insight, the 17:00 email and the 17:30 bulletin all
     call this -- one rule, one implementation (review 2026-09-24 §2.4 found
     three surfaces running three different buy rules, the 22.11 family).
 
-      admit  : `is_valid_buy` and `score > UNTRENDED_FLOOR` -- the SMA200 gate,
-               i.e. the uptrend is confirmed. Nothing else.
-      order  : `_rank_key` -- the rank blend of score and OBV trend (26.9).
+      admit  : every name the snapshot admitted (liquidity >= 5 bn VND/day,
+               foreign room, history) that has 6 months of prices.
+      order  : `_rank_key` -- risk-adjusted 6-month momentum, highest first.
       exclude: symbols to leave out (the bulletin drops what Tom already holds).
 
-    No sector gate: the ranker's BUY/SELL has no out-of-sample edge (review
-    §4.2), and a list filtered by noise is a list ordered by noise.
+    2026-09-28, docs/reviews/STRATEGY_STUDY_2026-09-28.md: the rule it
+    replaces (SMA200 gate -> blend of a 1-3 day oversold score and OBV) made
+    4.6%/yr 2019-07..2026-09 as a top-5 book; this order, top 8 kept while in
+    the top 16 and reviewed every 4 weeks, 31%/yr (in-sample, optimistic; the
+    honest figure is VNINDEX + ~10 points, see services/buy_layer.py). No SMA200
+    gate: momentum already selects names in an uptrend, and the gated version
+    measured worse. No sector gate (review §4.2).
+    """
+    ex = set(exclude)
+    pool = [r for r in rows if r.momentum is not None and r.symbol not in ex]
+    pool.sort(key=_rank_key)
+    return pool[:n]
 
-    `min_score` exists for ONE caller: the shadow log of the retired
-    MIN_BUY_SCORE rule (`daily_watch.service`), kept so the removal can be
-    audited out of sample. Production lists never pass it.
+
+def legacy_shortlist(rows: Iterable["TickerRow"], n: int = 5, *,
+                     exclude: Iterable[str] = (),
+                     min_score: float | None = None) -> list["TickerRow"]:
+    """The 2026-09-25 rule (SMA200 gate -> blend of score and OBV), kept ONLY
+    as the audit shadow: the bulletin archives what it WOULD have picked, so
+    `daily_watch/audit.py` can score the switch on data that did not choose
+    it. `min_score` re-creates the older 2.5-cutoff rule for the same reason.
     """
     ex = set(exclude)
     pool = [r for r in rows
             if r.is_valid_buy and r.score > UNTRENDED_FLOOR and r.symbol not in ex
             and (min_score is None or r.score >= min_score)]
-    pool.sort(key=_rank_key)
+    pool.sort(key=_legacy_rank_key)
     return pool[:n]
 
 
@@ -398,11 +448,34 @@ def _compose_thesis(r: "TickerRow", action: str) -> str:
         # card had never stated one, so it was read as a three-day trade and
         # closed as one. Stop and target are NOT in the sentence -- the book has
         # no stop since 26.10, and printing one here would invite using it.
-        return (f"Điểm xếp hạng {r.score:+.1f}. {tag}. "
-                f"Mua quanh {r.close:.1f}. {horizon_note()}")
+        lo, hi = buy_layer.accept_range(r.close, r.vol_63d)
+        why = (f"Động lượng 6 tháng {r.mom_6m:+.1f}%, xếp theo lãi/biến động "
+               f"({r.momentum:.1f})" if r.momentum is not None and r.mom_6m is not None
+               else "Chưa đủ 6 tháng giá")
+        rng = (f"Vùng mua {lo:.2f}–{hi:.2f}" if lo is not None and hi is not None
+               else f"Mua không quá {hi:.2f}" if hi is not None else f"Mua quanh {r.close:.1f}")
+        return f"{why}. {tag}. {rng}. {horizon_note()}"
     # SELL
     return (f"Điểm xếp hạng {r.score:+.1f}. {tag}. "
             f"Đề xuất thoát / tránh: giá {r.close:.1f}, stop-out nếu thủng {r.stop:.1f}.")
+
+
+def _market_state() -> dict[str, Any]:
+    """VNINDEX against its 200-session average, for the buy layer. One gated
+    vnstock call; never raises -- a quota exit (SystemExit) must not end the
+    build, it only leaves the state unknown ({"up": None})."""
+    try:
+        from services.macro_service import fetch_vnindex_daily
+        from utils.vnstock_gate import call as gated_call
+        s = gated_call(fetch_vnindex_daily, days=420, what="VNINDEX daily (buy layer)")
+        if s is None or len(s) == 0:
+            return {"up": None}
+        st = buy_layer.market_state(s.tolist())
+        st["as_of"] = str(pd.Timestamp(s.index[-1]).date())
+        return st
+    except BaseException as e:
+        log.warning("[picks-universe] market state unavailable: %s", e)
+        return {"up": None}
 
 
 def _latest_signal_date() -> date | None:
@@ -619,6 +692,20 @@ def _build_ticker_row(symbol: str, sector_code: str, ohlcv: pd.DataFrame,
     except Exception as e:
         log.debug("[picks-universe] score inputs fail %s: %s", symbol, e)
 
+    # The ordering key since 2026-09-28 -- same definition as the study that
+    # chose it (services.buy_layer), over the same adjusted closes. From the
+    # raw fetch, not `df`: an indicator step that drops warm-up rows must not
+    # shorten the 127 closes this needs.
+    momentum = mom_6m = vol_63d = None
+    try:
+        raw = ohlcv.sort_values("time") if "time" in ohlcv.columns else ohlcv
+        closes = raw["close"].astype(float).tolist()
+        momentum, mom, _ = buy_layer.risk_adjusted_momentum(closes)
+        mom_6m = mom * 100.0 if mom is not None else None
+        vol_63d = buy_layer.daily_vol(closes, 63)
+    except Exception as e:
+        log.debug("[picks-universe] momentum fail %s: %s", symbol, e)
+
     row = TickerRow(
         symbol=symbol,
         sector_code=sector_code,
@@ -636,6 +723,9 @@ def _build_ticker_row(symbol: str, sector_code: str, ohlcv: pd.DataFrame,
         price_to_sma_50=_last(df.get("price_to_SMA_50", pd.Series(dtype=float))),
         price_to_sma_200=price_to_sma_200,
         obv_chg20=obv_chg20,
+        momentum=round(momentum, 4) if momentum is not None else None,
+        mom_6m=round(mom_6m, 2) if mom_6m is not None else None,
+        vol_63d=round(vol_63d, 5) if vol_63d is not None else None,
         volume_ratio_20=_last(df.get("volume_ratio_20", pd.Series(dtype=float))),
         adx_14=_last(df.get("ADX_14", pd.Series(dtype=float))),
         bb_position=_last(df.get("BB_position", pd.Series(dtype=float))),
@@ -1014,8 +1104,10 @@ class PicksUniverseService:
         top_buys: list[PickEntry] = []
         top_sells: list[PickEntry] = []
         can_pick = len(tickers) >= UNIVERSE_PICKS_FLOOR
+        market = _market_state() if can_pick else {"up": None}
         if can_pick:
-            top_buys = self._select_top(tickers, by_sector, action="BUY", n=5, as_of=as_of_eff)
+            top_buys = self._select_top(tickers, by_sector, action="BUY", n=buy_layer.BUY_TOP_K,
+                                        as_of=as_of_eff, market=market)
             top_sells = self._select_top(tickers, by_sector, action="SELL", n=5, as_of=as_of_eff)
 
         dur = time.monotonic() - t0
@@ -1025,24 +1117,23 @@ class PicksUniverseService:
             as_of=as_of_eff, built_at=fr.built_at,
             tickers=tickers, by_sector=by_sector,
             freshness=fr, is_valid=is_valid,
-            top_buys=top_buys, top_sells=top_sells,
+            top_buys=top_buys, top_sells=top_sells, market=market,
         )
 
     def _select_top(self, tickers: dict[str, TickerRow],
                     by_sector: dict[str, list[TickerRow]],
-                    action: str, n: int, as_of: date) -> list["PickEntry"]:
+                    action: str, n: int, as_of: date,
+                    market: dict[str, Any] | None = None) -> list["PickEntry"]:
         """Top-N BUY (`long_shortlist` over the whole universe) or top-N SELL
         (lowest score in SELL sectors, or weakest score in any sector when no
         SELL sector exists).
         """
         action_up = action.upper()
         if action_up == "BUY":
-            # 2026-09-25: the same rule the bulletin and the email use. It used
-            # to put BUY/ACCUMULATE-sector names first and gate on MIN_BUY_SCORE;
-            # the sector signal has no measured edge and the cutoff measured
-            # negative (review 2026-09-24 §2.2, §4.2). A day on which no name is
-            # above its SMA200 still returns an empty list -- that is the
-            # answer, and the empty state says what to do with the money.
+            # The same rule the bulletin and the email use (2026-09-25), and
+            # since 2026-09-28 that rule is the momentum order: top
+            # BUY_TOP_K, each annotated by buy_layer (accept range, 4/8-week
+            # outcome band for the current market state).
             filtered = long_shortlist(tickers.values(), n)
         else:
             candidates: list[TickerRow] = []
@@ -1063,8 +1154,10 @@ class PicksUniverseService:
         from services.picks_news import fetch_news
 
         window = hold_window(as_of) if action_up == "BUY" else {}
+        up = (market or {}).get("up")
         out: list[PickEntry] = []
-        for r in chosen:
+        for i, r in enumerate(chosen, 1):
+            layer = (buy_layer.annotate(r.close, r.vol_63d, up) if action_up == "BUY" else {})
             pct_up = ((r.target - r.close) / r.close * 100) if (r.target and r.close) else None
             pct_dn = ((r.close - r.stop) / r.close * 100) if (r.stop and r.close) else None
             tech_bits = _technical_bits(r)
@@ -1094,6 +1187,13 @@ class PicksUniverseService:
                 news=news,
                 sell_from=window.get("sell_from"),
                 sell_by=window.get("sell_by"),
+                rank=i if action_up == "BUY" else None,
+                momentum=r.momentum if action_up == "BUY" else None,
+                mom_6m=r.mom_6m if action_up == "BUY" else None,
+                accept_lo=layer.get("accept_lo"),
+                accept_hi=layer.get("accept_hi"),
+                outlook_4w=layer.get("outlook_4w"),
+                outlook_8w=layer.get("outlook_8w"),
             ))
         return out
 

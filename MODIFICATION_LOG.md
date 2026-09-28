@@ -14,6 +14,84 @@
 
 ---
 
+## 2026-09-28 (3) — luật mua động lượng, và layer vùng mua / kỳ vọng 4-8 tuần
+- Author: Claude (Cowork) on behalf of Tom
+- Files:
+  - `services/buy_layer.py` (mới): động lượng, bảng đo, các câu dùng chung
+  - `services/picks_universe_service.py`: `TickerRow.momentum/mom_6m/vol_63d`, `_rank_key`,
+    `long_shortlist`, `legacy_shortlist`, `PickEntry` thêm layer, `UniverseSnapshot.market`,
+    snapshot schema 2
+  - `services/picks_scoring.py` (`horizon_note`)
+  - `daily_watch/service.py`, `daily_watch/audit.py`
+  - `generate_report.py`, `api/routers/insight.py`, `frontend/src/pages/DailyInsightPage.tsx`
+  - `scripts/ticker_alpha_bench.py` (`X_shipped_rule` → động lượng; luật cũ là
+    `X_rule_2026_09_25`), `scripts/tplus_strategy_bench.py`
+  - `docs/reviews/STRATEGY_STUDY_2026-09-28.md` + `docs/reviews/strategy_study_2026-09-28/`
+    (bộ script tái lập)
+  - `CLAUDE.md` §26, §28, §19; `docs/PATCHES.md`
+  - Test: `tests/test_buy_layer.py` (mới, 14), `tests/test_shortlist_rule.py` (viết lại),
+    `tests/test_picks_ranking.py`, `tests/test_bench_measurement.py`, `tests/test_picks_scoring.py`,
+    `tests/test_module_boundaries.py`, `frontend/src/pages/DailyInsightPage.test.tsx`
+- Reason: Tom, 28/09:
+  - *"7,2%/năm và 11,7%/năm ... thấp hơn VNINDEX 17,5% — không ổn, tôi cần bạn tối ưu hơn,
+    mức kỳ vọng của tôi là 20-30% năm"*;
+  - *"tôi cho bạn toàn quyền quyết định"*;
+  - *"tạo layer nữa: gợi ý nên mua gì, accept range, expect lên bao nhiêu trong các chu kỳ
+    4 tuần 8 tuần"*.
+- Summary:
+  - **Luật cũ hỏng ở gốc.** Nó dùng tín hiệu quá bán 1-3 ngày để chọn mã rồi giữ 4-8 tuần.
+    Trên 2019-07 → 2026-09 nó làm 4,6%/năm; VNINDEX 8,9%, rổ 75 mã chia đều 13,1%.
+  - **Luật mới.** Xếp theo lãi 6 tháng (bỏ 5 phiên gần nhất) chia độ lệch chuẩn 126 phiên;
+    top 8 chia đều; xem lại mỗi 20 phiên; giữ khi còn top 16; không cổng SMA200.
+    - 2019-07 → 2026-09: 31%/năm, Sharpe 1,10, sụt tối đa −47,5% (năm 2022 −30,6%).
+    - Vượt VNINDEX và vượt rổ chia đều ở 7/8 năm.
+    - Chọn trong 394 biến thể trên DEV (2019-07 → 2025-09), vùng tham số lân cận ổn định.
+  - **Holdout (12 tháng cuối).** Luật chọn trên DEV có công tắc thị trường (ra khi VNINDEX
+    < 97% SMA200). Nó lỗ −21,5% trong khi VNINDEX +5,9%, vì hai lần bị giật (03/2026, 07/2026)
+    trong một thị trường hẹp (VIC +244%, mã trung vị −12,5%).
+    - Công tắc bị bỏ. Quyết định này đưa ra sau khi đọc holdout và được ghi rõ trong study.
+    - Walk-forward 2021-2026: 22-29%/năm.
+    - Kỳ vọng trung thực: VNINDEX + ~10 điểm/năm (2022-2026: 14,3% vs 3,7%).
+  - **Layer.** Mỗi pick có:
+    - vùng mua [giá × (1 − 2σ₆₃), giá × 1,01] — trả thêm 1% là mất cả lợi thế 4 tuần so với
+      mặt bằng;
+    - dải P10/P25/trung vị/P75/P90 và xác suất lãi cho 4 và 8 tuần, từ phân phối chuẩn hoá
+      theo σ từng mã, tách theo VNINDEX trên/dưới SMA200 (kiểm: 47-52% mã rơi đúng khoảng
+      P25-P75 dự đoán ở mọi nhóm biến động);
+    - câu về cả rổ: 4 tuần trung vị +2,7%, lãi 64% số lần.
+    - Hiện ở bản tin 17:30 (mục 3 viết lại, mục 2 thêm hạng động lượng của mã đang nắm, mục 5
+      viết lại), email 17:00 (thẻ BUY, memo, thân email text) và Daily Insight (thẻ, bảng, khối
+      bối cảnh).
+  - **Một định nghĩa.** Bench (`X_shipped_rule`) và production gọi cùng
+    `risk_adjusted_momentum`; test so top-k hai bên.
+  - **Snapshot.** Schema 2: file cũ không có `momentum` bị từ chối, build lại, thay vì phục vụ
+    danh sách rỗng. Trạng thái thị trường lấy bằng một lệnh vnstock qua gate; lệnh đó hỏng thì
+    trạng thái là "không rõ", không làm chết build.
+  - **Kiểm chứng.** pytest 487, vitest 19, ruff 60 (không đổi), tsc sạch. 10 đột biến lên luật,
+    layer và bóng đều bị bắt.
+- Follow-ups:
+  - `daily_watch/audit.py --hold 40` sau ~40 phiên ngoài mẫu (cuối 11/2026). Nếu luật động
+    lượng không vượt base, xét lại.
+  - Skill `theo-doi-hang-ngay` trên máy Tom cần đọc cột mới của mục 3. File đó có thay đổi
+    chưa commit của Tom nên không commit.
+
+## 2026-09-28 (2) — ^VNINDEX tự cập nhật trong panel; chạy bù và sửa lịch sử trên máy Tom
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `scripts/build_price_panel.py` (`fetch_index`), `tests/test_price_panel_builder.py` (+1).
+- Reason: ^VNINDEX được nạp một lần và dừng ở 15/09 trong khi cổ phiếu chạy tiếp.
+- Summary:
+  - **Panel.** Mỗi lần build tải lại VNINDEX (một lệnh), delete-then-insert như một mã.
+  - **Chạy trên máy Tom tối 28/09.** Mỗi bước `--apply` đều có backup
+    `vnstock_market.db.bak-*` riêng.
+    - `fill_missing_session.py --date 2026-09-22` → thêm dòng RETAIL.
+    - `fill_missing_session.py --date 2026-09-25` chạy hai lần; lần hai sau khi thêm hỏi lại
+      khối ngoại, vì lần đầu HCM bị timeout.
+    - `build_price_panel.py --start 2017-01-01`: 143 mã, từ 2018-10 (giới hạn 8 năm của bản
+      cộng đồng), 0 lỗi.
+    - `repair_sector_data.py --apply`: 13.815 dòng; ATR trung vị 0,0057 → 0,028; bước nhảy
+      `close_idx` lớn nhất 240,6% → 9,0%; 613 dòng VNINDEX rác → NULL.
+    - `generate_report.py 2026-09-28`: báo cáo và email của ngày 28/09 đã gửi lại.
+
 ## 2026-09-28 (1) — bù phiên 25/09 từ dữ liệu cả ngày; báo cáo 17:00 không còn chết vì quota vnstock
 - Author: Claude (Cowork) on behalf of Tom
 - Files:

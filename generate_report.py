@@ -12,8 +12,10 @@ This generator unifies the two into a single list per Tom's directive
 
   * BUY list = snapshot.top_buys, verbatim (2026-09-25). It used to be a
     UNION with ranker-gated buys; the ranker has no out-of-sample edge (review
-    2026-09-24 §4.2), so there is now ONE buy rule — `long_shortlist`, SMA200
-    gate -> rank blend — shared with Daily Insight and the 17:30 bulletin.
+    2026-09-24 §4.2), so there is now ONE buy rule — `long_shortlist` — shared
+    with Daily Insight and the 17:30 bulletin. Since 2026-09-28 that rule is
+    risk-adjusted 6-month momentum, top 8, each pick carrying its accept range
+    and measured 4/8-week outcome band (services/buy_layer.py).
   * AVOID list = UNION(snapshot.top_sells, ranker SELL sectors), deduped by
     symbol, each entry tagged with its source:
       BOTH          → in snapshot.top_sells AND a ranker-SELL sector
@@ -71,6 +73,7 @@ from services.report.data import (
     sector_name_map,
 )
 from services.report.format import fmtM
+from services import buy_layer
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -379,7 +382,7 @@ def main(argv: list[str] | None = None) -> None:
     # 2026-09-24 §2.4). The sector gate has no out-of-sample edge (§4.2), the
     # cutoff measured negative (§2.2) and the 5-day guard measured nothing. It
     # now takes Daily Insight's list verbatim: `snapshot.top_buys`, which
-    # `long_shortlist` builds (SMA200 gate -> rank blend) -- the same function
+    # `long_shortlist` builds (momentum order since 2026-09-28) -- the same function
     # the 17:30 bulletin calls. Email = Daily Insight = shortlist.
     buy_cands = [_universe_snap.tickers[p.symbol].as_picks_dict()
                  for p in _universe_snap.top_buys
@@ -846,7 +849,7 @@ def main(argv: list[str] | None = None) -> None:
             items.append(f"<li>#1 theo luật chung: <b>{b['sym']}</b> ({b['sector']}), mua ATO quanh {b['close']:,.0f}, "
                          f"giữ 20-40 phiên, bán ATO ngày thoát — không stop.</li>")
         else:
-            items.append("<li>Không mã nào trên SMA200 — phần vốn định mua: ETF theo chỉ số thay vì tiền mặt.</li>")
+            items.append("<li>Không mã nào đủ 6 tháng giá để xếp hạng hôm nay.</li>")
         # 3. Stealth -- a watchlist (§16.14)
         if NUM_STEALTH > 0:
             items.append(f"<li>{NUM_STEALTH} ngành đủ 3/3 điều kiện stealth rút gọn — watchlist, {unverified.TAG}, không phải lệnh.</li>")
@@ -1089,6 +1092,12 @@ def main(argv: list[str] | None = None) -> None:
             "news": list(pe.news or []),
             "sell_from": getattr(pe, "sell_from", None),
             "sell_by": getattr(pe, "sell_by", None),
+            "rank": getattr(pe, "rank", None),
+            "mom_6m": getattr(pe, "mom_6m", None),
+            "accept_lo": getattr(pe, "accept_lo", None),
+            "accept_hi": getattr(pe, "accept_hi", None),
+            "outlook_4w": getattr(pe, "outlook_4w", None),
+            "outlook_8w": getattr(pe, "outlook_8w", None),
             "source": source,
         }
 
@@ -1179,16 +1188,30 @@ def main(argv: list[str] | None = None) -> None:
                             for b in (p.get("technical_bits") or [])[:6])
         # Numbers line
         nums_parts = [f"Giá <b>{p['close']:,.2f}</b>"]
-        if p.get("target") is not None:
-            nums_parts.append(f"<span class='pos'>Target {p['target']:,.2f}</span>")
-        if p.get("stop") is not None:
-            nums_parts.append(f"<span class='neg'>Stop {p['stop']:,.2f}</span>")
-        if p.get("rr") is not None:
-            nums_parts.append(f"<span class='warn'>R:R {p['rr']:.1f}</span>")
+        outlook_html = ""
+        if kind == "BUY":
+            # 2026-09-28: the momentum rule has no target/stop; what a buyer
+            # needs is the price worth paying and the measured outcome band.
+            rng, outlook = buy_layer.pick_sentences(p)
+            if p.get("rank"):
+                nums_parts.insert(0, f"<b>#{p['rank']}</b>")
+            if rng:
+                nums_parts.append(f"<b>{rng}</b>")
+            if p.get("mom_6m") is not None:
+                nums_parts.append(f"6 tháng {p['mom_6m']:+.1f}%")
+            if p.get("sell_from") and p.get("sell_by"):
+                nums_parts.append(f"xem lại {p['sell_from']} · {p['sell_by']}")
+            if outlook:
+                outlook_html = f"<div class='snap-nums mono'>Kỳ vọng — {_esc(outlook)}</div>"
+        else:
+            if p.get("target") is not None:
+                nums_parts.append(f"<span class='pos'>Target {p['target']:,.2f}</span>")
+            if p.get("stop") is not None:
+                nums_parts.append(f"<span class='neg'>Stop {p['stop']:,.2f}</span>")
+            if p.get("rr") is not None:
+                nums_parts.append(f"<span class='warn'>R:R {p['rr']:.1f}</span>")
         if p.get("atr_pct") is not None:
             nums_parts.append(f"ATR {p['atr_pct']:.1f}%")
-        if kind == "BUY" and p.get("sell_from") and p.get("sell_by"):
-            nums_parts.append(f"<b>giữ tới {p['sell_by']}</b> (cửa sổ bán mở {p['sell_from']})")
         nums_html = " · ".join(nums_parts)
         # News
         news_html = ""
@@ -1210,6 +1233,7 @@ def main(argv: list[str] | None = None) -> None:
             f"<span class='mut'>điểm {float(p.get('score') or 0):+.1f}</span>"
             f"</div>"
             f"<div class='snap-nums mono'>{nums_html}</div>"
+            f"{outlook_html}"
             f"<div class='snap-bits'>{bits_html}</div>"
             f"<div class='snap-thesis mut'>{_esc(p.get('thesis') or '')}</div>"
             f"{news_html}"
@@ -1222,12 +1246,17 @@ def main(argv: list[str] | None = None) -> None:
         out = []
         if UNIFIED_BUYS:
             out.append("<h3>Nên MUA ({} picks)</h3>".format(len(UNIFIED_BUYS)))
+            out.append(f"<p class='mut'>{_esc(buy_layer.market_sentence(_universe_snap.market))} "
+                       f"{_esc(buy_layer.book_sentence())}</p>")
             out.append("<div class='snap-grid'>")
             out.extend(_render_unified_card(p, "BUY") for p in UNIFIED_BUYS)
             out.append("</div>")
+            out.append("<p class='mut'>Kỳ vọng = phân phối đo được của mọi mã luật này từng chọn "
+                       "(2019-07 → 2026-08, mua ATO phiên sau, trừ 1% phí), co giãn theo biến động "
+                       "từng mã. Không phải dự báo: một nửa số lần nằm ngoài khoảng đó.</p>")
         else:
-            out.append("<p class='mut'>Không mã nào trên SMA200 hôm nay — phần vốn định mua: "
-                       "ETF theo chỉ số thay vì tiền mặt (review 2026-09-24 §3.4).</p>")
+            out.append("<p class='mut'>Không mã nào đủ 6 tháng giá để xếp hạng — kiểm tra "
+                       "snapshot (ngày thường danh sách này không rỗng).</p>")
         if UNIFIED_SELLS:
             out.append("<h3 style='margin-top:12px'>Nên TRÁNH / CẮT ({} picks)</h3>".format(len(UNIFIED_SELLS)))
             out.append("<div class='snap-grid'>")
@@ -1286,22 +1315,18 @@ def main(argv: list[str] | None = None) -> None:
         # Rule line (replaces the Daily-Insight-vs-Ranker "consensus" line: since
         # 2026-09-25 there is one buy rule and one list, on every surface).
         consensus_line = (
-            "Danh sách mua = <b>luật chung</b>: giá trên SMA200 → xếp theo blend hạng "
-            "điểm + OBV → top-5. Giống hệt Daily Insight và bản theo dõi 17:30. "
-            "Giữ 4-8 tuần, mặc định tới ~40 phiên; mua ATO phiên tới, bán ATO ngày thoát."
+            f"{_esc(buy_layer.rule_sentence())} Giống hệt Daily Insight và bản theo dõi "
+            f"17:30. {_esc(buy_layer.market_sentence(_universe_snap.market))}"
         ) if UNIFIED_BUYS else ""
 
         # Pick-by-pick memo — top 5 BUYs.
         pick_blocks = []
         for p in top_buys_for_memo:
             label, css = _conviction_bucket(p)
-            rr = p.get("rr")
-            rr_s = f"R:R {rr:.1f}" if rr else "R:R n/a"
-            up_s = f"+{p['upside_pct']:.1f}%" if p.get("upside_pct") is not None else "n/a"
-            dn_s = f"{-p['downside_pct']:.1f}%" if p.get("downside_pct") is not None else "n/a"
+            rng, outlook = buy_layer.pick_sentences(p)
             thesis = p.get("thesis") or ""
-            window = (f" Giữ tới <b>{p['sell_by']}</b> (cửa sổ bán mở {p['sell_from']})."
-                      if p.get("sell_from") and p.get("sell_by") else "")
+            window = (f" Xem lại {p['sell_from']} và {p['sell_by']}: giữ nếu còn top "
+                      f"{buy_layer.KEEP_TOP}." if p.get("sell_from") and p.get("sell_by") else "")
             news_hint = ""
             if p.get("news"):
                 # Just point to the first cached news link if present.
@@ -1310,15 +1335,14 @@ def main(argv: list[str] | None = None) -> None:
                     news_hint = (f"<br><span class='mut'>↪ <a href='{_esc(first.get('url'))}' "
                                  f"target='_blank' rel='noopener' style='color:#7dd3fc'>"
                                  f"{_esc((first.get('title') or '')[:90])}</a></span>")
-            # Target/stop stay, labelled for what they are: the SWING screening
-            # geometry, not orders -- the book has had no stop since 26.10.
+            # 2026-09-28: the accept range and the measured outcome band replace
+            # the SWING target/stop -- the momentum rule has neither.
             pick_blocks.append(
                 f"<p><b>{_esc(p['symbol'])}</b> "
                 f"<span class='mut'>({_esc(p['sector_name'])})</span> · "
                 f"<span class='conviction {css}'>{label}</span> — "
-                f"mua quanh <b>{p['close']:,.2f}</b>.{window} "
-                f"<span class='mut'>Tham chiếu hình học (không phải lệnh): target "
-                f"{(p['target'] or 0):,.2f} ({up_s}), stop {(p['stop'] or 0):,.2f} ({dn_s}), {rr_s}.</span> "
+                f"giá tham chiếu <b>{p['close']:,.2f}</b>, <b>{_esc(rng)}</b>.{window} "
+                f"<span class='mut'>Kỳ vọng — {_esc(outlook)}.</span> "
                 f"{_esc(thesis)}{news_hint}</p>"
             )
 
@@ -1345,7 +1369,7 @@ def main(argv: list[str] | None = None) -> None:
         body = (
             f"<p>{stance} {flow_bridge}</p>"
             f"<p>{consensus_line}</p>"
-            + ("".join(pick_blocks) if pick_blocks else "<p class='mut'>Không mã nào trên SMA200 hôm nay — phần vốn định mua: ETF theo chỉ số thay vì tiền mặt.</p>")
+            + ("".join(pick_blocks) if pick_blocks else "<p class='mut'>Không mã nào đủ 6 tháng giá để xếp hạng hôm nay.</p>")
             + avoid_line
             + link_line
         )
@@ -1385,26 +1409,25 @@ def main(argv: list[str] | None = None) -> None:
         lines.append("")
 
         # One buy rule since 2026-09-25 — say which, instead of counting sources.
-        lines.append(f"Danh sách mua ({len(UNIFIED_BUYS)} mã): giá trên SMA200 → blend "
-                     "điểm + OBV → top-5. Giống Daily Insight và bản theo dõi 17:30.")
-        lines.append("Giữ 4-8 tuần, mặc định tới ~40 phiên. Mua ATO phiên tới, bán ATO ngày thoát.")
+        lines.append(f"Danh sách mua ({len(UNIFIED_BUYS)} mã). {buy_layer.rule_sentence()}")
+        lines.append(buy_layer.market_sentence(_universe_snap.market))
+        lines.append(buy_layer.book_sentence())
         lines.append("")
 
         # BUY block
         lines.append("— NÊN MUA —")
         if not UNIFIED_BUYS:
-            lines.append("  (Không mã nào trên SMA200 hôm nay — phần vốn định mua: ETF theo chỉ số.)")
+            lines.append("  (Không mã nào đủ 6 tháng giá để xếp hạng hôm nay.)")
         else:
             for i, p in enumerate(UNIFIED_BUYS[:10], 1):
-                target = p.get("target"); stop = p.get("stop")
+                rng, outlook = buy_layer.pick_sentences(p)
                 lines.append(f"{i}. {p['symbol']} ({p['sector_name']})")
-                price_line = f"   Giá {p['close']:,.2f}"
+                price_line = f"   Giá {p['close']:,.2f}" + (f" · {rng}" if rng else "")
                 if p.get("sell_from") and p.get("sell_by"):
-                    price_line += f" · giữ tới {p['sell_by']} (cửa sổ bán mở {p['sell_from']})"
-                if target is not None and stop is not None:
-                    price_line += (f" · tham chiếu (không phải lệnh): target {target:,.2f}"
-                                   f" / stop {stop:,.2f}")
+                    price_line += f" · xem lại {p['sell_from']} / {p['sell_by']}"
                 lines.append(price_line)
+                if outlook:
+                    lines.append(f"   Kỳ vọng — {outlook}")
                 thesis = p.get("thesis") or ""
                 if thesis:
                     # Wrap thesis to ~80 cols-ish; keep simple.

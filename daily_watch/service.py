@@ -55,22 +55,15 @@ ARCHIVE_DIR = Path(BASE_DIR) / "data" / "watch"
 #: tuần và 8 tuần").
 HORIZONS = HOLD_SESSIONS
 
-#: Lợi nhuận/năm của LUẬT ĐANG CHẠY (cổng SMA200 → blend, top-5) như một danh
-#: mục thật: staggered, 2023-01 → 2026-09, chi phí 1,00%/vòng, để tiền mặt khi
-#: không có mã (review 2026-09-24 §2.1, §3.1). Đo in-sample — đây là trần của
-#: phép đo, không phải lời hứa. Số cũ (5,9% / 11,7%) là quy năm số học của
-#: %/lệnh, không phải danh mục, và thuộc về luật có ngưỡng 2,5 (danh mục thật:
-#: 2,7% / 9,3%).
-HORIZON_ANNUALISED = {20: 0.072, 40: 0.117}
-HORIZON_SHARPE = {20: 0.44, 40: 0.65}
-
-#: VNINDEX mua & giữ trên CÙNG các ngày đó — trần trung thực. Chưa luật nào
-#: vượt nó, cả lợi nhuận lẫn Sharpe.
-VNINDEX_CAGR, VNINDEX_SHARPE, VNINDEX_MAXDD = 0.175, 0.98, -0.181
+#: Luật mua từ 2026-09-28 và các con số của nó: `services/buy_layer.py`
+#: (RECORD, BOOK, Z) — đo trong docs/reviews/STRATEGY_STUDY_2026-09-28.md. Luật
+#: cũ (cổng SMA200 → blend, top-5) đo được 7,2% / 11,7%/năm ở khung 20 / 40
+#: phiên trên 2023-01 → 2026-09 (VNINDEX 17,5%); trên 2019-07 → 2026-09 là
+#: 4,6%/năm (VNINDEX 8,9%). Nó vẫn được ghi vào kho như một bóng để audit.
 
 
 def _shortlist(top_n: int) -> tuple[list[dict], dict[str, Any]]:
-    """Ứng viên tốt nhất theo đúng luật production — `long_shortlist`.
+    """Ứng viên theo đúng luật production — `long_shortlist`.
 
     Dùng `.peek()` chứ không `get_snapshot()`: job có lịch chạy SAU pipeline
     hằng ngày nên cache đã ấm; nếu lạnh thì trả rỗng kèm cờ, chứ không đứng chờ
@@ -78,16 +71,19 @@ def _shortlist(top_n: int) -> tuple[list[dict], dict[str, Any]]:
 
     **Cùng một hàm** với trang Daily Insight và email 17:00 — không phải bản
     chép (review 2026-09-24 §2.4: ba bề mặt từng chạy ba luật mua khác nhau).
-    Luật: cổng SMA200 (điểm trên sàn −20) → thứ tự blend điểm + OBV → top-N,
-    bỏ mã anh đang nắm. Ngưỡng `MIN_BUY_SCORE` 2,5 đã bỏ 2026-09-25 (Tom: "bỏ
-    ngay, giữ cổng SMA200"); danh sách nó LẼ RA cho ra vẫn được ghi vào
-    `meta["shortlist_with_cutoff"]` để `daily_watch/audit.py` so hai luật trên
-    dữ liệu chưa từng dùng để chọn luật.
+
+    Luật từ 2026-09-28 (Tom: *"tối ưu hơn, kỳ vọng 20-30%/năm"*): xếp theo
+    động lượng 6 tháng chia biến động, top 8, giữ khi còn trong top 16, xem lại
+    mỗi 4 tuần; bỏ mã anh đang nắm. Mỗi mã kèm vùng mua và dải kết quả 4/8 tuần
+    đo được (`services.buy_layer`). Luật cũ (cổng SMA200 → blend) LẼ RA cho ra
+    gì được ghi vào `meta["shortlist_previous_rule"]` để `daily_watch/audit.py`
+    so hai luật trên dữ liệu chưa từng dùng để chọn luật.
     """
     meta: dict[str, Any] = {"as_of": None, "universe": 0, "cold_cache": False}
     try:
-        from services.picks_scoring import MIN_BUY_SCORE
-        from services.picks_universe_service import PicksUniverseService, long_shortlist
+        from services import buy_layer
+        from services.picks_universe_service import (PicksUniverseService,
+                                                     legacy_shortlist, long_shortlist)
     except ImportError:
         log.exception("[watch] không import được picks layer")
         return [], meta
@@ -99,17 +95,25 @@ def _shortlist(top_n: int) -> tuple[list[dict], dict[str, Any]]:
 
     meta["as_of"] = str(snap.as_of)
     meta["universe"] = len(snap.tickers)
+    market = dict(getattr(snap, "market", None) or {})
+    meta["market"] = market
     held = trading_state.held_symbols()
 
+    # Hạng động lượng trên CẢ universe (kể cả mã đang nắm): luật giữ một mã
+    # khi nó còn trong top KEEP_TOP, nên sổ cần biết hạng của từng mã anh giữ.
+    ranked = long_shortlist(snap.tickers.values(), len(snap.tickers))
+    meta["ranks"] = {r.symbol: i for i, r in enumerate(ranked, 1)}
+    meta["ranked_count"] = len(ranked)
+
     rows = long_shortlist(snap.tickers.values(), len(snap.tickers), exclude=held)
-    shadow = long_shortlist(snap.tickers.values(), top_n, exclude=held,
-                            min_score=MIN_BUY_SCORE)
+    shadow = legacy_shortlist(snap.tickers.values(), top_n, exclude=held)
 
     meta["qualified"] = len(rows)
-    meta["rule"] = "cổng SMA200 → blend điểm + OBV"
+    meta["rule"] = (f"động lượng 6 tháng / biến động — top {buy_layer.BUY_TOP_K}, "
+                    f"giữ khi còn top {buy_layer.KEEP_TOP}, xem lại mỗi "
+                    f"{buy_layer.REVIEW_SESSIONS} phiên")
     meta["excluded_held"] = sorted(held)
-    meta["retired_min_buy_score"] = MIN_BUY_SCORE
-    meta["shortlist_with_cutoff"] = [
+    meta["shortlist_previous_rule"] = [
         {"symbol": r.symbol, "close": r.close, "score": round(r.score, 2)}
         for r in shadow]
     # Giá đóng của CẢ universe, để kho tự chấm được mọi danh sách — kể cả base
@@ -121,16 +125,15 @@ def _shortlist(top_n: int) -> tuple[list[dict], dict[str, Any]]:
         "symbol": r.symbol,
         "sector_code": r.sector_code,
         "close": r.close,
+        "rank": meta["ranks"].get(r.symbol),
+        "momentum": r.momentum,
+        "mom_6m": r.mom_6m,
+        "vol_63d": r.vol_63d,
         "score": round(r.score, 2),
-        "rank_score": round(r.rank_score, 4) if r.rank_score is not None else None,
-        "stop": r.stop,
-        "target": r.target,
-        "rr": round(r.rr, 2) if r.rr is not None else None,
         "atr_pct": r.atr_pct,
         "ret_5d": r.ret_5d,
-        "rsi_2": r.rsi_2,
-        # Cửa sổ bán NẾU mua ở phiên giao dịch kế tiếp — cùng luật 20-40 phiên
-        # mà sổ đang dùng, tính sẵn để khỏi phải nhẩm.
+        **buy_layer.annotate(r.close, r.vol_63d, market.get("up")),
+        # Kỳ xem lại NẾU mua ở phiên giao dịch kế tiếp: phiên 20 và 40.
         **_window_if_bought(),
     } for r in rows[:top_n]], meta
 
@@ -149,14 +152,14 @@ def _window_if_bought() -> dict[str, str | None]:
         return {"sell_from": None, "sell_by": None}
 
 
-def build(top_n: int = 5) -> dict[str, Any]:
+def build(top_n: int = 8) -> dict[str, Any]:
     """Toàn bộ payload của bản theo dõi. Thuần dữ liệu — không in, không gửi."""
     book = position_tracking.mark_book()
     alerts = position_tracking.alerts(book)
     _attach_projection(book)
     picks, meta = _shortlist(top_n)
     universe_closes = meta.pop("_universe_closes", {})
-    shadow = meta.pop("shortlist_with_cutoff", [])
+    shadow = meta.pop("shortlist_previous_rule", [])
 
     as_of = meta.get("as_of") or book.get("as_of")
     stale = 0
@@ -184,9 +187,10 @@ def build(top_n: int = 5) -> dict[str, Any]:
         } for a in alerts],
         "book": book,
         "shortlist": picks,
-        # Luật cũ (ngưỡng 2,5), chỉ để audit: danh sách nó LẼ RA cho ra hôm nay.
-        # Không in như một khuyến nghị — `daily_watch/audit.py` chấm cả hai.
-        "shortlist_with_cutoff": shadow,
+        # Luật cũ (cổng SMA200 → blend), chỉ để audit: danh sách nó LẼ RA cho
+        # ra hôm nay. Không in như một khuyến nghị — `daily_watch/audit.py`
+        # chấm cả hai.
+        "shortlist_previous_rule": shadow,
         # Giá đóng của mọi mã kho này nhắc tới, lưu lại để N ngày lưu trữ tự cho
         # một chuỗi giá — `daily_watch/audit.py` chấm khuyến nghị cũ bằng chính
         # các bản lưu sau nó, không cần nguồn giá thứ hai.
@@ -256,6 +260,30 @@ def _fmt(v: Any, unit: str = "", nd: int = 2) -> str:
     return "—" if v is None else f"{v:,.{nd}f}{unit}"
 
 
+def _pct(v: Any, nd: int = 1) -> str:
+    return "—" if v is None else f"{v * 100:+.{nd}f}%" if nd else f"{v * 100:.0f}%"
+
+
+def _band(o: dict[str, float] | None) -> str:
+    """"P25 · trung vị · P75" of an outlook, in percent."""
+    if not o:
+        return "—"
+    return f"{o['p25'] * 100:+.1f} · **{o['median'] * 100:+.1f}** · {o['p75'] * 100:+.1f}%"
+
+
+def _rank_verdict(rank: int | None, n: int) -> str:
+    from services.buy_layer import KEEP_TOP
+    if rank is None:
+        return "ngoài bảng xếp"
+    return (f"{rank}/{n} · giữ" if rank <= KEEP_TOP
+            else f"{rank}/{n} · **rơi khỏi top {KEEP_TOP}**, bán ở kỳ xem lại")
+
+
+def _market_line(mk: dict[str, Any]) -> str:
+    from services.buy_layer import market_sentence
+    return market_sentence(mk)
+
+
 def render(payload: dict[str, Any]) -> str:
     """Markdown cho người đọc. Skill tóm tắt từ đây hoặc từ JSON."""
     L: list[str] = []
@@ -302,13 +330,16 @@ def render(payload: dict[str, Any]) -> str:
           "hoặc `POST /api/state/positions`.")
     else:
         a("")
-        a("| mã | vào | gần nhất | P&L | range bán (tham chiếu) | giá đang | cửa sổ bán |")
-        a("|---|---|---|---|---|---|---|")
+        ranks = (payload.get("shortlist_meta") or {}).get("ranks") or {}
+        n_ranked = (payload.get("shortlist_meta") or {}).get("ranked_count") or 0
+        a("| mã | vào | gần nhất | P&L | hạng động lượng | range bán (tham chiếu) | giá đang | cửa sổ bán |")
+        a("|---|---|---|---|---|---|---|---|")
         for p in b["positions"]:
             sr = p.get("sell_range") or {}
             star = "" if sr.get("peak_basis") == "since_entry" else " *"
             a(f"| **{p.get('symbol')}** | {_fmt(p.get('entry_price'))} "
               f"| {_fmt(p.get('last'))} | {_fmt(p.get('pnl_pct'), '%')} "
+              f"| {_rank_verdict(ranks.get(p.get('symbol')), n_ranked)} "
               f"| {_fmt(sr.get('band_lo'))} – {_fmt(sr.get('band_hi'))}{star} "
               f"| {sr.get('band_status') or '—'} "
               f"| {sr.get('sell_from') or '—'} → {sr.get('sell_by') or '—'} |")
@@ -349,38 +380,54 @@ def render(payload: dict[str, Any]) -> str:
           "theo dõi mỗi ngày.")
 
     # --- 3. Shortlist ------------------------------------------------------
+    from services import buy_layer as bl
     m = payload["shortlist_meta"]
+    mk = m.get("market") or {}
     a("")
-    a("## 3. Ứng viên")
+    a("## 3. Ứng viên — nên mua gì, giá nào, kỳ vọng bao nhiêu")
+    a("")
+    a(_market_line(mk))
     if not payload["shortlist"]:
         a("")
-        a("Không mã nào trên SMA200 hôm nay (sau khi bỏ mã anh đang nắm). **Đó là "
-          "câu trả lời, không phải lỗi.** Phần vốn định mua: đặt vào ETF theo chỉ "
-          "số thay vì để tiền mặt — review 2026-09-24 §3.4 đo được cách đó tốt hơn "
-          "ở mọi năm.")
+        a("Không mã nào đủ 6 tháng giá để xếp hạng (sau khi bỏ mã anh đang nắm). "
+          "Kiểm tra snapshot — ngày thường danh sách này không bao giờ rỗng.")
     else:
         a("")
-        # Cột stop/target CỐ Ý không in ở đây. Chúng là sản phẩm phụ của bộ lọc
-        # sàng lọc (`is_valid_long_pick` đòi stop < entry để tính sàn R:R), không
-        # phải mức bán — và từ 2026-09-16 sổ không còn dùng stop. In chúng cạnh
-        # một sổ không có stop là mời người đọc dùng chúng làm mức bán, đúng thứ
-        # phép đo vừa bác (§26.10). ATR% thì có ích thật: nó quyết định range bán
-        # rộng bao nhiêu sau khi mua.
-        a("| # | mã | ngành | giá | điểm | ATR%/phiên | nếu mua, cửa sổ bán |")
-        a("|---|---|---|---|---|---|---|")
+        # Cột stop/target CỐ Ý không in: sổ không dùng stop từ 2026-09-16
+        # (§26.10). Vùng mua là giá đáng trả, không phải mức cắt lỗ.
+        a("| # | mã | ngành | giá tham chiếu | vùng mua | 6 tháng | 4 tuần: P25 · trung vị · P75 "
+          "| 8 tuần: P25 · trung vị · P75 | xác suất lãi 8T | xem lại |")
+        a("|---|---|---|---|---|---|---|---|---|---|")
         for i, p in enumerate(payload["shortlist"], 1):
             a(f"| {i} | **{p['symbol']}** | {p['sector_code']} | {_fmt(p['close'])} "
-              f"| {p['score']} | {_fmt(p.get('atr_pct'), '%')} "
-              f"| {p.get('sell_from') or '—'} → {p.get('sell_by') or '—'} |")
+              f"| {_fmt(p.get('accept_lo'))} – {_fmt(p.get('accept_hi'))} "
+              f"| {_fmt(p.get('mom_6m'), '%', 1)} "
+              f"| {_band(p.get('outlook_4w'))} | {_band(p.get('outlook_8w'))} "
+              f"| {_pct((p.get('outlook_8w') or {}).get('win'), 0)} "
+              f"| {p.get('sell_from') or '—'} · {p.get('sell_by') or '—'} |")
         a("")
-        a(f"Lọc từ {m.get('universe', 0)} mã · {m.get('qualified', 0)} mã trên SMA200"
+        a(f"**{bl.book_sentence()}**")
+        a("")
+        a(f"Xếp {m.get('qualified', 0)} mã đủ 6 tháng giá trong {m.get('universe', 0)} mã universe"
           + (f" · đã loại {len(m.get('excluded_held') or [])} mã anh đang nắm"
              if m.get("excluded_held") else ""))
-    shadow = payload.get("shortlist_with_cutoff") or []
+        a("")
+        a("> **Vùng mua:** trên mức trên, lịch sử cho thấy lợi thế so với mua một mã "
+          f"thanh khoản bất kỳ bị trả hết (trả thêm 1% ≈ mất cả lợi thế 4 tuần). Mức dưới "
+          f"là {bl.LOW_BAND_SIGMAS:.0f} phiên dao động bình thường của chính mã đó — thấp hơn "
+          "thì chờ danh sách phiên sau: mã còn trong danh sách là vẫn mua được (mua sau "
+          "phiên giảm ≥2% còn cho kết quả TỐT hơn, đo được).")
+        a(">")
+        a("> **Kỳ vọng 4/8 tuần** là phân phối đo được của mọi mã luật này từng chọn "
+          "(2019-07 → 2026-08, mua ATO phiên sau, trừ 1% phí), co giãn theo biến động "
+          "của từng mã và theo thị trường trên/dưới trung bình 200 phiên. **Không phải "
+          "dự báo**: một nửa số lần nằm ngoài khoảng P25-P75, và một mã lẻ lời lỗ gần "
+          "như chia đôi — lợi thế nằm ở cả rổ và ở việc giữ mã còn mạnh.")
+    shadow = payload.get("shortlist_previous_rule") or []
     if shadow != [] or payload["shortlist"]:
         a("")
-        a("<sub>So sánh, **không phải khuyến nghị**: luật cũ (điểm ≥ "
-          f"{m.get('retired_min_buy_score', 2.5)}) hôm nay sẽ cho "
+        a("<sub>So sánh, **không phải khuyến nghị**: luật cũ (cổng SMA200 → blend) hôm "
+          "nay sẽ cho "
           + (", ".join(x["symbol"] for x in shadow) if shadow else "danh sách rỗng")
           + ". Ghi vào kho để `daily_watch/audit.py` so hai luật.</sub>")
 
@@ -404,51 +451,43 @@ def render(payload: dict[str, Any]) -> str:
     a("")
     a("> **Đây là biên độ, không phải dự báo hướng.** Cột trên trả lời *\"mã này "
       "thường đi bao nhiêu trong n phiên\"*, giãn theo căn bậc hai số phiên — một "
-      "tính chất của bước ngẫu nhiên, không phải một ý kiến về giá. Không rule nào "
-      "trong hệ thống thắng VNINDEX risk-adjusted (§26.9), nên bất kỳ con số *\"giá "
-      "sẽ là X\"* nào cũng là bịa, và bản tin này cố ý không in ra một con số như thế.")
+      "tính chất của bước ngẫu nhiên, không phải một ý kiến về giá. Bản tin cố ý không "
+      "in một con số *\"giá sẽ là X\"*: mục 3 cho phân phối đo được, không cho một giá.")
     a(">")
     a("> ATR là biên độ **ngày**, không phải độ lệch chuẩn — đừng đọc ±% như một "
       "khoảng tin cậy và đừng suy ra xác suất từ nó.")
 
     # --- 5. Đọc thế nào ----------------------------------------------------
-    lo, hi = HORIZONS
+    rec = bl.RECORD
     a("")
     a("## 5. Đọc bảng trên thế nào")
     a("")
-    a("- **Luật chọn:** cổng xu hướng (giá trên SMA200) → xếp theo blend hạng "
-      "điểm + OBV → top-5. **Cùng một hàm** với Daily Insight và email 17:00. "
-      "Ngưỡng điểm 2,5 đã bỏ ngày 2026-09-25: đo ra nó tốn ~0,4%/lệnh "
-      "(review 2026-09-24 §2.2).")
-    a(f"- **Giữ {lo}-{hi} phiên (4-8 tuần), mặc định tới ~{hi} phiên.** Phiên {lo} "
-      "chỉ mở cửa sổ bán, không phải tín hiệu bán. Luật này như một danh mục thật "
-      "(2023-01 → 2026-09, chi phí 1,00%/vòng, đo in-sample):")
-    a("")
-    a("  | giữ | lợi nhuận/năm | Sharpe | VNINDEX cùng kỳ |")
-    a("  |---|---|---|---|")
-    for h in HORIZONS:
-        bold = "**" if h == hi else ""
-        a(f"  | {bold}{h} phiên ({h // 5} tuần){bold} "
-          f"| {bold}{HORIZON_ANNUALISED[h] * 100:+.1f}%{bold} "
-          f"| {HORIZON_SHARPE[h]:.2f} "
-          f"| {VNINDEX_CAGR * 100:+.1f}%, Sharpe {VNINDEX_SHARPE:.2f} |")
-    a("")
-    a(f"  Lợi nhuận tăng dốc tới ~{hi} phiên rồi đi ngang — giữ lâu hơn không "
-      "thêm gì đo được (review §3.1).")
-    a("- **Khớp lệnh:** mua ở phiên ATO phiên sau; khi thoát, bán ở phiên ATO — "
-      "+0,06-0,09%/lệnh so với bán ATC (review §3.3).")
-    a("- **Trần trung thực:** chưa luật nào thắng VNINDEX, cả lợi nhuận lẫn "
-      "Sharpe. Đây là shortlist cho người đã quyết định tự chọn mã. Nếu mục tiêu "
-      "là lợi nhuận trên rủi ro, cân nhắc mô hình lõi-vệ tinh: phần lớn vốn theo "
-      "index, shortlist là phần vệ tinh.")
-    a("- **\"Nhả quá sâu\" là tin về luận điểm, không phải lệnh bán.** Bán cơ học "
-      "theo mức giá tốn 0,7-2,0 điểm %/năm so với giữ hết khung (review §3.2).")
-    a("- **Xoay vòng là thuế:** chi phí ~12,6%/năm nếu giữ 4 tuần, ~6,3%/năm nếu "
-      "giữ 8 tuần.")
+    a(f"- **Luật chọn (từ 2026-09-28):** xếp 75 mã rổ ngành (thanh khoản ≥ 5 tỷ/ngày) theo "
+      f"lãi 6 tháng (bỏ tuần gần nhất) chia cho biến động của chính nó; mua "
+      f"**{bl.BUY_TOP_K} mã đầu, chia đều**. Cùng một hàm với Daily Insight và email 17:00.")
+    a(f"- **Giữ và bán:** xem lại mỗi {bl.REVIEW_SESSIONS} phiên (4 tuần). Mã còn trong "
+      f"**top {bl.KEEP_TOP}** thì giữ tiếp (8 tuần, rồi hơn nữa nếu vẫn mạnh); rơi khỏi top "
+      f"{bl.KEEP_TOP} thì bán ATO phiên kế và thay bằng mã đầu danh sách. Cột \"hạng động "
+      "lượng\" ở mục 2 là thứ quyết định, không phải P&L.")
+    a(f"- **Kết quả lịch sử ({rec['window']}, sau phí 1%/vòng):** {_pct(rec['cagr'], 0)}/năm, "
+      f"VNINDEX {_pct(rec['vnindex_cagr'], 1)}. Năm tệ nhất {rec['worst_year'][0]}: "
+      f"{_pct(rec['worst_year'][1], 0)}; sụt giảm tối đa {_pct(rec['maxdd'], 0)}. Riêng "
+      f"2022 → 2026: {_pct(rec['since_2022_cagr'], 1)}/năm, VNINDEX "
+      f"{_pct(rec['since_2022_vnindex'], 1)}. 12 tháng gần nhất: "
+      f"{_pct(rec['last_12m'][0], 0)} đến {_pct(rec['last_12m'][1], 0)} tùy ngày bắt đầu "
+      f"(VNINDEX {_pct(rec['last_12m_vnindex'], 0)}).")
+    a("- **Đọc các con số đó thế nào:** chúng lạc quan — rổ 75 mã được chọn năm 2026 (toàn "
+      "mã sống sót), và luật được chọn trên chính dữ liệu đó. Kỳ vọng trung thực: **VNINDEX "
+      "cộng khoảng 10 điểm %/năm**, dao động rất lớn giữa các năm; 20-30%/năm là năm tốt, "
+      "không phải năm nào cũng vậy (docs/reviews/STRATEGY_STUDY_2026-09-28.md).")
+    a("- **Khớp lệnh:** mua ATO phiên sau; bán ATO — +0,06-0,09%/lệnh so với ATC (review "
+      "2026-09-24 §3.3). Chi phí mỗi vòng mua-bán ~1%, nên giữ mã còn mạnh thay vì xoay vòng.")
+    a("- **\"Nhả quá sâu\" ở mục 1 là tin về luận điểm, không phải lệnh bán.** Bán cơ học "
+      "theo mức giá tốn 0,7-2,0 điểm %/năm (review §3.2).")
     return "\n".join(L) + "\n"
 
 
-def run(top_n: int = 5, write: bool = True) -> dict[str, Any]:
+def run(top_n: int = 8, write: bool = True) -> dict[str, Any]:
     """Dựng, ghi ra đĩa, trả payload. Đây là thứ `main.py --daily-watch` gọi.
 
     Đây là nơi DUY NHẤT gọi `holdings.refresh()` — nó gọi mạng. `build()` và

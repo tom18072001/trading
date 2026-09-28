@@ -176,8 +176,11 @@ def test_the_horizon_note_names_4_and_8_weeks_and_no_t_plus():
     stated a horizon and was closed on a three-day clock because of it."""
     from config import HOLD_SESSIONS
     from services.picks_scoring import horizon_note
+    from services.buy_layer import KEEP_TOP
     txt = horizon_note()
-    assert f"{HOLD_SESSIONS[0]}-{HOLD_SESSIONS[1]} phiên" in txt
+    assert f"phiên {HOLD_SESSIONS[0]} (4 tuần)" in txt and f"{HOLD_SESSIONS[1]} (8 tuần)" in txt
+    # 2026-09-28: session 20 is a review, and the keep/sell test is the rank
+    assert f"top {KEEP_TOP}" in txt
     assert "T+" not in txt
 
 

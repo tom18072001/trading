@@ -14,6 +14,12 @@ Two things shipped together and each can regress on its own:
     volume descending, which was measured to make the shortlist WORSE
     (-0.06% -> -0.15% excess over the base rate). A test that only checked
     "sorted by score" would stay green if someone put it back.
+
+2026-09-28: the production order became risk-adjusted momentum (`_rank_key`);
+the 2026-09-16/25 order lives on as `_legacy_rank_key` / `legacy_shortlist`,
+the audit shadow. The score tests below pin the shadow -- it must keep
+reproducing the retired rule, or the audit compares against a rule that never
+ran.
 """
 from __future__ import annotations
 
@@ -22,7 +28,13 @@ import pandas as pd
 import pytest
 
 from services.picks_scoring import UNTRENDED_FLOOR, score_ticker
-from services.picks_universe_service import TickerRow, _build_ticker_row, _rank_key
+from services.picks_universe_service import (
+    TickerRow,
+    _build_ticker_row,
+    _rank_key,
+    legacy_shortlist,
+)
+from services.picks_universe_service import _legacy_rank_key as _old_key
 
 
 # ---------------------------------------------------------------- the formula
@@ -139,13 +151,22 @@ def test_the_tie_break_is_not_dollar_volume():
     """
     big = _row("ZZZ", 3.0, dv=9e9)      # huge turnover, late in the alphabet
     small = _row("AAA", 3.0, dv=1e6)
+    assert sorted([big, small], key=_old_key)[0] is small
+    big.momentum = small.momentum = 4.0  # the production order: same property
     assert sorted([big, small], key=_rank_key)[0] is small
 
 
 def test_best_score_still_wins_regardless_of_symbol():
     good = _row("ZZZ", 5.0, dv=1e6)
     weak = _row("AAA", 1.0, dv=9e9)
-    assert sorted([good, weak], key=_rank_key)[0] is good
+    assert sorted([good, weak], key=_old_key)[0] is good
+
+
+def test_best_momentum_wins_regardless_of_symbol_and_score():
+    good = _row("ZZZ", -5.0, dv=1e6)
+    weak = _row("AAA", 9.0, dv=9e9)
+    good.momentum, weak.momentum = 6.0, 1.0
+    assert sorted([weak, good], key=_rank_key)[0] is good
 
 
 def test_the_order_is_stable_across_calls():
@@ -153,8 +174,8 @@ def test_the_order_is_stable_across_calls():
     reader to ignore the order."""
     rows = [_row(s, 3.0, dv=i * 1e6) for i, s in enumerate(["DEF", "ABC", "XYZ"])]
     shuffled = rows[::-1]        # a different input order, same expected output
-    first = [r.symbol for r in sorted(rows, key=_rank_key)]
-    second = [r.symbol for r in sorted(shuffled, key=_rank_key)]
+    first = [r.symbol for r in sorted(rows, key=_old_key)]
+    second = [r.symbol for r in sorted(shuffled, key=_old_key)]
     assert first == second == ["ABC", "DEF", "XYZ"]
 
 
@@ -232,12 +253,8 @@ def test_only_the_sma200_gate_decides_admission(monkeypatch):
                         stop=9.0, target=12.0, rr=2.0, atr_pct=2.0)
     tickers = {r.symbol: r for r in (high, low, floored)}
 
-    svc = mod.PicksUniverseService()
-    monkeypatch.setattr(svc, "_sectors_with_action", lambda *a, **k: {"BANK"})
-    monkeypatch.setattr(mod, "fetch_news", lambda *a, **k: [], raising=False)
-
-    out = svc._select_top(tickers, {"BANK": [high, low, floored]},
-                          action="BUY", n=5, as_of=date(2026, 9, 16))
+    assert mod and date  # the shadow is a pure function of the rows
+    out = legacy_shortlist(tickers.values(), 5)
     assert [p.symbol for p in out] == ["BBB", "AAA"]
 
 
@@ -249,14 +266,14 @@ def test_the_buy_list_ignores_sector_signals(monkeypatch):
     from datetime import date
 
     flagged = TickerRow(symbol="AAA", sector_code="BANK", close=10.0, score=5.0,
-                        rank_score=0.40, is_valid_buy=True,
+                        rank_score=0.40, is_valid_buy=True, momentum=2.0, vol_63d=0.02,
                         stop=9.0, target=12.0, rr=2.0, atr_pct=2.0)
     better = TickerRow(symbol="ZZZ", sector_code="TECH", close=10.0, score=1.0,
-                       rank_score=0.95, is_valid_buy=True,
+                       rank_score=0.95, is_valid_buy=True, momentum=8.0, vol_63d=0.02,
                        stop=9.0, target=12.0, rr=2.0, atr_pct=2.0)
     svc = mod.PicksUniverseService()
     monkeypatch.setattr(svc, "_sectors_with_action", lambda *a, **k: {"BANK"})
-    monkeypatch.setattr(mod, "fetch_news", lambda *a, **k: [], raising=False)
+    monkeypatch.setattr("services.picks_news.fetch_news", lambda *a, **k: [])
     out = svc._select_top({r.symbol: r for r in (flagged, better)},
                           {"BANK": [flagged], "TECH": [better]},
                           action="BUY", n=5, as_of=date(2026, 9, 16))
@@ -348,12 +365,8 @@ def test_flow_cannot_rescue_a_name_below_its_sma200(monkeypatch):
                      score=UNTRENDED_FLOOR, obv_chg20=9.0, rank_score=0.99,
                      is_valid_buy=True, stop=9.0, target=12.0, rr=2.0, atr_pct=2.0)
 
-    svc = mod.PicksUniverseService()
-    monkeypatch.setattr(svc, "_sectors_with_action", lambda *a, **k: {"BANK"})
-    monkeypatch.setattr(mod, "fetch_news", lambda *a, **k: [], raising=False)
-    out = svc._select_top({r.symbol: r for r in (ok, junk)},
-                          {"BANK": [ok, junk]}, action="BUY", n=5,
-                          as_of=date(2026, 9, 16))
+    assert mod and date  # the shadow is a pure function of the rows
+    out = legacy_shortlist([ok, junk], 5)
     assert [p.symbol for p in out] == ["AAA"]
 
 
@@ -365,11 +378,15 @@ def test_rank_key_prefers_rank_score_but_survives_without_it():
                    rank_score=0.9)
     lo = TickerRow(symbol="BBB", sector_code="BANK", close=10.0, score=9.0,
                    rank_score=0.1)
-    assert sorted([lo, hi], key=_rank_key)[0] is hi        # rank_score wins
+    assert sorted([lo, hi], key=_old_key)[0] is hi         # rank_score wins
 
     a = TickerRow(symbol="AAA", sector_code="BANK", close=10.0, score=1.0)
     b = TickerRow(symbol="BBB", sector_code="BANK", close=10.0, score=9.0)
-    assert sorted([a, b], key=_rank_key)[0] is b           # falls back to score
+    assert sorted([a, b], key=_old_key)[0] is b            # falls back to score
+
+    # the production key: a row without momentum sorts last, it does not crash
+    b.momentum = -3.0
+    assert sorted([a, b], key=_rank_key)[0] is b
 
 
 def test_the_bench_ordering_is_the_shipped_function():

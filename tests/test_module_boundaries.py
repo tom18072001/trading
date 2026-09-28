@@ -50,6 +50,9 @@ LAYER: dict[str, str] = {
     "sector_signal_service": "decide",
     "picks_universe_service": "decide",
     "picks_scoring": "decide",
+    # the buy rule's momentum and the layer on top (2026-09-28): pure
+    # arithmetic on closes, imports nothing from services/.
+    "buy_layer": "decide",
     "picks_news": "decide",
     "unified_picks": "decide",
     "backtest_service": "decide",

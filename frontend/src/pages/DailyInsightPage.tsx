@@ -41,6 +41,8 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 
 function convictionOf(p: any): number {
   if (p.conviction != null) return clamp(Math.round(p.conviction), 0, 5);
+  // 2026-09-28: the buy list is the momentum order; the stars say where in it.
+  if (p.rank != null) return clamp(5 - Math.floor((p.rank - 1) / 2), 1, 5);
   const rr = pRr(p) ?? 0;
   if (rr >= 2.5) return 5;
   if (rr >= 2.0) return 4;
@@ -48,6 +50,18 @@ function convictionOf(p: any): number {
   return 2;
 }
 const starStr = (n: number) => '★'.repeat(clamp(n, 0, 5)) + '☆'.repeat(5 - clamp(n, 0, 5));
+
+/** "P25 · median · P75" of a measured 4/8-week band (services/buy_layer.py). */
+type Outlook = { p25: number; median: number; p75: number; win: number } | null | undefined;
+const pct1 = (v: number) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%`;
+function outlookText(o: Outlook): string {
+  if (!o) return '—';
+  return `${pct1(o.p25)} · ${pct1(o.median)} · ${pct1(o.p75)}`;
+}
+function acceptText(p: { accept_lo?: number | null; accept_hi?: number | null }): string {
+  if (p.accept_hi == null) return '—';
+  return p.accept_lo != null ? `${fmtNum(p.accept_lo)} – ${fmtNum(p.accept_hi)}` : `≤ ${fmtNum(p.accept_hi)}`;
+}
 
 // ===================================================================
 //  Regime gauge — SVG semicircle (red → slate → green), needle by score
@@ -347,9 +361,9 @@ function holdSchedule(p: { sell_from?: string | null; sell_by?: string | null })
   return [
     { label: 'Mua', date: ddmm(buy), sub: 'ATO phiên tới', state: 'now' as const },
     { label: '+20 phiên', date: p.sell_from ? isoDdmm(p.sell_from) : ddmm(addSessions(buy, 20)),
-      sub: 'mở cửa sổ bán', state: 'future' as const },
+      sub: 'xem lại: còn top 16 thì giữ', state: 'future' as const },
     { label: '+40 phiên', date: p.sell_by ? isoDdmm(p.sell_by) : ddmm(addSessions(buy, 40)),
-      sub: 'mặc định bán (ATO)', state: 'sell' as const },
+      sub: 'xem lại lần 2', state: 'sell' as const },
   ];
 }
 
@@ -430,10 +444,24 @@ function PickCard({ p, kind, alloc }: { p: any; kind: 'BUY' | 'SELL'; alloc: num
         </div>
       </div>
 
+      {isBuy && p.accept_hi != null && (
+        /* 2026-09-28 — the momentum rule's layer: the price worth paying and the
+           measured 4/8-week band (services/buy_layer.py). Not a forecast. */
+        <div className="rounded-xl bg-panel2 border border-line p-3 text-[11px] font-mono flex flex-col gap-1.5"
+             title="Phân phối đo được của mọi mã luật này từng chọn (2019-07 → 2026-08, mua ATO phiên sau, trừ 1% phí), co giãn theo biến động của mã. Không phải dự báo.">
+          <div className="flex justify-between"><span className="text-mid">Vùng mua</span><span className="text-hi font-semibold">{acceptText(p)}</span></div>
+          <div className="flex justify-between"><span className="text-mid">4 tuần (P25 · trung vị · P75)</span><span className="text-hi">{outlookText(p.outlook_4w)}</span></div>
+          <div className="flex justify-between"><span className="text-mid">8 tuần (P25 · trung vị · P75)</span><span className="text-hi">{outlookText(p.outlook_8w)}</span></div>
+          {p.outlook_8w && <div className="flex justify-between"><span className="text-mid">Xác suất lãi 8 tuần</span><span className="text-hi">{(p.outlook_8w.win * 100).toFixed(0)}%</span></div>}
+        </div>
+      )}
+
       {isBuy ? (
         <>
           {/* price ladder + hold schedule. Target/stop are the SWING screening
-              geometry, not orders: the book has had no stop since 26.10. */}
+              geometry, not orders: the book has had no stop since 26.10. Hidden
+              for momentum picks, which carry the layer above instead. */}
+          {p.accept_hi == null && (
           <div className="flex gap-4" title="Target/Stop: hình học sàng lọc (SWING), không phải lệnh — sổ không dùng stop">
             <div className="relative w-1.5 rounded-full bg-raise self-stretch min-h-[88px]">
               <span className="absolute -left-1 top-0 w-3.5 h-0.5 bg-buy rounded" />
@@ -449,6 +477,7 @@ function PickCard({ p, kind, alloc }: { p: any; kind: 'BUY' | 'SELL'; alloc: num
               <div className="flex justify-between"><span className="text-sell">Stop</span><span className="text-sell">{fmtNum(p.stop)}{p.downside_pct != null && <span className="text-sell/70"> −{p.downside_pct.toFixed(1)}%</span>}</span></div>
             </div>
           </div>
+          )}
 
           {/* 4-8 week schedule */}
           <div className="grid grid-cols-3 gap-1.5">
@@ -470,18 +499,32 @@ function PickCard({ p, kind, alloc }: { p: any; kind: 'BUY' | 'SELL'; alloc: num
 
           {/* sizing */}
           <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="rounded-lg bg-panel2 border border-line py-1.5">
-              <div className="text-[9px] text-lo uppercase tracking-wider">R:R</div>
-              <div className={`text-[13px] font-mono font-semibold ${(rr ?? 0) >= 2 ? 'text-buy' : 'text-warn'}`}>{rr != null ? rr.toFixed(1) : '—'}</div>
-            </div>
+            {p.rank != null ? (
+              <div className="rounded-lg bg-panel2 border border-line py-1.5">
+                <div className="text-[9px] text-lo uppercase tracking-wider">Hạng</div>
+                <div className="text-[13px] font-mono font-semibold text-hi">#{p.rank}</div>
+              </div>
+            ) : (
+              <div className="rounded-lg bg-panel2 border border-line py-1.5">
+                <div className="text-[9px] text-lo uppercase tracking-wider">R:R</div>
+                <div className={`text-[13px] font-mono font-semibold ${(rr ?? 0) >= 2 ? 'text-buy' : 'text-warn'}`}>{rr != null ? rr.toFixed(1) : '—'}</div>
+              </div>
+            )}
             <div className="rounded-lg bg-panel2 border border-line py-1.5">
               <div className="text-[9px] text-lo uppercase tracking-wider">Phân bổ</div>
               <div className="text-[13px] font-mono font-semibold text-hi">{alloc >= 1 ? `${alloc.toFixed(0)}tr` : '—'}</div>
             </div>
-            <div className="rounded-lg bg-panel2 border border-line py-1.5">
-              <div className="text-[9px] text-lo uppercase tracking-wider">Rủi ro tối đa</div>
-              <div className="text-[13px] font-mono font-semibold text-sell">{risk >= 0.01 ? `${risk.toFixed(1)}tr` : '—'}</div>
-            </div>
+            {p.mom_6m != null ? (
+              <div className="rounded-lg bg-panel2 border border-line py-1.5">
+                <div className="text-[9px] text-lo uppercase tracking-wider">6 tháng</div>
+                <div className={`text-[13px] font-mono font-semibold ${p.mom_6m >= 0 ? 'text-buy' : 'text-sell'}`}>{p.mom_6m >= 0 ? '+' : ''}{p.mom_6m.toFixed(1)}%</div>
+              </div>
+            ) : (
+              <div className="rounded-lg bg-panel2 border border-line py-1.5">
+                <div className="text-[9px] text-lo uppercase tracking-wider">Rủi ro tối đa</div>
+                <div className="text-[13px] font-mono font-semibold text-sell">{risk >= 0.01 ? `${risk.toFixed(1)}tr` : '—'}</div>
+              </div>
+            )}
           </div>
         </>
       ) : (
@@ -537,12 +580,12 @@ function PickCard({ p, kind, alloc }: { p: any; kind: 'BUY' | 'SELL'; alloc: num
   );
 }
 
-/** Empty-state copy. The BUY list is the shared shortlist rule (SMA200 gate →
- *  rank blend, 2026-09-25) — it no longer depends on any sector being BUY, so
- *  "no BUY sector today" would be the wrong explanation for an empty list. */
+/** Empty-state copy. The BUY list is the shared shortlist rule — since
+ *  2026-09-28 the momentum order, which ranks every liquid name with 6 months
+ *  of prices — so an empty list is a data problem, not a market verdict. */
 function emptyText(kind: 'BUY' | 'SELL'): string {
   return kind === 'BUY'
-    ? 'Không mã nào trên SMA200 hôm nay — phần vốn định mua: ETF theo chỉ số thay vì tiền mặt.'
+    ? 'Không mã nào đủ 6 tháng giá để xếp hạng — kiểm tra snapshot (bấm Refresh).'
     : 'Không có ngành nào ở trạng thái SELL hôm nay.';
 }
 
@@ -563,7 +606,9 @@ function PickCards({ picks, kind, capital }: { picks: any[]; kind: 'BUY' | 'SELL
           key={`${p.symbol}-${i}`}
           p={p}
           kind={kind}
-          alloc={kind === 'BUY' ? deployable * convictionOf(p) / convSum : 0}
+          alloc={kind !== 'BUY' ? 0
+            : p.rank != null ? deployable / picks.length   // the rule is equal weight
+            : deployable * convictionOf(p) / convSum}
         />
       ))}
     </div>
@@ -609,10 +654,10 @@ export function PickTable({ title, subtitle, kind, picks }: {
             <th className="p-2 text-right">Giá</th>
             {kind === 'BUY' ? (
               <>
-                <th className="p-2 text-right">Target</th>
-                <th className="p-2 text-right">Stop</th>
-                <th className="p-2 text-right">R:R</th>
-                <th className="p-2 text-right">Cửa sổ bán</th>
+                <th className="p-2 text-right">Vùng mua</th>
+                <th className="p-2 text-right" title="P25 · trung vị · P75, sau phí — phân phối đo được, không phải dự báo">4 tuần</th>
+                <th className="p-2 text-right" title="P25 · trung vị · P75, sau phí — phân phối đo được, không phải dự báo">8 tuần</th>
+                <th className="p-2 text-right">Xem lại</th>
               </>
             ) : (
               <>
@@ -645,19 +690,11 @@ export function PickTable({ title, subtitle, kind, picks }: {
 
                   {kind === 'BUY' ? (
                     <>
-                      <td className="p-2 text-right font-mono text-buy">
-                        {fmtNum(p.target)}
-                        {p.upside_pct != null && (<div className="text-[10px] text-buy/80">+{p.upside_pct.toFixed(1)}%</div>)}
-                      </td>
-                      <td className="p-2 text-right font-mono text-sell">
-                        {fmtNum(p.stop)}
-                        {p.downside_pct != null && (<div className="text-[10px] text-sell/80">−{p.downside_pct.toFixed(1)}%</div>)}
-                      </td>
-                      <td className={`p-2 text-right font-mono ${(pRr(p) ?? 0) >= 2 ? 'text-buy' : 'text-warn'}`}>
-                        {pRr(p) != null ? pRr(p).toFixed(1) : '—'}
-                      </td>
+                      <td className="p-2 text-right font-mono text-hi text-[11px]">{acceptText(p)}</td>
+                      <td className="p-2 text-right font-mono text-mid text-[11px]">{outlookText(p.outlook_4w)}</td>
+                      <td className="p-2 text-right font-mono text-mid text-[11px]">{outlookText(p.outlook_8w)}</td>
                       <td className="p-2 text-right font-mono text-mid text-[11px]">
-                        {p.sell_from && p.sell_by ? `${isoDdmm(p.sell_from)} → ${isoDdmm(p.sell_by)}` : '—'}
+                        {p.sell_from && p.sell_by ? `${isoDdmm(p.sell_from)} · ${isoDdmm(p.sell_by)}` : '—'}
                       </td>
                     </>
                   ) : (
@@ -1053,23 +1090,31 @@ export default function DailyInsightPage() {
           </div>
         </div>
 
+        {mc?.buy_layer && (
+          <div className="text-[11.5px] text-mid leading-relaxed rounded-xl bg-panel2 border border-line p-3">
+            <div>{mc.buy_layer.rule_sentence}</div>
+            <div className="mt-1">{mc.buy_layer.market_sentence}</div>
+            <div className="mt-1">{mc.buy_layer.book_sentence}</div>
+          </div>
+        )}
+
         {pickView === 'cards' ? (
           <>
-            <div className="section-label text-buy/80">⚡ Nên MUA — giữ 4-8 tuần, mặc định tới ~40 phiên</div>
+            <div className="section-label text-buy/80">⚡ Nên MUA — top 8 động lượng, xem lại mỗi 4 tuần (giữ khi còn top 16)</div>
             <PickCards picks={buyPicks} kind="BUY" capital={capital} />
             <div className="section-label text-sell/80 mt-2">⚠ Nên BÁN / TRÁNH — stop-out levels</div>
             <PickCards picks={sellPicks} kind="SELL" capital={capital} />
           </>
         ) : (
           <>
-            <PickTable title="Nên MUA — giữ 4-8 tuần" subtitle="⚡ Mua ATO phiên tới · giữ tới ~40 phiên (phiên 20 chỉ mở cửa sổ) · bán ATO ngày thoát" kind="BUY" picks={buyPicks} />
+            <PickTable title="Nên MUA — top 8 động lượng" subtitle="⚡ Mua ATO phiên tới, trong vùng mua · xem lại ở phiên 20 và 40: còn top 16 thì giữ, rơi khỏi thì bán ATO" kind="BUY" picks={buyPicks} />
             <PickTable title="Nên BÁN / TRÁNH" subtitle="⚠ Stop-out levels — thoát nếu đang nắm, tránh mua mới" kind="SELL" picks={sellPicks} />
           </>
         )}
       </section>
 
       <div className="text-[10.5px] text-lo leading-relaxed pt-2">
-        * Đơn vị giá = nghìn VND. R:R = reward/risk, nên ≥ 1.5. Tín hiệu: RSI / MACD / SMA / ADX / Volume / ATR.
+        * Đơn vị giá = nghìn VND. Kỳ vọng 4/8 tuần = P25 · trung vị · P75 sau phí, phân phối đo được 2019-07 → 2026-08, không phải dự báo. Tín hiệu: RSI / MACD / SMA / ADX / Volume / ATR.
         News kết hợp KBS + Google News (CafeF, VnExpress, …). Không phải khuyến nghị đầu tư.
       </div>
     </div>

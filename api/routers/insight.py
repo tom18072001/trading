@@ -194,6 +194,7 @@ def insight_daily():
         sess.close()
     from analysis import verification
     from analysis.regime import confidence_phrase
+    from services import buy_layer
 
     regime = (
         {
@@ -220,6 +221,14 @@ def insight_daily():
         # What none of the above has: an out-of-sample test (review 2026-09-24
         # §8 P0-6). The page prints these beside the numbers.
         "unverified": verification.as_dict(),
+        # The buy rule's own context (2026-09-28, services/buy_layer.py): the
+        # same three sentences the email and the 17:30 bulletin print.
+        "buy_layer": {
+            "market": getattr(snapshot, "market", None) or {},
+            "rule_sentence": buy_layer.rule_sentence(),
+            "market_sentence": buy_layer.market_sentence(getattr(snapshot, "market", None)),
+            "book_sentence": buy_layer.book_sentence(),
+        },
     }
 
     generated_at = pd.Timestamp.now(tz="Asia/Ho_Chi_Minh").isoformat()

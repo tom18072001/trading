@@ -132,12 +132,11 @@ def test_book_stats_on_a_known_series():
 # ------------------------------------------------ the rule the bench grades
 
 def test_the_bench_grades_the_rule_production_ships():
-    """`X_shipped_rule` must pick what `long_shortlist` picks: the production
-    score with its floor over the whole liquid universe, the blend over that
-    SAME universe, then the gate. `X_prop_obv` blends only gated names and is
-    a different rule -- review 2026-09-24 §2.2."""
-    from scripts.ticker_alpha_bench import FACTORS, _production_score, build_features
-    from services.picks_scoring import UNTRENDED_FLOOR, blended_rank_scores
+    """`X_shipped_rule` must pick what `long_shortlist` picks (2026-09-28): the
+    risk-adjusted 6-month momentum of every liquid name, computed by the same
+    function production calls on the same closes."""
+    from scripts.ticker_alpha_bench import FACTORS, build_features
+    from services.buy_layer import risk_adjusted_momentum
     from services.picks_universe_service import TickerRow, long_shortlist
 
     rng = np.random.default_rng(8)
@@ -151,6 +150,45 @@ def test_the_bench_grades_the_rule_production_ships():
          "low": close * 0.985, "volume": vol}
     f = build_features(p)
     bench = FACTORS["X_shipped_rule"](f)
+
+    checked = 0
+    for i in range(140, n, 9):
+        live = f["dv20"].iloc[i] > 5e6
+        syms = list(live.index[live])
+        if len(syms) < 10:
+            continue
+        rows = []
+        for s in syms:
+            m, _, _ = risk_adjusted_momentum(close[s].iloc[: i + 1].tolist())
+            rows.append(TickerRow(symbol=s, sector_code="X", close=1.0, momentum=m))
+        want = [r.symbol for r in long_shortlist(rows, 5)]
+        got = list(bench.iloc[i].dropna().nlargest(5).index)
+        assert got == want, f"day {idx[i].date()}"
+        checked += 1
+    assert checked >= 5, "the fixture stopped producing liquid days"
+
+
+def test_the_bench_grades_the_retired_rule_its_shadow_prints():
+    """`X_rule_2026_09_25` must pick what `legacy_shortlist` (the audit shadow)
+    picks: the production score with its floor over the whole liquid universe,
+    the blend over that SAME universe, then the gate. `X_prop_obv` blends only
+    gated names and is a different rule -- review 2026-09-24 §2.2."""
+    from scripts.ticker_alpha_bench import FACTORS, _production_score, build_features
+    from services.picks_scoring import UNTRENDED_FLOOR, blended_rank_scores
+    from services.picks_universe_service import TickerRow
+    from services.picks_universe_service import legacy_shortlist as long_shortlist
+
+    rng = np.random.default_rng(8)
+    n, k = 330, 30
+    idx = pd.bdate_range("2023-01-02", periods=n)
+    drift = rng.uniform(-0.002, 0.003, k)
+    close = pd.DataFrame(20 * np.cumprod(1 + rng.normal(drift, 0.015, (n, k)), axis=0),
+                         index=idx, columns=[f"N{i:02d}" for i in range(k)])
+    vol = pd.DataFrame(rng.uniform(4e5, 9e5, (n, k)), index=idx, columns=close.columns)
+    p = {"close": close, "open": close.shift(1).bfill(), "high": close * 1.015,
+         "low": close * 0.985, "volume": vol}
+    f = build_features(p)
+    bench = FACTORS["X_rule_2026_09_25"](f)
     score = _production_score(f)
 
     checked = 0
