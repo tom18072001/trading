@@ -280,23 +280,29 @@ def test_the_buy_list_ignores_sector_signals(monkeypatch):
     assert [p.symbol for p in out] == ["ZZZ", "AAA"]
 
 
-def test_the_sell_list_is_not_score_gated(monkeypatch):
-    """The gate is a BUY-side filter only. A SELL list exists to surface the
-    weakest names, so a floor there would empty exactly the list that should be
-    full — a name below its SMA200 is the most natural member of it."""
+def test_the_sell_list_is_the_weak_end_of_the_momentum_order(monkeypatch):
+    """2026-09-28: the SELL list is the other end of the buy order, over the
+    whole universe, so no name can be a BUY and a SELL on the same day -- the
+    old score put the #6 buy (BMP, below its SMA200 after a 6-month run) in
+    the SELL list. Sector signals do not matter; a name without 6 months of
+    prices is not called weak."""
     import services.picks_universe_service as mod
     from datetime import date
 
-    weak = TickerRow(symbol="WWW", sector_code="REAL", close=10.0,
-                     score=UNTRENDED_FLOOR, is_valid_buy=True, stop=9.0)
-    ok = TickerRow(symbol="OOO", sector_code="REAL", close=10.0, score=2.0,
-                   is_valid_buy=True, stop=9.0)
+    weak = TickerRow(symbol="WWW", sector_code="REAL", close=10.0, score=5.0,
+                     is_valid_buy=True, stop=9.0, momentum=-4.0)
+    ok = TickerRow(symbol="OOO", sector_code="TECH", close=10.0, score=-20.0,
+                   is_valid_buy=True, stop=9.0, momentum=3.0)
+    new_listing = TickerRow(symbol="NEW", sector_code="REAL", close=10.0,
+                            score=-20.0, stop=9.0)
     svc = mod.PicksUniverseService()
     monkeypatch.setattr(svc, "_sectors_with_action", lambda *a, **k: {"REAL"})
-    monkeypatch.setattr(mod, "fetch_news", lambda *a, **k: [], raising=False)
-    out = svc._select_top({r.symbol: r for r in (weak, ok)}, {"REAL": [weak, ok]},
-                          action="SELL", n=5, as_of=date(2026, 9, 16))
+    monkeypatch.setattr("services.picks_news.fetch_news", lambda *a, **k: [])
+    rows = {r.symbol: r for r in (weak, ok, new_listing)}
+    out = svc._select_top(rows, {}, action="SELL", n=5, as_of=date(2026, 9, 16))
     assert [p.symbol for p in out] == ["WWW", "OOO"]
+    buys = svc._select_top(rows, {}, action="BUY", n=1, as_of=date(2026, 9, 16))
+    assert [p.symbol for p in buys] == ["OOO"], "the same order, read from the other end"
 
 
 # ------------------------------------------- the cross-sectional ordering pass

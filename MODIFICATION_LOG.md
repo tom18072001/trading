@@ -62,6 +62,9 @@
     - Hiện ở bản tin 17:30 (mục 3 viết lại, mục 2 thêm hạng động lượng của mã đang nắm, mục 5
       viết lại), email 17:00 (thẻ BUY, memo, thân email text) và Daily Insight (thẻ, bảng, khối
       bối cảnh).
+  - **Danh sách TRÁNH** là đầu yếu của cùng thứ tự động lượng, trên cả universe. Trước đó điểm cũ
+    đưa BMP (#6 mua) vào danh sách bán cùng ngày. Đo được: 8 mã yếu nhất thua mặt bằng −0,5% / 4
+    tuần và −1,2% / 8 tuần, 61% số lần. Email bỏ khỏi danh sách tránh mọi mã đang ở danh sách mua.
   - **Một định nghĩa.** Bench (`X_shipped_rule`) và production gọi cùng
     `risk_adjusted_momentum`; test so top-k hai bên.
   - **Snapshot.** Schema 2: file cũ không có `momentum` bị từ chối, build lại, thay vì phục vụ

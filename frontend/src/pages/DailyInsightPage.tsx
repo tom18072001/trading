@@ -529,9 +529,15 @@ function PickCard({ p, kind, alloc }: { p: any; kind: 'BUY' | 'SELL'; alloc: num
         </>
       ) : (
         <div className="rounded-xl bg-sell/[0.08] border border-sell/30 p-3 text-[12px] text-sell/90 leading-snug">
-          ⚠ Cắt/tránh — stop-out <span className="font-mono font-semibold">{fmtNum(p.stop)}</span>
-          {p.atr_pct != null && <> · ATR {p.atr_pct.toFixed(1)}%</>}
-          {p.score != null && <> · điểm {p.score >= 0 ? '+' : ''}{p.score.toFixed(1)}</>}
+          {p.mom_6m != null ? (
+            /* 2026-09-28: the weak end of the momentum order -- avoid new buys. */
+            <>⚠ Tránh mua mới — động lượng yếu nhất rổ · 6 tháng <span className="font-mono font-semibold">{p.mom_6m >= 0 ? '+' : ''}{p.mom_6m.toFixed(1)}%</span>
+              {p.atr_pct != null && <> · ATR {p.atr_pct.toFixed(1)}%</>}</>
+          ) : (
+            <>⚠ Cắt/tránh — stop-out <span className="font-mono font-semibold">{fmtNum(p.stop)}</span>
+              {p.atr_pct != null && <> · ATR {p.atr_pct.toFixed(1)}%</>}
+              {p.score != null && <> · điểm {p.score >= 0 ? '+' : ''}{p.score.toFixed(1)}</>}</>
+          )}
         </div>
       )}
 
@@ -1102,13 +1108,13 @@ export default function DailyInsightPage() {
           <>
             <div className="section-label text-buy/80">⚡ Nên MUA — top 8 động lượng, xem lại mỗi 4 tuần (giữ khi còn top 16)</div>
             <PickCards picks={buyPicks} kind="BUY" capital={capital} />
-            <div className="section-label text-sell/80 mt-2">⚠ Nên BÁN / TRÁNH — stop-out levels</div>
+            <div className="section-label text-sell/80 mt-2">⚠ Nên TRÁNH — động lượng yếu nhất rổ</div>
             <PickCards picks={sellPicks} kind="SELL" capital={capital} />
           </>
         ) : (
           <>
             <PickTable title="Nên MUA — top 8 động lượng" subtitle="⚡ Mua ATO phiên tới, trong vùng mua · xem lại ở phiên 20 và 40: còn top 16 thì giữ, rơi khỏi thì bán ATO" kind="BUY" picks={buyPicks} />
-            <PickTable title="Nên BÁN / TRÁNH" subtitle="⚠ Stop-out levels — thoát nếu đang nắm, tránh mua mới" kind="SELL" picks={sellPicks} />
+            <PickTable title="Nên TRÁNH" subtitle="⚠ Động lượng 6 tháng yếu nhất rổ — tránh mua mới; nếu đang nắm, xem hạng ở kỳ xem lại" kind="SELL" picks={sellPicks} />
           </>
         )}
       </section>

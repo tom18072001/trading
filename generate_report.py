@@ -1136,8 +1136,11 @@ def main(argv: list[str] | None = None) -> None:
         VN_TO_CODE = {vn: code for code, vn in SECTORS.items()}
         for sec_vn in ranker_sectors:
             code = VN_TO_CODE.get(sec_vn, sec_vn)  # ranker_sectors holds VN names
-            bucket = _universe_snap.by_sector.get(code, [])
-            for tr in bucket[:2]:
+            # by_sector is best-first by momentum (2026-09-28): a SELL sector's
+            # candidates are its two WEAKEST ranked names, not its leaders.
+            bucket = [r for r in _universe_snap.by_sector.get(code, [])
+                      if r.momentum is not None]
+            for tr in bucket[-2:]:
                 ranker_syms.append((tr.symbol, code))
 
         # --- 3. Normalize both sides into UnifiedPick dicts ---------------------
@@ -1154,7 +1157,10 @@ def main(argv: list[str] | None = None) -> None:
 
         # --- 4. Delegate the merge to services.unified_picks (testable pure fn)
         from services.unified_picks import merge_pick_sources
-        return merge_pick_sources(daily_side, ranker_side)
+        # A name the buy rule ranks in its top 8 is never also an AVOID.
+        buys = {pe.symbol for pe in _universe_snap.top_buys}
+        return [p for p in merge_pick_sources(daily_side, ranker_side)
+                if p["symbol"] not in buys]
 
 
     UNIFIED_BUYS  = build_unified_list("BUY")

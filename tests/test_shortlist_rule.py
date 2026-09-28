@@ -158,6 +158,8 @@ def test_the_email_takes_the_daily_insight_list_verbatim():
     assert "for p in _universe_snap.top_buys" in src
     for gone in ("MIN_BUY_SCORE", "MAX_5D_DROP_PCT", "in_secs"):
         assert gone not in src, f"{gone} is a second buy rule"
+    # 2026-09-28: the AVOID merge drops anything on the buy list
+    assert 'if p["symbol"] not in buys]' in src
 
 
 # ------------------------------------------------------------------ the audit

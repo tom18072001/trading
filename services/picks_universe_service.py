@@ -1125,8 +1125,7 @@ class PicksUniverseService:
                     action: str, n: int, as_of: date,
                     market: dict[str, Any] | None = None) -> list["PickEntry"]:
         """Top-N BUY (`long_shortlist` over the whole universe) or top-N SELL
-        (lowest score in SELL sectors, or weakest score in any sector when no
-        SELL sector exists).
+        (the weakest momentum over the whole universe, since 2026-09-28).
         """
         action_up = action.upper()
         if action_up == "BUY":
@@ -1136,19 +1135,15 @@ class PicksUniverseService:
             # outcome band for the current market state).
             filtered = long_shortlist(tickers.values(), n)
         else:
-            candidates: list[TickerRow] = []
-            for sec in self._sectors_with_action(as_of, ("SELL",)):
-                candidates.extend(by_sector.get(sec, []))
-            # If no SELL sector today, fall back to weakest scored tickers
-            # across the whole universe — lets the report still surface risk.
-            if not candidates:
-                candidates = list(tickers.values())
-            filtered = list(candidates)
-            # Weakest score first, symbol as the stable tie-break. No score
-            # floor here on purpose: a SELL list exists to surface the weakest
-            # names, so a minimum score would empty exactly the list that
-            # should be full.
-            filtered.sort(key=lambda r: (r.score, r.symbol))
+            # 2026-09-28: the weakest MOMENTUM in the whole universe -- the
+            # other end of the buy order, so no name can sit on both lists
+            # (on 2026-09-28 the old score put BMP, the #6 buy, in the SELL
+            # list). Measured: the bottom 8 trailed the basket by -0.5% over 4
+            # weeks and -1.2% over 8, 61% of the time -- weaker and less steady
+            # than the top's +1.0% / +2.1%. No sector gate (review §4.2). A
+            # name without 6 months of prices is not called weak.
+            filtered = [r for r in tickers.values() if r.momentum is not None]
+            filtered.sort(key=lambda r: (r.momentum, r.symbol))
         chosen = filtered[:n]
 
         from services.picks_news import fetch_news
@@ -1188,8 +1183,8 @@ class PicksUniverseService:
                 sell_from=window.get("sell_from"),
                 sell_by=window.get("sell_by"),
                 rank=i if action_up == "BUY" else None,
-                momentum=r.momentum if action_up == "BUY" else None,
-                mom_6m=r.mom_6m if action_up == "BUY" else None,
+                momentum=r.momentum,
+                mom_6m=r.mom_6m,
                 accept_lo=layer.get("accept_lo"),
                 accept_hi=layer.get("accept_hi"),
                 outlook_4w=layer.get("outlook_4w"),
