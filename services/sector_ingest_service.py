@@ -102,10 +102,19 @@ class SectorIngestService:
         filed under a past date is exactly the wrong number. A miss is loud
         and zero, like the live path's last resort.
         """
+        import time
+
         from services import foreign_flow
 
-        hist = foreign_flow.fetch_history(symbol, day, day)
-        row = hist[hist["date"] == day]
+        # fetch_history answers a timeout with an empty frame, like "no row":
+        # the first 2026-09-25 fill lost HCM to one 15s read timeout. Ask again.
+        for attempt in range(3):
+            hist = foreign_flow.fetch_history(symbol, day, day)
+            row = hist[hist["date"] == day]
+            if not row.empty:
+                break
+            if attempt < 2:
+                time.sleep(2.0)
         if row.empty:
             print(f"[ingest] foreign flow missing for {symbol} on {day} -- 0 used")
             return 0.0, 0.0, 0.0

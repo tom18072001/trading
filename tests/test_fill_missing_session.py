@@ -126,6 +126,29 @@ def test_as_of_leaves_out_a_name_without_a_bar_that_day(db, fetchers, monkeypatc
     s.close()
 
 
+def test_a_foreign_flow_timeout_is_asked_again(db, fetchers, monkeypatch):
+    """The first 2026-09-25 fill filed HCM's foreign flow as 0 after ONE read
+    timeout -- fetch_history answers a timeout with an empty frame."""
+    from services import foreign_flow
+    flaky = next(s for s in PROXY_BASKETS["BANK"] if NET[s] != 0)
+    inner, misses = foreign_flow.fetch_history, []
+
+    def history(symbol, start, end):
+        if symbol == flaky and not misses:
+            misses.append(symbol)
+            return pd.DataFrame(columns=["date", "buy_val", "sell_val", "net_val"])
+        return inner(symbol, start, end)
+
+    monkeypatch.setattr("services.foreign_flow.fetch_history", history)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    s = _session(db)
+    SectorIngestService(s).ingest_intraday_now(sector_codes=["BANK"], as_of=DAY)
+    row = s.query(SectorFlowTS).filter_by(sector_code="BANK", time=datetime(2026, 9, 25, 7)).one()
+    assert misses == [flaky]
+    assert row.foreign_net == pytest.approx(sum(NET[k] for k in PROXY_BASKETS["BANK"]))
+    s.close()
+
+
 def test_a_sector_with_no_bar_that_day_stops_before_the_rollup(db, fetchers, monkeypatch):
     """No FISH name has the day: FISH keeps its morning bar and NOTHING is rolled
     up -- rolling FISH up would file that morning bar as the day."""

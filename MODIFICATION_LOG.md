@@ -18,7 +18,7 @@
 - Author: Claude (Cowork) on behalf of Tom
 - Files:
   - `services/sector_ingest_service.py` (`ingest_intraday_now(as_of=)`, `_fetch_foreign_on`)
-  - `scripts/fill_missing_session.py` (mới), `tests/test_fill_missing_session.py` (mới, 11 test)
+  - `scripts/fill_missing_session.py` (mới), `tests/test_fill_missing_session.py` (mới, 12 test)
   - `generate_report.py` (`pick_news`), `tests/test_report_news.py` (mới, 4 test)
   - `CLAUDE.md` §8
 - Reason: Tom, 28/09: *"Ngày 25/09 không có bản tin, và dữ liệu ngành cũng thiếu ngày đó"* và
