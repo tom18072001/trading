@@ -81,3 +81,31 @@ def test_a_basis_jump_is_flagged_and_the_index_is_not(panel):
     ])
     bad = band_violations(con)
     assert [(s, t) for s, t, _ in bad] == [("SRC", "2026-03-03")]
+
+
+def test_the_index_is_kept_current_with_the_stocks(panel, monkeypatch):
+    """2026-09-28: ^VNINDEX was loaded once and stopped at 09-15 while the
+    stocks moved on -- every benchmark after that compared against nothing.
+    Each build now refetches it over its span, delete-then-insert."""
+    import pandas as pd
+
+    from scripts import build_price_panel as bpp
+
+    con, _ = panel
+    con.executemany("INSERT INTO prices VALUES (?,?,?,?,?,?,?)", [
+        ("^VNINDEX", "2016-12-30", 1, 1, 1, 664.87, 0),          # outside the span: kept
+        ("^VNINDEX", "2026-09-15", 1, 1, 1, 9999.0, 0),          # inside, stale: replaced
+    ])
+    asked = []
+
+    def fetch(sym, start, end):
+        asked.append((sym, start, end))
+        return pd.DataFrame({"time": ["2026-09-15", "2026-09-28"], "open": [1805.0, 1779.0],
+                             "high": [1812.0, 1785.0], "low": [1800.0, 1770.0],
+                             "close": [1811.15, 1780.68], "volume": [5e8, 6e8]})
+
+    monkeypatch.setattr(bpp, "fetch_symbol", fetch)
+    assert bpp.fetch_index(con, "2017-01-01", "2026-09-28") == 2
+    assert asked == [("VNINDEX", "2017-01-01", "2026-09-28")]
+    assert _closes(con, "^VNINDEX") == {"2016-12-30": 664.87, "2026-09-15": 1811.15,
+                                        "2026-09-28": 1780.68}

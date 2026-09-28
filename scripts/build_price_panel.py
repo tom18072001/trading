@@ -7,7 +7,9 @@ have worked" needs a panel, so this builds one once and caches it to SQLite.
 
 Universe = legacy stocks UNION the symbols this system actually picked UNION
 the current sector constituents. Incremental: re-running only fetches dates
-after what is already stored, so the 18 req/min gate is paid once.
+after what is already stored, so the 18 req/min gate is paid once. VNINDEX is
+refetched on every build and stored as ^VNINDEX (one call), so the benchmark
+never stops while the stocks move on.
 """
 from __future__ import annotations
 
@@ -130,6 +132,29 @@ def fetch_symbol(sym: str, start: str, end: str):
     return get_stock_history(sym, start_date=start, end_date=end, interval="1D")
 
 
+#: The benchmark lives in the panel so it shares the panel's calendar
+#: (`ticker_alpha_bench.load_vnindex`, `backtest_service`). Nothing used to
+#: keep it current: ^VNINDEX was loaded once and stopped at 2026-09-15 while
+#: the stocks moved on (2026-09-28). One call per build, whole span, same
+#: delete-then-insert as a stock -- the source starts it at 2018-10-01.
+INDEX = ("VNINDEX", "^VNINDEX")
+
+
+def fetch_index(con: sqlite3.Connection, start: str, end: str) -> int:
+    src, sym = INDEX
+    df = fetch_symbol(src, start, end)
+    if df is None or df.empty:
+        print(f"{src}: nothing fetched -- {sym} left as it was")
+        return 0
+    df.columns = [c.lower().strip() for c in df.columns]
+    recs = [(sym, str(r["time"])[:10], float(r.get("open") or 0), float(r.get("high") or 0),
+             float(r.get("low") or 0), float(r["close"]), float(r.get("volume") or 0))
+            for _, r in df.iterrows() if r.get("close")]
+    store_fetch(con, sym, recs, start, end)
+    con.commit()
+    return len(recs)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--start", default="2021-01-01")
@@ -205,6 +230,10 @@ def main() -> int:
             el = time.time() - t0
             print(f"  {i}/{len(todo)}  ok={ok} fail={fail}  {el/60:.1f}m", flush=True)
 
+    try:
+        print(f"{INDEX[1]}: {fetch_index(con, args.start, args.end)} rows")
+    except Exception as e:  # noqa: BLE001 - the stocks are stored; the index can wait
+        print(f"{INDEX[1]}: fetch failed ({type(e).__name__}: {e}) -- left as it was")
     print(con.execute("SELECT COUNT(*), COUNT(DISTINCT symbol), MIN(time), MAX(time) "
                       "FROM prices").fetchone())
     bad = band_violations(con)
