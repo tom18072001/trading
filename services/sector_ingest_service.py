@@ -95,16 +95,45 @@ class SectorIngestService:
         b, s, _ = self._fetch_foreign(symbol)
         return b, s
 
+    def _fetch_foreign_on(self, symbol: str, day: str) -> tuple[float, float, float]:
+        """(buy_val, sell_val, net_val) for one symbol on ONE past session.
+
+        No price_board fallback here: the board is today's, and today's flow
+        filed under a past date is exactly the wrong number. A miss is loud
+        and zero, like the live path's last resort.
+        """
+        from services import foreign_flow
+
+        hist = foreign_flow.fetch_history(symbol, day, day)
+        row = hist[hist["date"] == day]
+        if row.empty:
+            print(f"[ingest] foreign flow missing for {symbol} on {day} -- 0 used")
+            return 0.0, 0.0, 0.0
+        r = row.iloc[-1]
+        return float(r.buy_val), float(r.sell_val), float(r.net_val)
+
     # ----- ingestion -----
-    def ingest_intraday_now(self, sector_codes: Iterable[str] | None = None) -> int:
+    def ingest_intraday_now(self, sector_codes: Iterable[str] | None = None,
+                            as_of: str | None = None) -> int:
         """Fetch latest daily bar for each constituent, aggregate, write
         one sector_flow_ts row per sector. Returns number of rows written.
+
+        `as_of` (YYYY-MM-DD, a past session) rebuilds THAT session's bar from
+        its full-day data -- bars after it are dropped, names without a bar
+        on the day are left out, the foreign flow is that day's -- and
+        upserts it over whatever the intraday runs left there; a sector with
+        no name trading that day gets no bar. For a session the scheduled jobs missed
+        (`scripts/fill_missing_session.py`; 2026-09-25 lost its afternoon to a
+        power cut). `None` is the live path, unchanged.
         """
         codes = list(sector_codes) if sector_codes else list(SECTORS.keys())
-        end = today_str()
+        end = as_of or today_str()
         # Use 60d window so SMA20/50/ATR14 work
-        from datetime import timedelta
-        start = (market_now() - timedelta(days=120)).strftime("%Y-%m-%d")
+        from datetime import date as _date, timedelta
+        if as_of:
+            start = (_date.fromisoformat(as_of) - timedelta(days=120)).isoformat()
+        else:
+            start = (market_now() - timedelta(days=120)).strftime("%Y-%m-%d")
 
         written = 0
         for code in codes:
@@ -115,9 +144,19 @@ class SectorIngestService:
             foreign_sell: dict[str, float] = {}
             for sym in symbols:
                 df = self._fetch_constituent_daily(sym, start, end)
+                if as_of and not df.empty:
+                    df = df.loc[:as_of]        # the whole of that day, nothing after
+                    # A name with no bar ON that day (suspended, or the source
+                    # lags) would add its previous session's move to this one
+                    # -- and a basket where no name has the day would stamp
+                    # its bar on an earlier session, over that session's row.
+                    if df.empty or df.index[-1].strftime("%Y-%m-%d") != as_of:
+                        print(f"[ingest] {sym} has no bar on {as_of} -- left out")
+                        df = df.iloc[0:0]
                 if not df.empty:
                     constituents[sym] = df
-                    fb, fs, fnet = self._fetch_foreign(sym)
+                    fb, fs, fnet = (self._fetch_foreign_on(sym, as_of) if as_of
+                                    else self._fetch_foreign(sym))
                     foreign[sym] = fnet
                     foreign_buy[sym] = fb
                     foreign_sell[sym] = fs

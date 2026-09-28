@@ -85,6 +85,28 @@ try:
 except Exception:
     pass
 
+
+def pick_news(sym: str, max_items: int = 3) -> list[dict]:
+    """Headlines for one BUY name, for the report's news blocks. Never raises.
+
+    2026-09-28: the report called vnstock's company news itself, inside an
+    `except Exception`. vnai's quota guard does not raise an Exception at 20
+    req/min -- it calls `sys.exit()` -- and the universe snapshot had just
+    spent that minute. So the report died HERE, after the buy list was built:
+    "Process terminated.", no HTML, no PDF, no email, and Tom saw no buys.
+    Daily Insight's news path (`services.picks_news`) already catches
+    BaseException and tops up from Google News RSS; the report uses it now.
+    """
+    try:
+        from services.picks_news import fetch_news
+        items = fetch_news(sym, max_items=max_items)
+    except (Exception, SystemExit) as e:  # news is optional; the email is not
+        print(f"[report] news for {sym} unavailable: {type(e).__name__}")
+        return []
+    return [{"title": it.title[:180], "src": it.source, "date": it.published}
+            for it in items]
+
+
 def main(argv: list[str] | None = None) -> None:
     """Build the daily report and (unless --no-email) send it.
 
@@ -750,24 +772,8 @@ def main(argv: list[str] | None = None) -> None:
     watch_rows_html= "".join(pick_row(w, "tag-watch","WATCH", watch_thesis(w)) for w in watches) or "<tr><td colspan='9' class='mut'>No watch outliers.</td></tr>"
 
     # ----- News & Catalysts by BUY pick -----
-    def fetch_vnstock_news(sym, lookback_days=3):
-        """Try vnstock company news; fall back silently."""
-        try:
-            from utils.vn_api import company_news  # type: ignore
-            df = company_news(sym, source="VCI").news()
-            if df is None or len(df) == 0: return []
-            # Pick most recent N
-            items = []
-            for _, row in df.head(3).iterrows():
-                items.append({
-                    "title": str(row.get("title") or row.get("news_title") or "")[:180],
-                    "src":   str(row.get("source") or row.get("publisher") or "vnstock"),
-                    "date":  str(row.get("date") or row.get("publish_date") or ""),
-                })
-            return items
-        except Exception:
-            return []
-
+    # `pick_news` (module level): the vnstock call that used to live here
+    # killed the whole report on 2026-09-28.
     SECTOR_CATALYST_FALLBACK = {
         "Bất động sản": "Tháo gỡ pháp lý dự án, KQKD Q1, tin giao dịch VHM/VIC/NVL.",
         "Công nghệ": "FPT/CMG earnings, AI tailwind, FED rate path.",
@@ -791,7 +797,7 @@ def main(argv: list[str] | None = None) -> None:
             return "<p class='mut'>Không có BUY pick hôm nay — không có news cần theo dõi.</p>"
         blocks = []
         for b in buys:
-            items = fetch_vnstock_news(b["sym"])
+            items = pick_news(b["sym"])
             header = f"<h3>{b['sym']} · {b['sector']}</h3>"
             if items:
                 body = "".join(

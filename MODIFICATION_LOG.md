@@ -14,6 +14,47 @@
 
 ---
 
+## 2026-09-28 (1) — bù phiên 25/09 từ dữ liệu cả ngày; báo cáo 17:00 không còn chết vì quota vnstock
+- Author: Claude (Cowork) on behalf of Tom
+- Files:
+  - `services/sector_ingest_service.py` (`ingest_intraday_now(as_of=)`, `_fetch_foreign_on`)
+  - `scripts/fill_missing_session.py` (mới), `tests/test_fill_missing_session.py` (mới, 11 test)
+  - `generate_report.py` (`pick_news`), `tests/test_report_news.py` (mới, 4 test)
+  - `CLAUDE.md` §8
+- Reason: Tom, 28/09: *"Ngày 25/09 không có bản tin, và dữ liệu ngành cũng thiếu ngày đó"* và
+  *"hiện tại đã mất gợi ý mua"*.
+- Summary:
+  - **Vì sao mất 25/09.** Máy mất điện lúc 11:53:08 ngày 25/09 (Kernel-Power 41) và tắt tới 21:01
+    ngày 26/09; Tom đăng nhập lại lúc 11:44 ngày 27/09.
+    - Cả 9 task `SectorFlow_*` là `LogonType Interactive`, nên cả chiều 25/09 không job nào chạy.
+    - Intraday buổi sáng để lại mỗi ngành một bar 25/09 chỉ có phiên sáng; rollup 16:00 không chạy.
+    - Scheduler chạy bù cũng không cứu được: job tính cho *hôm nay*.
+  - **Bù từ dữ liệu cả ngày.** `ingest_intraday_now(as_of=DATE)` dựng lại bar của phiên DATE:
+    - bỏ mọi bar sau DATE, và bỏ mã không có bar đúng ngày DATE;
+    - khối ngoại lấy đúng ngày đó, không fallback sang price_board (board là của hôm nay);
+    - upsert đè lên bar buổi sáng.
+  - **`fill_missing_session.py`.** Mặc định chỉ chạy thử. `--apply` từ chối khi:
+    - ngày đó không phải phiên đã qua, hoặc đang trong giờ job;
+    - nguồn giá hay nguồn khối ngoại chưa có ngày đó (thăm dò bằng VCB).
+    - Có backup trước khi ghi. Dựng từng ngành; thiếu dù một ngành thì dừng trước rollup (exit 4),
+      vì ngành đó chỉ còn bar buổi sáng.
+    - Cùng script bù được 22/09, ngày RETAIL thiếu dòng daily (bar ts vẫn có).
+  - **Báo cáo 17:00 ngày 28/09.** Dừng ngay sau "[report] rendering charts...".
+    - Nguyên nhân: tin tức cho từng mã BUY gọi vnstock trực tiếp, trong `except Exception`. Khi chạm
+      20 req/phút, vnai gọi `sys.exit()`; SystemExit không phải Exception, nên process dừng với
+      "Process terminated.". Không có HTML, PDF hay email.
+    - Danh sách mua vẫn còn trong snapshot và trong bản tin 17:30.
+    - Sửa: tin tức nay đi qua `services.picks_news` như Daily Insight. Đường đó bắt BaseException và
+      lấy thêm từ Google News RSS khi thiếu.
+  - **Kiểm chứng.** 12/12 đột biến của script bị bắt; cả 4 test tin tức đều đỏ trên code cũ.
+- Follow-ups:
+  - Đăng ký lại task ở chế độ "run whether user is logged on or not" (cần admin, và mật khẩu hoặc
+    S4U). Việc này Tom quyết.
+  - `data/data_fetcher._call_with_retry` vẫn chỉ bắt `Exception`, nên SystemExit của vnai trong
+    vòng lấy giá vẫn dừng process.
+    - Snapshot tự bắt BaseException nên không bị ảnh hưởng.
+    - `build_price_panel.py` thì bị, nhưng chạy lại sẽ tiếp tục từ chỗ dừng.
+
 ## 2026-09-25 (9) — xoá chi tiết sổ thật khỏi lịch sử chưa push, trước khi lên GitHub public
 - Author: Claude (Cowork) on behalf of Tom
 - Files: lịch sử của 21 commit chưa push (từ `origin/master`), trong 7 file: `MODIFICATION_LOG.md`,

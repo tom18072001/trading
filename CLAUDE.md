@@ -78,6 +78,17 @@ Record-count impact vs legacy: **~98% reduction** (15 sectors × ~12 features vs
 > quyền, và ở mức đó **đăng ký được mà không cần shell admin**
 > (`scripts/cleanup_scheduled_tasks.ps1` nay nhận `RunLevel` theo từng job).
 
+> **2026-09-28 — một phiên bị bỏ lỡ không tự bù được.** Cả 9 task chạy
+> `LogonType Interactive`, tức chỉ chạy khi Tom đang đăng nhập. Máy mất điện
+> 11:53 ngày 25/09 và tắt tới tối 26/09, nên cả chiều 25/09 không job nào chạy.
+> Intraday buổi sáng để lại mỗi ngành một bar chỉ có phiên sáng; rollup 16:00
+> không chạy. `StartWhenAvailable` không cứu được: job tính cho *hôm nay*, nên
+> lượt chạy bù ghi sai ngày hoặc bị bỏ vì không có phiên. Dựng lại phiên đó bằng
+> `scripts/fill_missing_session.py --date YYYY-MM-DD`: chạy thử trước, rồi
+> `--apply` sau 17:45. Script dựng từ dữ liệu cả ngày, có backup, và dừng trước
+> rollup nếu thiếu dù một ngành. Sau đó chạy `repair_sector_data.py`. Bản tin và
+> báo cáo của ngày đó không dựng lại được: snapshot universe không tái lập được.
+
 ## 9. Data Sources
 Primary: **vnstock** (proxy OHLCV, foreign flow, VNINDEX). Macro: FRED (US10Y), stooq (Brent, Gold), SBV/exchangerate.host (USD/VND). Optional: HOSE order-book deltas, ETFs FUEVFVND/E1VFVND.
 
@@ -395,9 +406,9 @@ Run the two commands rather than trusting the numbers.
 
 | Suite | Count | Command |
 |---|---|---|
-| Backend (pytest) | 451 | `uv run pytest tests/` |
+| Backend (pytest) | 466 | `uv run pytest tests/` |
 | Frontend (vitest) | 18 | `cd frontend && npm test` |
-| **Total** | **469** | — |
+| **Total** | **484** | — |
 > Vì sao từng bài test tồn tại — và 4 lần negative control bắt được test vô
 > dụng của chính tôi — ở [`docs/doctrine/19-testing-history.md`](docs/doctrine/19-testing-history.md).
 > Đọc nó trước khi xoá hoặc viết lại một bài test trông có vẻ thừa.
