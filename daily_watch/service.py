@@ -401,16 +401,24 @@ def render(payload: dict[str, Any]) -> str:
         for i, p in enumerate(payload["shortlist"], 1):
             a(f"| {i} | **{p['symbol']}** | {p['sector_code']} | {_fmt(p['close'])} "
               f"| {_fmt(p.get('accept_lo'))} – {_fmt(p.get('accept_hi'))} "
-              f"| {_fmt(p.get('mom_6m'), '%', 1)} "
+              f"| {_pct((p.get('mom_6m') or 0) / 100) if p.get('mom_6m') is not None else '—'} "
               f"| {_band(p.get('outlook_4w'))} | {_band(p.get('outlook_8w'))} "
               f"| {_pct((p.get('outlook_8w') or {}).get('win'), 0)} "
               f"| {p.get('sell_from') or '—'} · {p.get('sell_by') or '—'} |")
         a("")
         a(f"**{bl.book_sentence()}**")
+        ranks = m.get("ranks") or {}
+        held_ranked = [s for s in (m.get("excluded_held") or []) if s in ranks]
+        keep = [s for s in held_ranked if ranks[s] <= bl.KEEP_TOP]
+        slots = max(0, bl.BUY_TOP_K - len(keep))
         a("")
-        a(f"Xếp {m.get('qualified', 0)} mã đủ 6 tháng giá trong {m.get('universe', 0)} mã universe"
-          + (f" · đã loại {len(m.get('excluded_held') or [])} mã anh đang nắm"
-             if m.get("excluded_held") else ""))
+        a(f"Xếp hạng {m.get('ranked_count', 0)} mã đủ 6 tháng giá trong {m.get('universe', 0)} mã "
+          f"universe; danh sách trên đã bỏ {len(held_ranked)} mã anh đang nắm.")
+        a("")
+        a(f"**Cỡ sổ của luật là {bl.BUY_TOP_K} mã.** Sổ đang có {len(keep)} mã còn trong top "
+          f"{bl.KEEP_TOP} (giữ) → mua thêm **tối đa {slots} mã** từ đầu danh sách trên, không "
+          "phải cả danh sách. Mã đang nắm rơi khỏi top "
+          f"{bl.KEEP_TOP} (mục 2) thì bán ở kỳ xem lại và nhường chỗ.")
         a("")
         a("> **Vùng mua:** trên mức trên, lịch sử cho thấy lợi thế so với mua một mã "
           f"thanh khoản bất kỳ bị trả hết (trả thêm 1% ≈ mất cả lợi thế 4 tuần). Mức dưới "

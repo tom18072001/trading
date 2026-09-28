@@ -141,7 +141,7 @@ def cmd_risk_sentinel() -> None:
             print(f"  - {b}")
 
 
-def cmd_daily_watch(top_n: int = 5) -> None:
+def cmd_daily_watch(top_n: int = 8) -> None:
     """Sổ + shortlist, ghi ra report/watch_<date>.md và data/watch_latest.json.
 
     Không gửi email (Tom 2026-09-16: "tạm thời chưa cần nhận email, để sau").
@@ -211,8 +211,8 @@ def main() -> None:
                         help="Stop-loss breach scan (job: sector_risk_sentinel)")
     parser.add_argument("--daily-watch", dest="daily_watch", action="store_true",
                         help="Sổ + shortlist ra file (job: daily_watch)")
-    parser.add_argument("--top", type=int, default=5,
-                        help="Số ứng viên trong --daily-watch (mặc định 5)")
+    parser.add_argument("--top", type=int, default=8,
+                        help="Số ứng viên trong --daily-watch (mặc định 8 = cỡ sổ của luật, §28)")
     # compound (ad-hoc)
     parser.add_argument("--ingest", action="store_true",
                         help="Shorthand: --macro + --intraday + --eod-rollup")

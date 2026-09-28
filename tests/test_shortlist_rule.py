@@ -193,3 +193,23 @@ def test_the_audit_scores_the_rules_against_the_same_base():
     assert r[MOMENTUM] == pytest.approx(0.20)
     assert r[RUNNING] == pytest.approx(-0.10)
     assert r["base"] == pytest.approx((0.20 - 0.10) / 12)
+
+
+def test_the_bulletin_sizes_the_buy_to_the_free_slots(monkeypatch):
+    """The rule holds 8 names. A held name still in the top 16 keeps its slot,
+    so the bulletin says how many to ADD -- not "buy the whole list" -- and
+    prints each holding's rank, which is what the sell rule reads."""
+    import services.picks_universe_service as mod
+    from daily_watch import positions, service
+    from services import trading_state
+
+    rows = _universe() + [_row(f"X{i:02d}", 0.0, 0.5, -float(i)) for i in range(20)]
+    monkeypatch.setattr(mod.PicksUniverseService, "peek", lambda self: _Snap(rows))
+    monkeypatch.setattr(trading_state, "held_symbols", lambda: {"BBB", "X19"})
+    monkeypatch.setattr(positions, "mark_book", lambda: {
+        "as_of": "2026-09-24", "priced": 2, "count": 2, "total_pnl_pct": None,
+        "positions": [{"symbol": "BBB", "sell_range": {}}, {"symbol": "X19", "sell_range": {}}]})
+    md = service.render(service.build(top_n=8))
+    assert "mua thêm **tối đa 7 mã**" in md, "BBB (rank 1) keeps its slot; X19 does not"
+    assert "1/25 · giữ" in md
+    assert "25/25 · **rơi khỏi top 16**" in md

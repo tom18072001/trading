@@ -67,7 +67,7 @@
   - **Snapshot.** Schema 2: file cũ không có `momentum` bị từ chối, build lại, thay vì phục vụ
     danh sách rỗng. Trạng thái thị trường lấy bằng một lệnh vnstock qua gate; lệnh đó hỏng thì
     trạng thái là "không rõ", không làm chết build.
-  - **Kiểm chứng.** pytest 487, vitest 19, ruff 60 (không đổi), tsc sạch. 10 đột biến lên luật,
+  - **Kiểm chứng.** pytest 488, vitest 19, ruff 60 (không đổi), tsc sạch. 10 đột biến lên luật,
     layer và bóng đều bị bắt.
 - Follow-ups:
   - `daily_watch/audit.py --hold 40` sau ~40 phiên ngoài mẫu (cuối 11/2026). Nếu luật động

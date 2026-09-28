@@ -406,9 +406,9 @@ Run the two commands rather than trusting the numbers.
 
 | Suite | Count | Command |
 |---|---|---|
-| Backend (pytest) | 487 | `uv run pytest tests/` |
+| Backend (pytest) | 488 | `uv run pytest tests/` |
 | Frontend (vitest) | 19 | `cd frontend && npm test` |
-| **Total** | **506** | — |
+| **Total** | **507** | — |
 > Vì sao từng bài test tồn tại — và 4 lần negative control bắt được test vô
 > dụng của chính tôi — ở [`docs/doctrine/19-testing-history.md`](docs/doctrine/19-testing-history.md).
 > Đọc nó trước khi xoá hoặc viết lại một bài test trông có vẻ thừa.
