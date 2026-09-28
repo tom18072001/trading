@@ -1230,8 +1230,9 @@ def main(argv: list[str] | None = None) -> None:
             f"<span class='mut'>{_esc(p['sector_name'])}</span>"
             f"<span class='tag {action_cls}'>{kind}</span>"
             f"{src_html}"
-            f"<span class='mut'>điểm {float(p.get('score') or 0):+.1f}</span>"
-            f"</div>"
+            # The oversold score is the retired rule's; a BUY is ranked by momentum.
+            + ("" if kind == "BUY" else f"<span class='mut'>điểm {float(p.get('score') or 0):+.1f}</span>")
+            + f"</div>"
             f"<div class='snap-nums mono'>{nums_html}</div>"
             f"{outlook_html}"
             f"<div class='snap-bits'>{bits_html}</div>"
