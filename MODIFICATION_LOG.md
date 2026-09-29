@@ -14,6 +14,14 @@
 
 ---
 
+## 2026-09-29 (2) — đính chính một ô trong bảng §9 của study
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `docs/reviews/STRATEGY_STUDY_2026-09-28.md` §9.
+- Reason: chạy lại `benchmark.py` để kiểm chứng. Dòng "2026 tới nay" trộn hai loại số: ba ô là
+  tổng lợi nhuận, còn ô VNINDEX (−0,3) là số quy năm.
+- Summary: cả dòng giờ là tổng lợi nhuận: VNINDEX −0,2%, khớp bảng theo năm ở §4. Các số
+  khác trong §9 khớp đúng với lần chạy lại. Kết luận không đổi.
+
 ## 2026-09-29 — so benchmark, kiểm tra mục tiêu 20-30%/năm (chỉ đo, không đổi code chạy)
 - Author: Claude (Cowork) on behalf of Tom
 - Files: `docs/reviews/strategy_study_2026-09-28/benchmark.py` (mới), `docs/reviews/STRATEGY_STUDY_2026-09-28.md` §9.
