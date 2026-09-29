@@ -14,6 +14,21 @@
 
 ---
 
+## 2026-09-29 — so benchmark, kiểm tra mục tiêu 20-30%/năm (chỉ đo, không đổi code chạy)
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `docs/reviews/strategy_study_2026-09-28/benchmark.py` (mới), `docs/reviews/STRATEGY_STUDY_2026-09-28.md` §9.
+- Reason: Tom, 29/09: *"so sánh benchmark và kiểm tra đạt target 20%-30%/năm chưa"*.
+- Summary:
+  - Luật mới được so với VNINDEX, rổ 75 mã chia đều và luật cũ trên 9 cửa sổ, theo năm, mọi
+    cửa sổ 12 tháng và 3 năm, và 25 ngày bắt đầu.
+  - **Trong mẫu:** 31%/năm từ 2019-07, 28,8% từ 2021, 33,2% từ 2024. Nhưng từ 2022 chỉ 14,5%,
+    12 tháng gần nhất 16,5%, năm 2026 tới nay −3,2%.
+    - ≥ 20% ở 63% số cửa sổ 12 tháng, nhưng rơi đúng vào 20-30% chỉ 9%.
+    - ≥ 20%/năm ở 74% số cửa sổ 3 năm.
+    - ≥ 20%/năm ở 76% số ngày bắt đầu, thắng VNINDEX ở 88%.
+  - **Ngoài mẫu chưa đạt:** holdout −3% đến +16,5%, và chưa có ngày chạy thật nào.
+  - Kỳ vọng lập kế hoạch giữ nguyên: VNINDEX + ~10 điểm/năm.
+
 ## 2026-09-28 (3) — luật mua động lượng, và layer vùng mua / kỳ vọng 4-8 tuần
 - Author: Claude (Cowork) on behalf of Tom
 - Files:

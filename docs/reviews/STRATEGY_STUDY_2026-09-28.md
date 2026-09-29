@@ -257,4 +257,58 @@ python holdout.py      # MỘT lần
 python walkforward.py
 python layer.py        # bảng của services/buy_layer.py
 python final.py        # bảng mục 3-4
+python benchmark.py    # mục 9: so benchmark, kiểm tra mục tiêu 20-30%/năm
 ```
+
+## 9. Kiểm tra mục tiêu 20-30%/năm — 2026-09-29
+
+Tom: *"so sánh benchmark và kiểm tra đạt target 20%-30%/năm chưa"*. Số từ
+`benchmark.py`, trên panel tới 28/09/2026, luật chạy liên tục từ 2019-07, sau phí 1%/vòng.
+
+**Theo cửa sổ, tới 28/09/2026 (%/năm):**
+
+| bắt đầu | luật mới | VNINDEX | rổ chia đều | luật cũ | mục tiêu |
+|---|---|---|---|---|---|
+| 2019-07 (7,2 năm) | 31,0 | 8,9 | 13,1 | 4,6 | vượt |
+| 2021-01 (5,7 năm) | 28,8 | 8,8 | 11,9 | 4,4 | đạt |
+| 2022-01 (4,7 năm) | 14,5 | 3,8 | 2,1 | −2,2 | **chưa** |
+| 2023-01 (3,7 năm) | 31,2 | 16,7 | 14,3 | 9,7 | vượt |
+| 2024-01 (2,7 năm) | 33,2 | 18,4 | 8,7 | 7,7 | vượt |
+| 12 tháng gần nhất | 16,5 | 5,6 | −10,1 | −22,6 | **chưa** |
+| 2026 tới nay | −3,2 (tổng) | −0,3 | −6,5 | −17,9 | **chưa** |
+
+**Phân phối:**
+
+- Mọi cửa sổ 12 tháng:
+  - trung vị +36,6%;
+  - ≥ 20% ở 63% số cửa sổ;
+  - rơi đúng vào 20-30% chỉ 9% số cửa sổ;
+  - âm ở 20% số cửa sổ;
+  - thắng VNINDEX ở 86% số cửa sổ.
+- Mọi cửa sổ 3 năm: CAGR trung vị 31,7% (thấp nhất −6,9%, cao nhất 59,9%); ≥ 20%/năm ở
+  74% số cửa sổ. Cùng thước đó, VNINDEX chỉ đạt ở 6% số cửa sổ.
+- Bắt đầu từ tiền mặt vào đầu mỗi quý (25 ngày, 2019-07 → 2025-07) rồi giữ tới hôm nay:
+  - CAGR trung vị 28,8%;
+  - thấp nhất 9,4% (bắt đầu 04/2022), cao nhất 44,6%;
+  - ≥ 20%/năm ở 76% số ngày bắt đầu;
+  - thắng VNINDEX ở 88%.
+
+**Kết luận.**
+
+- Trong backtest, luật mới đạt hoặc vượt mục tiêu trên đa số cửa sổ nhiều năm, nhưng không
+  phải năm nào.
+  - Lợi nhuận năm rất phân tán: hiếm khi rơi đúng vào 20-30%, thường cao hơn nhiều hoặc
+    thấp hơn nhiều.
+  - Mục tiêu có ý nghĩa như một **trung bình nhiều năm**, không phải một lời hứa cho từng
+    năm.
+- Ngoài mẫu, luật **chưa** đạt mục tiêu:
+  - 12 tháng để riêng cho kết quả từ −3% (bắt đầu từ tiền mặt) đến +16,5% (chạy liên tục);
+  - chưa có ngày chạy thật nào (luật bắt đầu chạy 29/09/2026).
+- Số trong mẫu còn lạc quan thêm vì hai lý do:
+  - rổ chọn năm 2026 và 394 biến thể thử (mục 7);
+  - giá cổ phiếu KBS đã điều chỉnh cổ tức, còn VNINDEX là chỉ số giá — khoảng 1,5-2 điểm
+    %/năm lệch về phía luật.
+- Kỳ vọng dùng để lập kế hoạch vẫn là **VNINDEX + ~10 điểm %/năm**. Với VNINDEX dài hạn
+  ~9-10%/năm, con số đó nằm ở cận dưới của 20-30%.
+- Phép kiểm tra thật đầu tiên là `daily_watch/audit.py --hold 40`, khoảng cuối 11/2026.
+  Muốn kết luận về một mục tiêu theo năm thì cần 1-2 năm chạy thật.
