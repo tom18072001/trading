@@ -1093,6 +1093,8 @@ def main(argv: list[str] | None = None) -> None:
             "sell_from": getattr(pe, "sell_from", None),
             "sell_by": getattr(pe, "sell_by", None),
             "rank": getattr(pe, "rank", None),
+            "priority": getattr(pe, "priority", None),
+            "top8_run": getattr(pe, "top8_run", None),
             "mom_6m": getattr(pe, "mom_6m", None),
             "accept_lo": getattr(pe, "accept_lo", None),
             "accept_hi": getattr(pe, "accept_hi", None),
@@ -1200,7 +1202,8 @@ def main(argv: list[str] | None = None) -> None:
             # needs is the price worth paying and the measured outcome band.
             rng, outlook = buy_layer.pick_sentences(p)
             if p.get("rank"):
-                nums_parts.insert(0, f"<b>#{p['rank']}</b>")
+                pri = f" · ưu tiên {p['priority']}" if p.get("priority") else ""
+                nums_parts.insert(0, f"<b>#{p['rank']}{pri}</b>")
             if rng:
                 nums_parts.append(f"<b>{rng}</b>")
             if p.get("mom_6m") is not None:
@@ -1254,7 +1257,8 @@ def main(argv: list[str] | None = None) -> None:
         if UNIFIED_BUYS:
             out.append("<h3>Nên MUA ({} picks)</h3>".format(len(UNIFIED_BUYS)))
             out.append(f"<p class='mut'>{_esc(buy_layer.market_sentence(_universe_snap.market))} "
-                       f"{_esc(buy_layer.book_sentence())}</p>")
+                       f"{_esc(buy_layer.book_sentence())}</p>"
+                       f"<p class='mut'>{_esc(buy_layer.priority_sentence())}</p>")
             out.append("<div class='snap-grid'>")
             out.extend(_render_unified_card(p, "BUY") for p in UNIFIED_BUYS)
             out.append("</div>")
@@ -1419,6 +1423,7 @@ def main(argv: list[str] | None = None) -> None:
         lines.append(f"Danh sách mua ({len(UNIFIED_BUYS)} mã). {buy_layer.rule_sentence()}")
         lines.append(buy_layer.market_sentence(_universe_snap.market))
         lines.append(buy_layer.book_sentence())
+        lines.append(buy_layer.priority_sentence())
         lines.append("")
 
         # BUY block
@@ -1428,7 +1433,8 @@ def main(argv: list[str] | None = None) -> None:
         else:
             for i, p in enumerate(UNIFIED_BUYS[:10], 1):
                 rng, outlook = buy_layer.pick_sentences(p)
-                lines.append(f"{i}. {p['symbol']} ({p['sector_name']})")
+                pri = f" — ưu tiên {p['priority']}" if p.get("priority") else ""
+                lines.append(f"{i}. {p['symbol']} ({p['sector_name']}){pri}")
                 price_line = f"   Giá {p['close']:,.2f}" + (f" · {rng}" if rng else "")
                 if p.get("sell_from") and p.get("sell_by"):
                     price_line += f" · xem lại {p['sell_from']} / {p['sell_by']}"

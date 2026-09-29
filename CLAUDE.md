@@ -406,9 +406,9 @@ Run the two commands rather than trusting the numbers.
 
 | Suite | Count | Command |
 |---|---|---|
-| Backend (pytest) | 488 | `uv run pytest tests/` |
+| Backend (pytest) | 536 | `uv run pytest tests/` |
 | Frontend (vitest) | 19 | `cd frontend && npm test` |
-| **Total** | **507** | — |
+| **Total** | **555** | — |
 > Vì sao từng bài test tồn tại — và 4 lần negative control bắt được test vô
 > dụng của chính tôi — ở [`docs/doctrine/19-testing-history.md`](docs/doctrine/19-testing-history.md).
 > Đọc nó trước khi xoá hoặc viết lại một bài test trông có vẻ thừa.
@@ -925,3 +925,20 @@ Tom: *"7,2% / 11,7%/năm thấp hơn VNINDEX 17,5% — không ổn, kỳ vọng 
 - Snapshot schema 2: bản trên đĩa không có `momentum` bị từ chối, và build lại.
 - `daily_watch/audit.py` chấm luật mới với bóng `shortlist_previous_rule` ngoài
   mẫu.
+
+### 28.1 Cách Tom giao dịch — 2026-09-29
+
+Tom mua **vài mã**, vào **ngày của anh**, báo mua/bán và cần đề xuất cho từng mã
+đang giữ. Đo trong `docs/reviews/WORKFLOW_STUDY_2026-09-29.md` (11 biến thể, đăng ký
+trước):
+
+- **Ưu tiên A/B** (`buy_layer.top_runs`): A = trong top 8 cả 11 phiên gần nhất, xếp
+  trước B. Chỉ là thứ tự trong tập top 8; hiệu ứng nhỏ, không ổn định.
+- **Bán theo đồng hồ của từng vị thế** (`sell_range.schedule` + `verdict`, nơi duy
+  nhất nói GIỮ/BÁN): xem lại phiên 20, 40, 60… từ ngày mua; ngoài top 16 thì bán ATO.
+  **Giá mua không quyết định bán**: chốt lời −5…−8 điểm/năm, bán cứng ở phiên 40 −6,5,
+  cắt lỗ −10% không ổn định. Cảnh báo "quá hạn"/"cửa sổ bán"/"nhả quá sâu" đã bỏ.
+- Mã chưa có ngày mua xét theo hạng hôm nay; mã ngoài rổ có **hạng tương đương**.
+- **Sổ:** mua thêm → giá vốn bình quân (`record_buy`); bán một phần (`qty`). Ghi bằng
+  `python -m daily_watch.book buy|sell|date|show` — `add_position` vẫn là nút đánh dấu
+  idempotent của Daily Insight, đừng dùng nó để ghi một lần mua thêm.

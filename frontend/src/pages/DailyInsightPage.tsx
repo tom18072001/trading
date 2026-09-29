@@ -501,8 +501,15 @@ function PickCard({ p, kind, alloc }: { p: any; kind: 'BUY' | 'SELL'; alloc: num
           <div className="grid grid-cols-3 gap-2 text-center">
             {p.rank != null ? (
               <div className="rounded-lg bg-panel2 border border-line py-1.5">
-                <div className="text-[9px] text-lo uppercase tracking-wider">Hạng</div>
-                <div className="text-[13px] font-mono font-semibold text-hi">#{p.rank}</div>
+                <div className="text-[9px] text-lo uppercase tracking-wider">Hạng · ưu tiên</div>
+                {/* 2026-09-29: A = in the top 8 for > 10 sessions (steady), B = newer.
+                    services/buy_layer.priority — orders the list for a partial buyer. */}
+                <div className="text-[13px] font-mono font-semibold text-hi">
+                  #{p.rank}
+                  {p.priority && (
+                    <span className={p.priority === 'A' ? 'text-buy' : 'text-lo'}> · {p.priority}</span>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="rounded-lg bg-panel2 border border-line py-1.5">
@@ -1101,6 +1108,8 @@ export default function DailyInsightPage() {
             <div>{mc.buy_layer.rule_sentence}</div>
             <div className="mt-1">{mc.buy_layer.market_sentence}</div>
             <div className="mt-1">{mc.buy_layer.book_sentence}</div>
+            {mc.buy_layer.priority_sentence && <div className="mt-1">{mc.buy_layer.priority_sentence}</div>}
+            {mc.buy_layer.sell_rule_sentence && <div className="mt-1">{mc.buy_layer.sell_rule_sentence}</div>}
           </div>
         )}
 

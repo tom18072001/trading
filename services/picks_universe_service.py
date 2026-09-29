@@ -105,6 +105,10 @@ class TickerRow:
     momentum: float | None = None
     mom_6m: float | None = None           # the 6-month return behind it, percent units
     vol_63d: float | None = None          # daily volatility, fraction (0.02 == 2%/session)
+    # 2026-09-29: the same score on each of the last 11 sessions (oldest ->
+    # newest), so a name's run in the top 8 can be dated -- the buy priority
+    # (buy_layer.ESTABLISHED). Empty in snapshots written before that.
+    momentum_hist: list[float | None] = field(default_factory=list)
     dv_20d: float = 0.0
     foreign_room_pct: float | None = None
     score: float = 0.0
@@ -214,6 +218,11 @@ class PickEntry:
     accept_hi: float | None = None
     outlook_4w: dict[str, float] | None = None
     outlook_8w: dict[str, float] | None = None
+    # BUY only, 2026-09-29: sessions in a row in the top 8, and the priority it
+    # gives ("A" steady / "B" newer, buy_layer.priority). Orders the list for
+    # someone buying a few of the names; the set is still the momentum top N.
+    top8_run: int | None = None
+    priority: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -243,6 +252,8 @@ class PickEntry:
             "accept_hi": self.accept_hi,
             "outlook_4w": self.outlook_4w,
             "outlook_8w": self.outlook_8w,
+            "top8_run": self.top8_run,
+            "priority": self.priority,
         }
 
 
@@ -697,12 +708,14 @@ def _build_ticker_row(symbol: str, sector_code: str, ohlcv: pd.DataFrame,
     # raw fetch, not `df`: an indicator step that drops warm-up rows must not
     # shorten the 127 closes this needs.
     momentum = mom_6m = vol_63d = None
+    momentum_hist: list[float | None] = []
     try:
         raw = ohlcv.sort_values("time") if "time" in ohlcv.columns else ohlcv
         closes = raw["close"].astype(float).tolist()
         momentum, mom, _ = buy_layer.risk_adjusted_momentum(closes)
         mom_6m = mom * 100.0 if mom is not None else None
         vol_63d = buy_layer.daily_vol(closes, 63)
+        momentum_hist = buy_layer.momentum_history(closes)
     except Exception as e:
         log.debug("[picks-universe] momentum fail %s: %s", symbol, e)
 
@@ -726,6 +739,7 @@ def _build_ticker_row(symbol: str, sector_code: str, ohlcv: pd.DataFrame,
         momentum=round(momentum, 4) if momentum is not None else None,
         mom_6m=round(mom_6m, 2) if mom_6m is not None else None,
         vol_63d=round(vol_63d, 5) if vol_63d is not None else None,
+        momentum_hist=momentum_hist,
         volume_ratio_20=_last(df.get("volume_ratio_20", pd.Series(dtype=float))),
         adx_14=_last(df.get("ADX_14", pd.Series(dtype=float))),
         bb_position=_last(df.get("BB_position", pd.Series(dtype=float))),
@@ -1150,6 +1164,10 @@ class PicksUniverseService:
 
         window = hold_window(as_of) if action_up == "BUY" else {}
         up = (market or {}).get("up")
+        # Runs in the top 8 over the whole ranked universe (buy_layer.top_runs).
+        runs = (buy_layer.top_runs({r.symbol: r.momentum_hist for r in tickers.values()
+                                    if r.momentum is not None})
+                if action_up == "BUY" else {})
         out: list[PickEntry] = []
         for i, r in enumerate(chosen, 1):
             layer = (buy_layer.annotate(r.close, r.vol_63d, up) if action_up == "BUY" else {})
@@ -1189,8 +1207,12 @@ class PicksUniverseService:
                 accept_hi=layer.get("accept_hi"),
                 outlook_4w=layer.get("outlook_4w"),
                 outlook_8w=layer.get("outlook_8w"),
+                top8_run=runs.get(r.symbol),
+                priority=buy_layer.priority(runs.get(r.symbol)) if action_up == "BUY" else None,
             ))
-        return out
+        # 2026-09-29: steady names first for a buyer taking only a few; the set
+        # is unchanged and `rank` still says where each sits in the momentum order.
+        return buy_layer.prioritise(out) if action_up == "BUY" else out
 
     def _sectors_with_action(self, as_of: date,
                              actions: tuple[str, ...]) -> set[str]:

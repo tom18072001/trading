@@ -79,6 +79,127 @@ def daily_vol(closes: list[float] | Any, n: int = 63) -> float | None:
     return math.sqrt(sum((r - mu) ** 2 for r in rets) / (len(rets) - 1))
 
 
+# ======================= buying a few names, on your own days =================
+# Tom, 2026-09-29: *"bạn khuyến nghị mã nào nên mua hằng ngày (có các priority,
+# con nào khả năng lên cao) · tôi báo bạn mua con nào giá thế nào · khi bán tôi
+# báo · bạn cập nhật những con tôi đang hold và đề xuất dựa vào giá mua, có nên
+# bán hay không"*. He buys a few names from the daily list on his own days, not a
+# synchronised 8-name book. Measured in docs/reviews/WORKFLOW_STUDY_2026-09-29.md
+# (harness `docs/reviews/workflow_study_2026-09-29/`), DEV 2019-07..2025-09,
+# hypotheses and adoption rules written down before any result was read.
+
+#: Sessions of momentum history kept per name -- enough to date a top-8 run.
+MOM_HISTORY = 11
+
+#: Priority A = in the top 8 on each of the last 11 sessions (a run > 10).
+#: Pre-registered as P3 in priority.py. Per new pick, A minus B (newer names):
+#: DEV +1.6% over 4 weeks (Newey-West t 2.2), +2.0% over 8; holdout year +2.5% /
+#: +3.4%, the same sign. Not a strong effect: 2025 alone went the other way,
+#: and it overlaps with the other trend-strength measures (rank, the last week's
+#: move, distance to the 52-week high), none significant on its own once the
+#: others are in. Read it as "steady trends first", not as a second rule.
+ESTABLISHED = 11
+PRIORITY_EDGE = {20: 0.016, 40: 0.020}
+
+#: Mean excess over the average basket name per new pick, after the 1% round
+#: trip, by momentum rank at the signal (DEV). Descriptive: inside the top 8 the
+#: order helps a little (ranks 1-4 minus 5-8: +0.9% / +1.7%, t 1.3 / 1.5, 3 of 6
+#: years); below rank 16 the shortfall is clear -- the reason a holding is sold
+#: there and kept above it.
+RANK_EDGE = {  # (lo, hi): (4 weeks, 8 weeks)
+    (1, 2): (0.015, 0.029), (3, 4): (0.001, 0.016), (5, 8): (-0.001, 0.006),
+    (9, 16): (-0.006, -0.004), (17, 24): (-0.011, -0.011), (25, 32): (-0.011, -0.010),
+    (33, None): (-0.015, -0.020),
+}
+
+#: Sell rules counted from each position's own entry, 8-slot book, DEV CAGR
+#: (exits.py). Pre-registered bar: +1 point a year, Sharpe not lower, not worse
+#: in 4 of 6 years. Nothing beat the shipped rule on that bar:
+EXIT_STUDY = {
+    "review_20_keep_16": 0.330,      # shipped: review at sessions 20, 40, 60 ... from entry
+    "rank_check_daily": 0.306,       # sell the first day out of the top 16
+    "hard_cap_40": 0.265,            # sell at session 40 whatever the rank
+    "take_profit_20": 0.251,         # sell at +20% over the entry price
+    "take_profit_30": 0.277,
+    "cut_loss_10": 0.354,            # +2.4 points, but worse in 3 of 6 years -> not adopted
+    "cut_loss_15": 0.325,
+}
+
+
+def momentum_history(closes: list[float] | Any, n: int = MOM_HISTORY) -> list[float | None]:
+    """The score on each of the last `n` sessions, oldest -> newest (last = today)."""
+    c = [float(x) for x in closes if x is not None and float(x) == float(x)]
+    out: list[float | None] = []
+    for k in range(n - 1, -1, -1):
+        s, _m, _v = risk_adjusted_momentum(c[:len(c) - k] if k else c)
+        out.append(round(s, 4) if s is not None else None)
+    return out
+
+
+def top_runs(histories: dict[str, list[float | None]],
+             k: int = BUY_TOP_K) -> dict[str, int | None]:
+    """Consecutive sessions each name has been in the top `k`, up to today.
+
+    `histories` maps symbol -> `momentum_history`, last element = today. The
+    cross-section on a past day is today's universe: a name that joined or left
+    it since is a small error, not a new rule. A name with no history at all (a
+    snapshot built before 2026-09-29) gets None -- unknown, not "new".
+    """
+    n = max((len(h) for h in histories.values()), default=0)
+    hist = {s: [None] * (n - len(h)) + list(h) for s, h in histories.items()}
+    runs: dict[str, int | None] = {s: (0 if h else None) for s, h in histories.items()}
+    alive = {s for s, h in histories.items() if h}
+    for d in range(n - 1, -1, -1):
+        day = {s: h[d] for s, h in hist.items() if h[d] is not None}
+        alive &= set(sorted(day, key=lambda s: (-day[s], s))[:k])
+        if not alive:
+            break
+        for s in alive:
+            runs[s] += 1
+    return runs
+
+
+def priority(run: int | None) -> str | None:
+    """"A" (steady: in the top 8 for > 10 sessions), "B" (newer), None (unknown)."""
+    if run is None:
+        return None
+    return "A" if run >= ESTABLISHED else "B"
+
+
+def prioritise(picks: list[Any]) -> list[Any]:
+    """Stable re-order of an already-chosen buy list: A before B, rank inside each.
+
+    The SET is the rule's (the top names by momentum); this only orders it for
+    someone buying a few of them. Works on dicts and on objects.
+    """
+    def g(p, key):
+        return p.get(key) if isinstance(p, dict) else getattr(p, key, None)
+    order = {"A": 0, "B": 1, None: 1}
+    return sorted(picks, key=lambda p: (order.get(g(p, "priority"), 1),
+                                        g(p, "rank") if g(p, "rank") is not None else 10**6))
+
+
+def rank_edge(rank: int | None) -> tuple[float, float] | None:
+    """RANK_EDGE row for a rank, or None."""
+    if rank is None:
+        return None
+    for (lo, hi), v in RANK_EDGE.items():
+        if rank >= lo and (hi is None or rank <= hi):
+            return v
+    return None
+
+
+def equivalent_rank(score: float | None, universe_scores: list[float]) -> int | None:
+    """Where a name outside the basket would sit in today's momentum order.
+
+    For holdings the buy filter left out (liquidity, room, basket). The same
+    score, placed among the ranked names: 1 + how many score higher.
+    """
+    if score is None:
+        return None
+    return 1 + sum(1 for s in universe_scores if s is not None and s > score)
+
+
 # ============================== the layer ====================================
 # Measured by docs/reviews/strategy_study_2026-09-28/layer.py over every day
 # 2019-07-01 .. 2026-08: each name in the top 8 at close t, bought at the open
@@ -236,6 +357,32 @@ def pick_sentences(p: dict[str, Any]) -> tuple[str, str]:
             parts.append(f"{label}: trung vị {_p(o['median'])} (một nửa số lần {_p(o['p25'])} … "
                          f"{_p(o['p75'])}, lãi {o['win'] * 100:.0f}%)")
     return rng, "; ".join(parts)
+
+
+def priority_sentence() -> str:
+    """How to read the priority column -- the measured size and its limits."""
+    return (f"Ưu tiên A = đã nằm trong top {BUY_TOP_K} liên tục ≥ {ESTABLISHED} phiên (xu hướng "
+            f"bền); B = mới vào. Mua ít mã thì lấy A trước, trong mỗi nhóm theo hạng. Đo "
+            f"2019-2025: mỗi mã A hơn mã B trung bình {_p(PRIORITY_EDGE[20])} sau 4 tuần, "
+            f"{_p(PRIORITY_EDGE[40])} sau 8 tuần; 12 tháng gần nhất cùng chiều. Chênh lệch nhỏ và "
+            "không năm nào cũng đúng (2025 ngược lại). Tỷ lệ lãi của từng mã chỉ khoảng 55%, "
+            "nên cầm vài mã luôn an toàn hơn dồn vào một mã.")
+
+
+def sell_rule_sentence() -> str:
+    """The per-position sell rule and what was measured against it."""
+    e = EXIT_STUDY
+    base = e["review_20_keep_16"]
+    return (f"Luật bán, tính từ ngày anh mua từng mã: xem lại ở phiên thứ {REVIEW_SESSIONS}, "
+            f"{2 * REVIEW_SESSIONS}, {3 * REVIEW_SESSIONS}… Đến kỳ mà mã nằm ngoài top {KEEP_TOP} thì "
+            f"bán ATO phiên kế; còn trong top {KEEP_TOP} thì giữ tới kỳ sau, không giới hạn số "
+            f"phiên. Giá mua không quyết định bán. Đo 2019-2025 trên cùng rổ ({base * 100:.0f}%/năm "
+            f"với luật này): chốt lời khi lãi +20% còn {e['take_profit_20'] * 100:.0f}%/năm, +30% "
+            f"còn {e['take_profit_30'] * 100:.0f}%; bán cứng ở phiên 40 còn "
+            f"{e['hard_cap_40'] * 100:.0f}%; kiểm hạng mỗi ngày còn "
+            f"{e['rank_check_daily'] * 100:.0f}%. Cắt lỗ −10% được "
+            f"{e['cut_loss_10'] * 100:.0f}% nhưng tệ hơn ở 3/6 năm và mức −15% không giúp, nên "
+            "không đưa vào luật.")
 
 
 def rule_sentence() -> str:

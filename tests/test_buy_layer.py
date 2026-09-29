@@ -155,3 +155,73 @@ def test_build_row_carries_the_momentum_of_its_raw_closes():
     assert row.momentum == pytest.approx(score, abs=1e-4)
     assert row.mom_6m == pytest.approx(mom * 100, abs=0.01)
     assert row.vol_63d == pytest.approx(bl.daily_vol(c, 63), abs=1e-5)
+
+
+# ============ buying a few names on your own days (2026-09-29) ================
+# Tom: "khuyến nghị mã nào nên mua hằng ngày (có các priority)". The list's SET
+# stays the momentum top N; the priority only orders it for a partial buyer.
+
+def test_momentum_history_ends_with_todays_score():
+    c = _closes()
+    h = bl.momentum_history(c)
+    assert len(h) == bl.MOM_HISTORY == 11
+    assert h[-1] == pytest.approx(bl.risk_adjusted_momentum(c)[0], abs=1e-4)
+    assert h[0] == pytest.approx(bl.risk_adjusted_momentum(c[:-10])[0], abs=1e-4)
+
+
+def test_a_short_history_leaves_the_early_days_unknown():
+    h = bl.momentum_history(_closes(n=130))
+    assert h[:6] == [None] * 6 and all(x is not None for x in h[-4:])
+
+
+def _hist(*vals):
+    return list(vals)
+
+
+def test_top_runs_count_consecutive_days_in_the_top_k_up_to_today():
+    # k = 2. A is top every day; B only the last two; C was top, then fell out.
+    H = {"A": _hist(9, 9, 9, 9), "B": _hist(1, 1, 8, 8), "C": _hist(8, 8, 1, 1),
+         "D": _hist(2, 2, 2, 2)}
+    runs = bl.top_runs(H, k=2)
+    assert runs == {"A": 4, "B": 2, "C": 0, "D": 0}
+
+
+def test_a_row_without_history_is_unknown_not_new():
+    runs = bl.top_runs({"A": _hist(9, 9), "OLD": []}, k=2)
+    assert runs["OLD"] is None and bl.priority(runs["OLD"]) is None
+    assert runs["A"] == 2
+
+
+def test_priority_a_needs_a_run_longer_than_ten_sessions():
+    assert bl.priority(11) == "A" and bl.priority(10) == "B" and bl.priority(0) == "B"
+
+
+def test_prioritise_orders_a_before_b_and_keeps_rank_inside_each():
+    picks = [{"symbol": "X", "rank": 1, "priority": "B"},
+             {"symbol": "Y", "rank": 2, "priority": "A"},
+             {"symbol": "Z", "rank": 3, "priority": None},
+             {"symbol": "W", "rank": 4, "priority": "A"}]
+    assert [p["symbol"] for p in bl.prioritise(picks)] == ["Y", "W", "X", "Z"]
+    # without any priority (an old snapshot) the order is the rank order
+    plain = [{"symbol": s, "rank": i, "priority": None} for i, s in enumerate("PQR", 1)]
+    assert [p["symbol"] for p in bl.prioritise(plain)] == ["P", "Q", "R"]
+
+
+def test_an_outside_name_is_placed_among_the_ranked_scores():
+    scores = [5.0, 4.0, 3.0, 2.0]
+    assert bl.equivalent_rank(3.5, scores) == 3
+    assert bl.equivalent_rank(9.0, scores) == 1
+    assert bl.equivalent_rank(None, scores) is None
+
+
+def test_the_sell_sentence_quotes_the_measured_alternatives():
+    s = bl.sell_rule_sentence()
+    e = bl.EXIT_STUDY
+    for key in ("take_profit_20", "hard_cap_40", "cut_loss_10"):
+        assert f"{e[key] * 100:.0f}%" in s
+    assert "không quyết định bán" in s and "**" not in s, "plain text: the email reuses it"
+
+
+def test_the_priority_sentence_says_how_small_the_effect_is():
+    s = bl.priority_sentence()
+    assert "2025 ngược lại" in s and "**" not in s

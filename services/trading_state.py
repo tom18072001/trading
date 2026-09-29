@@ -62,7 +62,10 @@ _DEFAULT: dict[str, Any] = {
 # None = rơi về `opened_at`, nên mọi dòng ghi trước hôm nay vẫn đúng: mức của
 # chúng quả thật có hiệu lực từ lúc mở lệnh.
 _POSITION_DEFAULT: dict[str, Any] = {"stop": None, "target": None, "thesis": "",
-                                     "stop_set_at": None, "target_set_at": None}
+                                     "stop_set_at": None, "target_set_at": None,
+                                     # 2026-09-29: each buy that built the position
+                                     # ({price, qty, date}); empty = one lot, the row.
+                                     "lots": []}
 
 _lock = threading.Lock()
 
@@ -254,32 +257,62 @@ def update_position(symbol: str, side: str = "BUY", *,
     return get_state()
 
 
+def _realise(row: dict[str, Any], side: str, *, exit_price: float, qty: float | None,
+             closed_at: str, note: str | None) -> dict[str, Any]:
+    """The `closed` record for selling `qty` of `row` at `exit_price`, net of costs.
+
+    Costs are the §18.2/10 figures the backtest already uses (BACKTEST_FEE_BPS
+    per side, BACKTEST_SELL_TAX_BPS on proceeds), imported rather than retyped:
+    a book that reports a gross number the backtest would call a loss is worse
+    than no book. On a round trip that is ~0.40% of notional, which routinely
+    decides whether a small win is a win. P&L is against the AVERAGE cost.
+    """
+    from config import BACKTEST_FEE_BPS, BACKTEST_SELL_TAX_BPS
+
+    entry = row.get("entry_price")
+    direction = 1 if side == "BUY" else -1
+    closed = {**row, "qty": qty, "exit_price": exit_price, "closed_at": closed_at,
+              "pnl_pct": None, "pnl_vnd": None, "fees_vnd": None}
+    if note is not None:
+        closed["note"] = note.strip()
+    if entry:
+        gross_pct = direction * (exit_price / entry - 1) * 100
+        # Cost in percent terms is independent of size, so a position with
+        # no qty still gets an honest net figure.
+        cost_pct = (2 * BACKTEST_FEE_BPS + BACKTEST_SELL_TAX_BPS) / 100
+        closed["pnl_pct"] = gross_pct - cost_pct
+        if qty:
+            fees = ((entry + exit_price) * qty * BACKTEST_FEE_BPS / 10_000
+                    + exit_price * qty * BACKTEST_SELL_TAX_BPS / 10_000)
+            closed["fees_vnd"] = fees
+            closed["pnl_vnd"] = direction * (exit_price - entry) * qty - fees
+    return closed
+
+
 def close_position(symbol: str, side: str = "BUY", *,
                    exit_price: float, closed_at: str | None = None,
-                   note: str | None = None) -> dict[str, Any]:
-    """Book an exit: move the row from `positions` to `closed` with realised P&L.
+                   note: str | None = None, qty: float | None = None) -> dict[str, Any]:
+    """Book an exit: all of it, or `qty` of it (2026-09-29, Tom: *"khi tôi bán tôi
+    sẽ báo bạn"* -- a sale is not always the whole position).
 
     Deliberately NOT remove_position(). That one deletes, which is right for
     "I mis-clicked" and wrong for "I sold" — deleting a closed trade throws away
     the only record of whether the system's picks made money, which is the whole
     reason to track a book.
 
-    Costs are the §18.2/10 figures the backtest already uses (BACKTEST_FEE_BPS
-    per side, BACKTEST_SELL_TAX_BPS on proceeds), imported rather than retyped:
-    a book that reports a gross number the backtest would call a loss is worse
-    than no book. On a round trip that is ~0.40% of notional, which routinely
-    decides whether a small win is a win.
-
-    ponytail: no partial exits — closing takes the whole position. Split it into
-    a `qty` argument and a residual row if you ever scale out.
+    A partial sale writes a `closed` row for the part sold (`partial: True`) and
+    leaves the rest open at the same average cost and the same buy date: selling
+    some does not restart the position's review clock.
     """
-    from config import BACKTEST_FEE_BPS, BACKTEST_SELL_TAX_BPS
-
     sym = symbol.strip().upper()
     side = side.strip().upper()
     exit_price = float(exit_price)
     if exit_price <= 0:
         raise ValueError("exit_price must be positive")
+    if qty is not None:
+        qty = float(qty)
+        if qty <= 0:
+            raise ValueError("qty must be positive")
 
     with _lock:
         s = _read()
@@ -287,35 +320,75 @@ def close_position(symbol: str, side: str = "BUY", *,
                     if p.get("symbol") == sym and p.get("side") == side), None)
         if row is None:
             raise ValueError(f"no open {side} position for {sym}")
-
-        entry, qty = row.get("entry_price"), row.get("qty")
-        direction = 1 if side == "BUY" else -1
-        closed = {
-            **row,
-            "exit_price": exit_price,
-            "closed_at": (closed_at or today_str()).strip(),
-            "pnl_pct": None, "pnl_vnd": None, "fees_vnd": None,
-        }
-        if note is not None:
-            closed["note"] = note.strip()
-
-        if entry:
-            gross_pct = direction * (exit_price / entry - 1) * 100
-            # Cost in percent terms is independent of size, so a position with
-            # no qty still gets an honest net figure.
-            cost_pct = (2 * BACKTEST_FEE_BPS + BACKTEST_SELL_TAX_BPS) / 100
-            closed["pnl_pct"] = gross_pct - cost_pct
-            if qty:
-                fees = ((entry + exit_price) * qty * BACKTEST_FEE_BPS / 10_000
-                        + exit_price * qty * BACKTEST_SELL_TAX_BPS / 10_000)
-                closed["fees_vnd"] = fees
-                closed["pnl_vnd"] = direction * (exit_price - entry) * qty - fees
-
-        s["positions"] = [p for p in s["positions"]
-                          if not (p.get("symbol") == sym and p.get("side") == side)]
+        held = row.get("qty")
+        partial = False
+        if qty is not None:
+            if held is None:
+                raise ValueError(f"{sym} has no qty on record -- set it before a partial sale")
+            if qty > held + 1e-9:
+                raise ValueError(f"cannot sell {qty:g} of {sym}: only {held:g} held")
+            partial = qty < held - 1e-9
+        closed = _realise(row, side, exit_price=exit_price,
+                          qty=qty if partial else held,
+                          closed_at=(closed_at or today_str()).strip(), note=note)
+        if partial:
+            closed["partial"] = True
+            row["qty"] = held - qty
+        else:
+            s["positions"] = [p for p in s["positions"]
+                              if not (p.get("symbol") == sym and p.get("side") == side)]
         s["closed"] = [*s["closed"], closed]
         _write(s)
-    log.info("[state] closed %s %s @ %s", side, sym, exit_price)
+    log.info("[state] closed %s %s %s @ %s", side, sym, "part" if partial else "all", exit_price)
+    return get_state()
+
+
+def record_buy(symbol: str, price: float, qty: float, *, bought_at: str | None = None,
+               sector_code: str = "", note: str = "") -> dict[str, Any]:
+    """Tom báo đã mua (2026-09-29): *"tôi sẽ báo bạn tôi mua con nào giá thế nào"*.
+
+    Unlike `add_position` (the Daily Insight "Đã vào lệnh" button, idempotent:
+    marking twice updates the row), a second buy of a name already held ADDS to
+    it: quantities sum and the entry becomes the quantity-weighted average cost,
+    the way a VN broker shows "giá vốn bình quân". `add_position` would have
+    overwritten the first fill's price and quantity with the second's.
+
+    The position keeps the date of its FIRST buy -- that is its review clock.
+    A position whose date was never known stays undated rather than taking the
+    new lot's date: that would invent a date for the earlier shares.
+    """
+    sym = symbol.strip().upper()
+    if not sym:
+        raise ValueError("symbol is required")
+    price, qty = float(price), float(qty)
+    if price <= 0 or qty <= 0:
+        raise ValueError("price and qty must be positive")
+    day = (bought_at or today_str()).strip()
+    lot = {"price": price, "qty": qty, "date": day}
+    with _lock:
+        s = _read()
+        row = next((p for p in s["positions"]
+                    if p.get("symbol") == sym and p.get("side") == "BUY"), None)
+        if row is None:
+            s["positions"] = [*s["positions"], {
+                **_POSITION_DEFAULT, "symbol": sym, "sector_code": sector_code.strip().upper(),
+                "side": "BUY", "entry_price": price, "qty": qty, "note": note.strip(),
+                "opened_at": day, "lots": [lot]}]
+        else:
+            old_p, old_q = row.get("entry_price"), row.get("qty")
+            if not old_p or not old_q:
+                raise ValueError(f"{sym} is held without a price or qty -- fix it with "
+                                 "update_position before adding to it")
+            lots = row.get("lots") or [{"price": old_p, "qty": old_q,
+                                        "date": row.get("opened_at")}]
+            row["entry_price"] = (old_p * old_q + price * qty) / (old_q + qty)
+            row["qty"] = old_q + qty
+            row["lots"] = [*lots, lot]
+            if note:
+                row["note"] = note.strip()
+        s["watchlist"] = [w for w in s["watchlist"] if w != sym]
+        _write(s)
+    log.info("[state] bought %s %g @ %s", sym, qty, price)
     return get_state()
 
 

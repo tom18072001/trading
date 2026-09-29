@@ -205,21 +205,23 @@ export type PnlRow = Position & {
   dist_to_stop_pct: number | null;
   dist_to_target_pct: number | null;
   sessions_held: number | null;
-  /** daily_watch/sell_range.advise — the 4-8 week window and the price range.
+  /** daily_watch/sell_range.advise — the review schedule and the price range.
    *  Replaces `sellable_on` (T+2), removed with the T+ mode on 2026-09-25. */
   sell_range?: SellRange;
 };
 
 export type SellRange = {
-  /** Window opens 20 sessions after the buy, closes at 40. Null without a buy date. */
+  /** The first two reviews: sessions 20 and 40 after the buy. Null without a buy date. */
   sell_from: string | null;
   sell_by: string | null;
-  phase: 'giữ' | 'trong cửa sổ bán' | 'quá hạn' | 'unknown';
+  /** The next review session (2026-09-29: every 20 sessions, sell if out of the top 16). */
+  next_review: string | null;
+  decide_today: boolean;
+  phase: 'trước kỳ xem lại đầu' | 'quyết định hôm nay' | 'giữa hai kỳ' | 'unknown';
   peak_basis: 'since_entry' | 'recent_window' | null;
+  /** ±1 ATR around the peak — a reference for choosing a price, not a sell rule. */
   band_lo: number | null;
   band_hi: number | null;
-  give_back: number | null;
-  armed: boolean;
   note: string;
 };
 

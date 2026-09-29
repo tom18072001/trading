@@ -287,6 +287,22 @@ the 2-week shadow window and drop in migration 10.
 - **Audit shadow.** The previous rule (SMA200 gate → score/OBV blend) is
   `legacy_shortlist`, archived daily for `daily_watch/audit.py`.
 
+**For a trader buying a few names on his own days (2026-09-29,
+`docs/reviews/WORKFLOW_STUDY_2026-09-29.md`).**
+
+- **Priority.** The list's set is still the momentum top 8; it is ordered A
+  (in the top 8 on each of the last 11 sessions, `buy_layer.top_runs` over
+  `TickerRow.momentum_hist`) before B, rank inside each. Pre-registered, passed
+  on DEV, same sign on the holdout, small and unsteady.
+- **Sell, per position.** `daily_watch/sell_range.schedule` + `verdict`: each
+  position is reviewed at sessions 20, 40, 60 … after its own buy date and sold
+  at a review where it ranks outside the top 16. No hard cap, no take profit, no
+  cut loss — all measured worse or unstable. A missed sale is read back from the
+  archive; an undated position is judged on today's rank; a holding outside the
+  basket gets an equivalent rank from the same score.
+- **Book.** `trading_state.record_buy` adds at the quantity-weighted average
+  cost; `close_position(qty=…)` sells part. CLI: `python -m daily_watch.book`.
+
 ## 9. TraderAgent "Minh"
 
 `services.trader_agent.TraderAgent` runs **in-process**. Since 2026-07-20 the

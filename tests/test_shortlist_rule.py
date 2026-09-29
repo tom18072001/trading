@@ -211,7 +211,130 @@ def test_the_bulletin_sizes_the_buy_to_the_free_slots(monkeypatch):
     monkeypatch.setattr(positions, "mark_book", lambda: {
         "as_of": "2026-09-24", "priced": 2, "count": 2, "total_pnl_pct": None,
         "positions": [{"symbol": "BBB", "sell_range": {}}, {"symbol": "X19", "sell_range": {}}]})
-    md = service.render(service.build(top_n=8))
+    payload = service.build(top_n=8)
+    md = service.render(payload)
     assert "mua thêm **tối đa 7 mã**" in md, "BBB (rank 1) keeps its slot; X19 does not"
-    assert "1/25 · giữ" in md
-    assert "25/25 · **rơi khỏi top 16**" in md
+    # 2026-09-29: one verdict per holding. Neither has a buy date, so today's
+    # rank decides: BBB stays, X19 (outside the top 16) is a sale -- and it is
+    # the one alert at the top of the bulletin.
+    assert "| 1/25 | GIỮ |" in md
+    assert "| 25/25 | **BÁN** ATO phiên tới |" in md
+    assert [a["symbol"] for a in payload["alerts"]] == ["X19"]
+    assert "### 🔴 X19 — BÁN ATO phiên tới" in md
+
+
+# ------------------------------- 2026-09-29: Tom buys a few, on his own days
+
+def _steady_and_new():
+    """12 names. Today's order is S00 > S01 > ... > S11. S00 jumped into the
+    top 8 two sessions ago; S01..S07 have been there all 11 sessions."""
+    rows = []
+    for i in range(12):
+        today_score = 20.0 - i
+        hist = [today_score] * 11
+        if i == 0:
+            hist = [1.0] * 9 + [today_score] * 2          # new: 2 sessions in the top 8
+        r = _row(f"S{i:02d}", 0.0, 0.5, today_score)
+        r.momentum_hist = hist
+        rows.append(r)
+    return rows
+
+
+def test_the_bulletin_lists_steady_names_first(monkeypatch):
+    import services.picks_universe_service as mod
+    from daily_watch import service
+    from services import trading_state
+
+    rows = _steady_and_new()
+    monkeypatch.setattr(mod.PicksUniverseService, "peek", lambda self: _Snap(rows))
+    monkeypatch.setattr(trading_state, "held_symbols", lambda: set())
+    picks, _meta = service._shortlist(8)
+    assert {p["symbol"] for p in picks} == {f"S{i:02d}" for i in range(8)}, "the set is the rule's"
+    assert picks[0]["symbol"] == "S01" and picks[0]["priority"] == "A"
+    assert picks[-1]["symbol"] == "S00" and picks[-1]["priority"] == "B"
+    assert picks[-1]["rank"] == 1 and picks[-1]["top8_run"] == 2
+
+
+def test_daily_insight_orders_its_buys_the_same_way(monkeypatch):
+    import services.picks_universe_service as mod
+    rows = _steady_and_new()
+    svc = mod.PicksUniverseService()
+    monkeypatch.setattr("services.picks_news.fetch_news", lambda *a, **k: [])
+    out = svc._select_top({r.symbol: r for r in rows}, {}, action="BUY", n=8,
+                          as_of=date(2026, 9, 29), market={"up": True})
+    assert [p.symbol for p in out][:2] == ["S01", "S02"] and out[-1].symbol == "S00"
+    assert out[-1].rank == 1 and out[-1].priority == "B" and out[0].priority == "A"
+
+
+def test_a_holding_outside_the_basket_gets_an_equivalent_rank(monkeypatch):
+    import services.picks_universe_service as mod
+    from daily_watch import holdings, positions, service
+    from services import trading_state
+
+    rows = _universe()
+    monkeypatch.setattr(mod.PicksUniverseService, "peek", lambda self: _Snap(rows))
+    monkeypatch.setattr(trading_state, "held_symbols", lambda: {"OUT"})
+    monkeypatch.setattr(holdings, "load", lambda: {"rows": {"OUT": {"close": 9.0,
+                                                                    "momentum": 6.0}}})
+    monkeypatch.setattr(positions, "mark_book", lambda: {
+        "as_of": "2026-09-29", "priced": 1, "count": 1, "total_pnl_pct": None,
+        "positions": [{"symbol": "OUT", "entry_price": 12.0, "last": 9.0, "pnl_pct": -25.0,
+                       "sell_range": {}}]})
+    payload = service.build(top_n=5)
+    # scores 9, 7, 5, 5, 1 -> 6.0 sits third
+    assert payload["shortlist_meta"]["held_ranks"]["OUT"] == {"rank": 3, "equivalent": True}
+    p = payload["book"]["positions"][0]
+    assert p["verdict"]["verdict"] == "GIỮ" and "tương đương" in p["verdict"]["why"]
+    assert "*tương đương*" in service.render(payload)
+
+
+def test_a_missed_review_is_read_back_from_the_archive(monkeypatch, tmp_path):
+    import json
+
+    import services.picks_universe_service as mod
+    from daily_watch import positions, sell_range, service
+    from services import trading_state
+    from utils.clock import previous_trading_day, today
+
+    rows = _universe() + [_row(f"X{i:02d}", 0.0, 0.5, -float(i)) for i in range(20)]
+    d = today()
+    for _ in range(22):
+        d = previous_trading_day(d)
+    sr = sell_range.advise({"opened_at": d.isoformat()}, [], 2.0, 10.0)
+    assert sr["last_decision"], "22 sessions in: the session-19 decision is behind us"
+    monkeypatch.setattr(service, "ARCHIVE_DIR", tmp_path)
+    (tmp_path / f"{sr['last_decision']}.json").write_text(json.dumps(
+        {"shortlist_meta": {"ranks": {"X15": 21}}}), encoding="utf-8")
+    monkeypatch.setattr(mod.PicksUniverseService, "peek", lambda self: _Snap(rows))
+    monkeypatch.setattr(trading_state, "held_symbols", lambda: {"X15"})
+    monkeypatch.setattr(positions, "mark_book", lambda: {
+        "as_of": "2026-09-29", "priced": 1, "count": 1, "total_pnl_pct": None,
+        "positions": [{"symbol": "X15", "entry_price": 10.0, "last": 10.0, "pnl_pct": 0.0,
+                       "sell_range": sr}]})
+    v = service.build(top_n=5)["book"]["positions"][0]["verdict"]
+    assert v["verdict"] == "BÁN" and sr["last_decision"] in v["why"]
+
+
+def test_a_weak_name_before_its_review_still_takes_a_slot(monkeypatch):
+    """V0 frees a slot only at a review: X19 (rank 25) bought 5 sessions ago is
+    GIỮ until session 20, so the book has two names kept and six slots free."""
+    import services.picks_universe_service as mod
+    from daily_watch import positions, sell_range, service
+    from services import trading_state
+    from utils.clock import previous_trading_day, today
+
+    d = today()
+    for _ in range(5):
+        d = previous_trading_day(d)
+    rows = _universe() + [_row(f"X{i:02d}", 0.0, 0.5, -float(i)) for i in range(20)]
+    monkeypatch.setattr(mod.PicksUniverseService, "peek", lambda self: _Snap(rows))
+    monkeypatch.setattr(trading_state, "held_symbols", lambda: {"BBB", "X19"})
+    monkeypatch.setattr(positions, "mark_book", lambda: {
+        "as_of": "2026-09-24", "priced": 2, "count": 2, "total_pnl_pct": None,
+        "positions": [{"symbol": "BBB", "sell_range": {}},
+                      {"symbol": "X19", "sell_range": sell_range.advise(
+                          {"opened_at": d.isoformat()}, [], 2.0, 10.0)}]})
+    payload = service.build(top_n=8)
+    assert [p["verdict"]["verdict"] for p in payload["book"]["positions"]] == ["GIỮ", "GIỮ"]
+    assert payload["alerts"] == []
+    assert "mua thêm **tối đa 6 mã**" in service.render(payload)

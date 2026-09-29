@@ -156,9 +156,9 @@ def cmd_daily_watch(top_n: int = 8) -> None:
           f"{len(alerts)} cần quyết định, {len(payload['shortlist'])} ứng viên "
           f"(dữ liệu phiên {payload['data_as_of']})")
     for a in alerts:
-        sr = a.get("sell_range") or {}
+        v = a.get("verdict") or {}
         print(f"  - {a['kind']}: {a['symbol']} @ {a['last']} "
-              f"(cửa sổ bán {sr.get('sell_from')} -> {sr.get('sell_by')})")
+              f"{v.get('when') or ''} — {v.get('why', '')}")
     for f in payload.get("_written", []):
         print(f"  -> {f}")
 

@@ -198,41 +198,29 @@ def mark_book(positions: list[dict] | None = None) -> dict[str, Any]:
     }
 
 
-#: Thứ tự khẩn cấp của cảnh báo. Chỉ ba loại — thêm loại thứ tư là bắt người đọc
-#: phân loại thay vì hành động.
-_URGENCY = {"quá hạn": 0, "nhả quá sâu": 1, "trong cửa sổ bán": 2}
+#: Thứ tự khẩn cấp. Hai loại: một lệnh bán, và một mã hệ thống không xếp được
+#: hạng nên không nói được giữ hay bán.
+_URGENCY = {"BÁN": 0, "CHƯA XẾP ĐƯỢC": 1}
 
 
 def alerts(book: dict[str, Any] | None = None) -> list[dict]:
-    """Vị thế cần Tom quyết định hôm nay.
+    """Vị thế cần Tom quyết định hôm nay: kết luận BÁN, hoặc không xếp được hạng.
 
-    **Không còn cảnh báo stop-loss** (bỏ 2026-09-16). Đo trên 3.446 lệnh: mọi
-    luật thoát bằng mức giá — kể cả băng neo ở đỉnh — đều thua việc giữ hết
-    khung, và càng chặt càng tệ, đơn điệu. Nên thứ đáng đánh thức người đọc là
-    **hết khung giữ**, không phải giá chạm một mức nào đó.
+    Kết luận (`row["verdict"]`) do `service.build` gắn bằng
+    `sell_range.verdict()`, vì nó cần hạng trên CẢ universe. Một sổ chưa gắn
+    kết luận thì không có cảnh báo nào — không đoán.
 
-    `nhả quá sâu` vẫn được báo vì nó là tin tức về *luận điểm* ("sóng lên đã
-    kết thúc"), không phải một lệnh bán cơ học — và nó dùng mức ít tốn nhất
-    trong các băng đo được, chứ không phải mức tốt nhất, vì không có mức nào tốt.
+    2026-09-29: "quá hạn" (bán cứng ở phiên 40), "trong cửa sổ bán" và "nhả quá
+    sâu" là luật của thứ tự cũ. Với luật động lượng, bán cứng ở phiên 40 mất ~6,5
+    điểm/năm (docs/reviews/WORKFLOW_STUDY_2026-09-29.md) — không còn là cảnh báo.
     """
     b = book or mark_book()
     out = []
     for r in b["positions"]:
-        sr = r.get("sell_range") or {}
-        phase = sr.get("phase")
-        kind = None
-        if phase == "quá hạn":
-            kind = "quá hạn"
-        elif (sr.get("armed") and r.get("last") and sr.get("give_back")
-              and r["last"] <= sr["give_back"]):
-            # Chỉ khi ĐÃ ARM — xem sell_range.ARM_ATR. Không có điều kiện này thì
-            # đây là cảnh báo stop-loss trên lệnh đang lỗ, thứ Tom đã bỏ.
-            kind = "nhả quá sâu"
-        elif phase == "trong cửa sổ bán":
-            kind = "trong cửa sổ bán"
-        if kind:
+        kind = (r.get("verdict") or {}).get("verdict")
+        if kind in _URGENCY:
             out.append({**r, "alert_kind": kind})
-    return sorted(out, key=lambda r: _URGENCY.get(r["alert_kind"], 9))
+    return sorted(out, key=lambda r: _URGENCY[r["alert_kind"]])
 
 
 def breaches(book: dict[str, Any] | None = None) -> list[dict]:

@@ -47,10 +47,21 @@ class PositionPatch(BaseModel):
 
 
 class PositionClose(BaseModel):
-    """Book an exit. `exit_price` is required — that is the point of the verb."""
+    """Book an exit. `exit_price` is required — that is the point of the verb.
+    `qty` sells part of the position (2026-09-29); omitted = all of it."""
     exit_price: float
     closed_at: str | None = None
     note: str | None = None
+    qty: float | None = None
+
+
+class PositionBuy(BaseModel):
+    """A buy Tom reports. Adds to a held name at the average cost (2026-09-29)."""
+    price: float
+    qty: float
+    bought_at: str | None = None
+    sector_code: str = ""
+    note: str = ""
 
 
 class SymbolBody(BaseModel):
@@ -110,12 +121,27 @@ def close_position(symbol: str, body: PositionClose, side: str = "BUY"):
     try:
         return trading_state.close_position(
             symbol, side, exit_price=body.exit_price,
-            closed_at=body.closed_at, note=body.note,
+            closed_at=body.closed_at, note=body.note, qty=body.qty,
         )
     except ValueError as e:
-        # "no open position" is a 404; "exit_price must be positive" is a 422.
-        status = 422 if "exit_price" in str(e) else 404
+        # "no open position" is a 404; a bad price or quantity is a 422.
+        status = 404 if str(e).startswith("no open") else 422
         raise HTTPException(status_code=status, detail=str(e)) from e
+
+
+@router.post("/positions/{symbol}/buy")
+def record_buy(symbol: str, body: PositionBuy):
+    """A buy: opens the position, or adds to it at the quantity-weighted cost.
+
+    Not POST /positions, which marks a pick idempotently (the Daily Insight
+    button) and would overwrite a held name's price and quantity.
+    """
+    try:
+        return trading_state.record_buy(symbol, body.price, body.qty,
+                                        bought_at=body.bought_at,
+                                        sector_code=body.sector_code, note=body.note)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
 
 
 @router.delete("/positions/{symbol}")

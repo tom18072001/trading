@@ -6,11 +6,12 @@ Module riêng, tách khỏi `services/` ngày 2026-09-16. **Ba việc, không h�
 |---|---|---|
 | 1 | **Báo cáo** sổ hôm nay | `service.render()` mục 2 |
 | 2 | **Đề xuất mua** — ứng viên | `service._shortlist()` → `long_shortlist` (luật chung với Daily Insight + email) |
-| 3 | **Đề xuất bán** — cửa sổ + range | `sell_range.advise()` |
+| 3 | **Đề xuất bán** — GIỮ / BÁN từng mã, theo đồng hồ của chính nó | `sell_range.schedule()` + `verdict()` |
 
 ```bash
 uv run python main.py --daily-watch             # chạy, ghi 3 file
 uv run python daily_watch/audit.py --hold 20    # chấm lại khuyến nghị cũ (20 hoặc 40)
+uv run python -m daily_watch.book buy VIC 45.2 1000   # Tom báo mua / sell / date / show
 ```
 
 Task `SectorFlow_daily_watch` chạy lệnh đầu lúc **17:30, T2–T6**.
@@ -21,7 +22,8 @@ Task `SectorFlow_daily_watch` chạy lệnh đầu lúc **17:30, T2–T6**.
 |---|---|
 | `service.py` | dựng bản tin + ghi ra đĩa |
 | `positions.py` | chấm sổ theo giá gần nhất, đường giá từ ngày vào lệnh |
-| `sell_range.py` | bán lúc nào — cửa sổ (luật) + range (tham chiếu) |
+| `sell_range.py` | bán lúc nào — lịch xem lại + kết luận GIỮ/BÁN (luật) + range (tham chiếu) |
+| `book.py` | ghi đúng điều Tom báo (mua thêm = giá vốn bình quân, bán một phần) rồi in kết luận |
 | `holdings.py` | giá cho mã **đang nắm ngoài universe** — `refresh()` gọi mạng (chỉ job), `load()` chỉ đọc đĩa |
 | `audit.py` | đọc kho lưu trữ, chấm lại khuyến nghị cũ — luật đang chạy (động lượng, từ 29/09) **và** các luật trước nó (cổng SMA200 `shortlist_previous_rule`, ngưỡng 2,5 `shortlist_with_cutoff`) trên cùng base |
 
@@ -46,9 +48,11 @@ Không sinh HTML và không gửi email. Bản tin này để **trả lời tron
    chặn. Đây cũng là cái giá của việc rời `services/`: module này **không** còn
    được bảng phân tầng kiểm, nên guard hướng là thứ duy nhất còn lại.
 
-2. **Cửa sổ thời gian là LUẬT, range giá là THAM CHIẾU.** Đo trên 3.446 lệnh:
-   giữ hết khung thắng mọi hình học thoát bằng mức giá, và càng chặt càng tệ,
-   đơn điệu. Không có stop-loss ở đây, và đó là có chủ ý (`CLAUDE.md` §26.10).
+2. **Lịch xem lại là LUẬT, range giá là THAM CHIẾU** (2026-09-29). Mỗi vị thế có đồng
+   hồ riêng từ ngày mua: xem lại phiên 20, 40, 60…; ngoài top 16 thì bán ATO, trong top
+   16 thì giữ, không giới hạn số phiên. Giá mua không quyết định bán — chốt lời, cắt lỗ
+   và bán cứng ở phiên 40 đều đã đo và thua hoặc không ổn định
+   (`docs/reviews/WORKFLOW_STUDY_2026-09-29.md`). Không có stop-loss (`CLAUDE.md` §26.10).
 
 3. **Bộ lọc mua không phải danh sách theo dõi.** Universe 54 mã là bộ lọc
    *mua*. Mã đang nắm mà nằm ngoài nó vẫn phải được nhìn thấy — `holdings.py`
@@ -56,12 +60,9 @@ Không sinh HTML và không gửi email. Bản tin này để **trả lời tron
    mua, không phải để được theo dõi). Gọi mạng chỉ ở job; `mark_book()` được
    route API gọi nên chỉ đọc cache.
 
-4. **`give_back` chỉ có nghĩa sau khi đã có sóng lên — kể từ lúc mua.** Nó chỉ
-   báo khi đỉnh đã vượt giá vào ≥ `ARM_ATR`×ATR — đúng điều kiện bench đã đo —
-   **và** vị thế có ngày mua (`peak_basis == "since_entry"`, 2026-09-25). Không
-   có điều kiện đầu thì nó là một stop-loss 3,5×ATR dưới giá vào; không có điều
-   kiện sau thì đỉnh ~30 phiên có thể có trước lúc mua, và "sóng lên đã kết
-   thúc" nói về một con sóng anh không có mặt.
+4. **Mọi mã đang giữ đều có kết luận.** Mã ngoài rổ nhận hạng tương đương từ cùng điểm
+   động lượng (`holdings.py` lưu `momentum`); mã chưa có ngày mua xét theo hạng hôm nay;
+   một kỳ bán bị lỡ được đọc lại từ kho `data/watch/`.
 
 5. **Không dự báo hướng giá.** `projection()` trả lịch và biên độ ATR. Không
    rule nào trong repo thắng VNINDEX risk-adjusted (§26.9), nên một con số
@@ -72,7 +73,9 @@ Không sinh HTML và không gửi email. Bản tin này để **trả lời tron
 
 | sửa | đo lại bằng |
 |---|---|
-| hình học thoát / range | `scripts/tplus_strategy_bench.py --trail` |
+| luật bán theo vị thế | `docs/reviews/workflow_study_2026-09-29/exits.py dev` |
+| thứ tự ưu tiên mua | `docs/reviews/workflow_study_2026-09-29/priority.py` |
+| range tham chiếu | `scripts/tplus_strategy_bench.py --trail` |
 | luật xếp hạng ứng viên | `scripts/ticker_alpha_bench.py --verdict` (chỉ nhận 20/40) |
 | khung giữ | `docs/reviews/algo_review_2026-09-24/followup.py` (quét 10-120 phiên, ngoài bench — hệ thống chỉ dùng 20/40) |
 | bỏ ngưỡng 2,5, ngoài mẫu | `daily_watch/audit.py --hold 20` / `--hold 40` |

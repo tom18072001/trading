@@ -1,193 +1,188 @@
-"""Khuyến nghị bán: một **cửa sổ thời gian** và một **range giá** trượt lên.
+"""Khuyến nghị bán cho từng vị thế: **lịch xem lại** (luật) và **range giá** (tham chiếu).
 
-Thay cho stop-loss, bỏ ngày 2026-09-16 theo quyết định của Tom (§26.10 lần hai).
+## Luật — từ 2026-09-29, đo trong docs/reviews/WORKFLOW_STUDY_2026-09-29.md
 
-## Cái gì được đo, cái gì không — đọc trước khi tin con số nào
+Tom mua vào ngày của anh ấy, không theo một sổ 8 mã đồng bộ, nên mỗi vị thế có
+**đồng hồ riêng, tính từ ngày mua**: xem lại ở phiên thứ 20, 40, 60… Đến kỳ mà
+mã nằm ngoài top 16 của thứ tự động lượng thì bán ATO phiên kế; còn trong top
+16 thì giữ tới kỳ sau, không giới hạn số phiên. `verdict()` là nơi duy nhất nói
+GIỮ / BÁN.
 
-`scripts/tplus_strategy_bench.py --trail` chấm 7 hình học thoát, luật vào lệnh
-đang ship (`shipped_rule_top5`, 4.382 lệnh từ 2023), chi phí 1,00%/vòng. Đo lại
-2026-09-25 sau khi sửa hai lỗi nhìn trước của bench (đỉnh cập nhật bằng giá đóng
-TRƯỚC khi so giá thấp cùng phiên; phiên mở dưới băng vẫn khớp ở băng — review
-2026-09-24 §3.2):
+Bảy biến thể, đăng ký trước, sổ 8 chỗ, DEV 2019-07 → 2025-09 (`exits.py`):
 
-    khung 40 phiên              mean%/lệnh  giữ TB   theo năm (excess vs ngẫu nhiên)
-    KHÔNG stop, giữ hết khung     +2,23      40,0    23:−0,24 24:+0,69 25:+1,92 26:+1,03
-    range nhả 2,5×ATR, arm 2,0    +1,66      33,5
-    range nhả 3,5×ATR             +1,54      33,9
-    range nhả 2,5×ATR             +1,26      30,0
-    chỉ gãy trend thì bán         +1,21      26,8
-    range nhả 1,5×ATR             +0,70      24,0
+    xem lại mỗi 20 phiên, giữ khi còn top 16   33,0%/năm   <- luật này
+    kiểm hạng mỗi ngày                          30,6%
+    bán cứng ở phiên 40                         26,5%   <- cảnh báo "quá hạn" cũ
+    chốt lời +20% / +30% so với giá mua         25,1% / 27,7%
+    cắt lỗ −10% / −15% so với giá mua           35,4% / 32,5%
 
-**Giữ hết khung vẫn cho lợi nhuận/lệnh cao nhất, và càng chặt càng thấp** — cùng
-chiều ở khung 20 (+0,66 so với +0,43 / +0,31 / +0,07 cho băng 3,5 / 2,5 / 1,5).
-Nhưng cái giá của băng nhỏ hơn 2-3 lần con số cũ (bản lỗi: băng 1,5×ATR −1,29,
-băng 2,5×ATR +0,18 trên luật cũ). Đo như một danh mục thật (review §3.2):
-`give_back` 3,5×ATR tốn ~0,7 điểm %/năm nếu tiền bán ra đặt vào index, và giữ hết
-khung có Sharpe tốt nhất. Một luật thoát bằng mức giá, dù neo ở đỉnh thay vì ở
-giá vào, vẫn tốn tiền — chỉ ít hơn đã tưởng.
+Không biến thể nào qua ngưỡng đăng ký trước (+1 điểm/năm, Sharpe không thấp
+hơn, không tệ hơn ở ≥ 4/6 năm). Cắt lỗ −10% cao hơn nhưng tệ hơn ở 3/6 năm và
+mức −15% không giúp — không đưa vào luật. **Giá mua không quyết định bán**; nó
+được in ra để anh biết mình lời lỗ bao nhiêu.
 
-Nên module này tách bạch hai thứ, và chỉ MỘT trong hai là luật đo được:
+Cửa sổ 20-40 phiên + "quá hạn" + "nhả quá sâu" là luật của thứ tự CŨ (quá bán
+1-3 ngày, 2026-09-16). Với luật động lượng, bán cứng ở phiên 40 mất ~6,5
+điểm/năm, nên cả ba đã bỏ khỏi phần luật.
 
-  - `sell_from` / `sell_by` — **cửa sổ thời gian. ĐÂY là luật.** Giữ 20-40 phiên
-    (4-8 tuần), **mặc định tới ~40**; phiên 20 mở cửa sổ, không phải tín hiệu
-    bán. Đo lại 2026-09-24 (review §3.1): lợi nhuận danh mục tăng dốc tới ~40
-    phiên rồi đi ngang — giữ lâu hơn 40 không thêm gì đo được.
-  - `band_lo` / `band_hi` — **range tham chiếu, KHÔNG phải luật.** Nó trả lời
-    "giá đang ở đâu so với nhịp thường của chính mã này", để Tom quyết định bán
-    vào vùng nào trong cửa sổ. Thoát tự động tại `band_lo` đã được đo và **thua**
-    việc giữ hết khung.
+## Tham chiếu, không phải luật
 
-`give_back` 3,5×ATR dưới đỉnh là băng **ít tốn nhất** trong các băng neo 1×ATR
-đo được (+1,54 so với +2,23 của không-băng ở khung 40). Nó được báo như **tin về
-luận điểm**, không phải lệnh bán; nếu Tom vẫn muốn một mức cơ học thì đó là mức ít
-hại nhất — không phải mức tốt.
+`band_lo` / `band_hi` — ±1×ATR quanh đỉnh đã đạt (Tom 2026-09-16: *"phải đưa
+khuyến nghị range bán"*). Nó trả lời "giá đang ở đâu so với nhịp thường của
+chính mã này", để anh chọn giá khi bán — không trả lời "có bán không".
 """
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from config import HOLD_SESSIONS
 
-#: Cửa sổ giữ: 4 và 8 tuần — config.HOLD_SESSIONS, một định nghĩa cho cả hệ
-#: thống (Tom 2026-09-25: "chỉ sử dụng 4 tuần và 8 tuần"). Bench, bản tin, thẻ
-#: Daily Insight và backtest ngành đọc cùng một chỗ.
+#: 4 và 8 tuần — config.HOLD_SESSIONS. Nay là hai kỳ xem lại đầu tiên; kỳ sau
+#: cứ thêm REVIEW phiên.
 HOLD_MIN_SESSIONS, HOLD_MAX_SESSIONS = HOLD_SESSIONS
 
 #: Range tham chiếu: ±1 ATR quanh ĐỈNH đã đạt. Một ATR là "một nhịp thường của
-#: chính mã đó", nên vùng này đọc được ngay: dưới đáy range là đã nhả hơn một
-#: nhịp, trên đỉnh range là đang mạnh hơn một nhịp. Nó **không** là luật thoát.
+#: chính mã đó". Nó **không** là luật thoát.
 BAND_ATR = 1.0
 
-#: Mức nhả lại ít tốn nhất trong các băng ĐO ĐƯỢC — vẫn thua không dùng băng.
-GIVE_BACK_ATR = 3.5
 
-#: Lãi tối thiểu (bội ATR, tính từ giá vào) trước khi `give_back` có nghĩa.
-#: **Phải khớp bench**: biến thể "range nhả 3,5×ATR" trong
-#: `tplus_strategy_bench.py --trail` chạy với `arm_atr=1.0`, và đó là con số đã
-#: đo. Thiếu điều kiện này thì `give_back` trên một lệnh chưa từng lãi chính là
-#: một stop-loss 3,5×ATR dưới giá vào — thứ Tom đã bỏ và bench không hề kiểm.
-ARM_ATR = 1.0
+def _review() -> int:
+    from services.buy_layer import REVIEW_SESSIONS
+    return REVIEW_SESSIONS
+
+
+def _keep() -> int:
+    from services.buy_layer import KEEP_TOP
+    return KEEP_TOP
 
 
 def _atr_frac(atr_pct: float | None) -> float | None:
     """`atr_pct` đi lẫn lộn hai đơn vị trong repo — chuẩn hoá về phân số.
 
     `TickerRow.atr_pct` là phần trăm (3.13 = 3,13%); `sector_flow_daily.atr_pct`
-    là phân số (0.0313). Cùng tên, hai đơn vị — đúng thứ đã gây ra §16.15, nơi
-    bar breakout hoá ra là 1,15% thay vì 8%.
+    là phân số (0.0313). Cùng tên, hai đơn vị — đúng thứ đã gây ra §16.15.
     """
     if atr_pct is None or atr_pct <= 0:
         return None
     return atr_pct / 100.0 if atr_pct >= 0.5 else float(atr_pct)
 
 
+def schedule(opened_at: Any, today_: date | None = None) -> dict[str, Any]:
+    """Lịch xem lại của một vị thế, đếm PHIÊN kể từ ngày mua.
+
+    Kỳ k: quyết định bằng giá đóng phiên thứ 20k−1 sau ngày mua (`decide_k`),
+    bán ATO phiên thứ 20k (`review_k`) — đúng như mô phỏng: vào ở giá mở phiên
+    e, chấm hạng ở giá đóng phiên e+19, bán ở giá mở phiên e+20.
+    """
+    from utils.clock import next_trading_day, sessions_between, to_market_date, today
+
+    out: dict[str, Any] = {"sessions_held": None, "sell_from": None, "sell_by": None,
+                           "next_review": None, "following_review": None,
+                           "decide_today": False, "last_decision": None, "phase": "unknown"}
+    if not opened_at:
+        return out
+    try:
+        d0 = to_market_date(opened_at)
+    except (ValueError, TypeError):
+        return out
+    t = today_ or today()
+    R = _review()
+    held = sessions_between(d0, t)
+    out["sessions_held"] = held
+    out["sell_from"] = next_trading_day(d0, HOLD_MIN_SESSIONS).isoformat()
+    out["sell_by"] = next_trading_day(d0, HOLD_MAX_SESSIONS).isoformat()
+    # Decision closes fall at held = kR - 1 (k = 1, 2, ...).
+    k_next = max(1, -(-(held + 1) // R))          # first k with kR - 1 >= held
+    out["decide_today"] = held == k_next * R - 1
+    out["next_review"] = next_trading_day(d0, k_next * R).isoformat()
+    # the review after that: where a name kept today is looked at next
+    out["following_review"] = next_trading_day(d0, (k_next + 1) * R).isoformat()
+    k_last = held // R                            # last k with kR - 1 < held
+    if k_last >= 1:
+        out["last_decision"] = next_trading_day(d0, k_last * R - 1).isoformat()
+    out["phase"] = ("quyết định hôm nay" if out["decide_today"]
+                    else "trước kỳ xem lại đầu" if held < R - 1 else "giữa hai kỳ")
+    return out
+
+
+def verdict(sched: dict[str, Any], rank: int | None, n_ranked: int | None = None, *,
+            rank_at_last_decision: int | None = None, equivalent: bool = False) -> dict[str, Any]:
+    """GIỮ / BÁN cho một vị thế. Thuần hàm: hạng hôm nay, lịch, và hạng ở kỳ trước.
+
+    `rank_at_last_decision`: hạng ở ngày quyết định gần nhất đã qua (từ kho
+    `data/watch/`), để một kỳ bán bị lỡ không biến mất vào hôm sau.
+    `equivalent`: mã ngoài rổ — hạng là chỗ nó SẼ đứng với cùng điểm động lượng.
+    """
+    keep = _keep()
+    n = f"/{n_ranked}" if n_ranked else ""
+    tag = " (tương đương — mã ngoài rổ)" if equivalent else ""
+    if rank is None:
+        return {"verdict": "CHƯA XẾP ĐƯỢC", "when": None,
+                "why": "chưa đủ 6 tháng giá hoặc không lấy được giá — hệ thống không nói được "
+                       "giữ hay bán mã này"}
+    where = f"hạng {rank}{n}{tag}"
+    out_of = rank > keep
+    if sched.get("sessions_held") is None:
+        if out_of:
+            return {"verdict": "BÁN", "when": "ATO phiên tới",
+                    "why": f"{where}, ngoài top {keep}. Chưa có ngày mua nên không có lịch xem "
+                           "lại — xét theo hạng hôm nay"}
+        return {"verdict": "GIỮ", "when": None,
+                "why": f"{where}, trong top {keep}. Chưa có ngày mua nên chưa có lịch xem lại"}
+    nxt = sched.get("next_review")
+    if sched.get("decide_today"):
+        if out_of:
+            return {"verdict": "BÁN", "when": f"ATO {nxt}",
+                    "why": f"tới kỳ xem lại, {where} — ngoài top {keep}"}
+        return {"verdict": "GIỮ", "when": None,
+                "why": f"tới kỳ xem lại, {where} — còn trong top {keep}, giữ tới kỳ sau "
+                       f"({sched.get('following_review')})"}
+    if (out_of and rank_at_last_decision is not None and rank_at_last_decision > keep
+            and sched.get("last_decision")):
+        return {"verdict": "BÁN", "when": "ATO phiên tới",
+                "why": f"kỳ xem lại {sched['last_decision']} đã ở hạng {rank_at_last_decision} "
+                       f"(ngoài top {keep}) mà chưa bán; hôm nay {where}"}
+    if out_of:
+        return {"verdict": "GIỮ", "when": None,
+                "why": f"{where} — đang ngoài top {keep}. Chưa tới kỳ xem lại ({nxt}); tới kỳ "
+                       "mà vẫn ngoài top thì bán"}
+    return {"verdict": "GIỮ", "when": None, "why": f"{where}, trong top {keep}"}
+
+
 def advise(position: dict, path: list[dict], atr_pct: float | None,
            last: float | None) -> dict[str, Any]:
-    """Khuyến nghị bán cho một vị thế. Thuần hàm — không đọc đĩa, không gọi API.
+    """Lịch xem lại + range tham chiếu cho một vị thế. Thuần hàm — không đọc đĩa.
 
-    `path` là đường giá đóng kể từ ngày vào lệnh (`position_tracking.track`).
+    `path` là đường giá đóng kể từ ngày vào lệnh (`positions.track`). Hạng và
+    kết luận GIỮ/BÁN không ở đây: chúng cần cả universe, nên `service.build`
+    gắn chúng bằng `verdict()`.
     """
-    from utils.clock import next_trading_day, sessions_between, to_market_date
-
     out: dict[str, Any] = {
         "peak": None, "peak_basis": None, "band_lo": None, "band_hi": None,
-        "band_status": None, "give_back": None, "armed": False, "sell_from": None,
-        "sell_by": None, "sessions_held": None, "phase": "unknown", "note": "",
+        "band_status": None, **schedule(position.get("opened_at")), "note": "",
     }
-
-    entry = position.get("entry_price")
     closes = [b["close"] for b in path if b.get("close")]
-
-    # Đỉnh tính trên mọi phiên TRỪ phiên gần nhất.
-    #
-    # Bản đầu tính cả phiên hôm nay, và điều đó làm `band_hi` **không bao giờ
-    # chạm tới được**: đỉnh luôn ≥ giá hôm nay theo định nghĩa, nên "trên vùng
-    # bán" là nhánh chết và "trong vùng bán" bật cho mọi mã đang ở gần đỉnh —
-    # một trạng thái luôn đúng không nói lên điều gì.
-    #
-    # Bỏ phiên cuối ra thì cả ba trạng thái đều tới được: lập đỉnh mới hôm nay
-    # sẽ đẩy giá lên phần trên của vùng hoặc vượt hẳn.
+    # Đỉnh tính trên mọi phiên TRỪ phiên gần nhất — nếu không `band_hi` không
+    # bao giờ chạm tới được (đỉnh luôn ≥ giá hôm nay). Đỉnh là GIÁ THỊ TRƯỜNG
+    # đã đạt, không gộp giá vào lệnh.
     prior = closes[:-1] if len(closes) > 1 else closes
-    # Đỉnh là GIÁ THỊ TRƯỜNG đã đạt — KHÔNG gộp giá vào lệnh.
-    #
-    # Bản trước gộp `entry`, nên với một mã chưa từng lên trên giá vào, "đỉnh"
-    # chính là giá vào và `give_back` thành "lỗ 3,5×ATR so với giá vào": một
-    # stop-loss mặc áo range. Nó nổ thật ngày 2026-09-17 trên một vị thế đang lỗ, báo
-    # "sóng lên đã kết thúc" cho một mã chưa từng có sóng lên nào kể từ lúc mua.
     peak = max(prior) if prior else None
     out["peak"] = peak
-
-    # Cơ sở của đỉnh, nói ra chứ không im lặng — nhưng KHÔNG chặn range.
-    #
-    # Range giá là tính chất của MÃ, không phải của lệnh: đỉnh swing gần đây của
-    # một mã ở đâu thì nó ở đó, không phụ thuộc Tom mua lúc nào. Bản đầu neo range
-    # vào "đỉnh kể từ khi mua" rồi thiếu ngày thì chặn cả range — một ràng buộc
-    # thừa, và nó lấy mất đúng thứ Tom cần ("tôi cần estimate range bán thôi mà").
-    #
-    # Thứ THẬT SỰ cần ngày mua là `sell_from`/`sell_by`, vì chúng đếm phiên kể từ
-    # lúc vào lệnh và không có gì thay thế được.
+    # Range là tính chất của MÃ, không phải của lệnh: thiếu ngày mua thì neo ở
+    # đỉnh ~30 phiên gần nhất, và chỉ cần nói ra điều đó.
     out["peak_basis"] = "since_entry" if position.get("opened_at") else "recent_window"
-
     a = _atr_frac(atr_pct)
     if peak and a:
         out["band_lo"] = round(peak * (1 - BAND_ATR * a), 2)
         out["band_hi"] = round(peak * (1 + BAND_ATR * a), 2)
-        # `give_back` trả lời "sóng lên đã kết thúc chưa" — nên chỉ có nghĩa khi
-        # ĐÃ CÓ sóng lên: đỉnh phải vượt giá vào ít nhất ARM_ATR×ATR. Đúng điều
-        # kiện `run_trail()` đã đo. Chưa arm thì không có mức nào — một lệnh
-        # đang lỗ không có mức thoát giá, đó là nghĩa của "bỏ stop".
-        out["give_back"] = round(peak * (1 - GIVE_BACK_ATR * a), 2)
-        # ...và chỉ khi đỉnh đó là đỉnh KỂ TỪ LÚC MUA. Thiếu ngày mua thì `peak`
-        # là đỉnh ~30 phiên gần nhất, có thể có TRƯỚC lúc Tom vào lệnh — so nó
-        # với giá vào là hỏi "sóng lên đã kết thúc chưa" về một con sóng Tom
-        # không có mặt. Bản tin 2026-09-23 báo đúng như thế ("NHẢ QUÁ SÂU") cho
-        # một vị thế không có ngày mua, đỉnh cao hơn giá vào ~11% (review
-        # 2026-09-24 §3.2). Range vẫn tính được; chỉ tin "nhả quá sâu" là không.
-        out["armed"] = (bool(entry) and out["peak_basis"] == "since_entry"
-                        and peak >= entry * (1 + ARM_ATR * a))
         if last:
             out["band_status"] = ("trên vùng bán" if last > out["band_hi"]
                                   else "trong vùng bán" if last >= out["band_lo"]
                                   else "dưới vùng bán")
-
-    opened = position.get("opened_at")
-    if opened:
-        try:
-            d0 = to_market_date(opened)
-            held = sessions_between(d0)
-            out["sessions_held"] = held
-            out["sell_from"] = next_trading_day(d0, HOLD_MIN_SESSIONS).isoformat()
-            out["sell_by"] = next_trading_day(d0, HOLD_MAX_SESSIONS).isoformat()
-            if held < HOLD_MIN_SESSIONS:
-                out["phase"] = "giữ"
-                out["note"] = (f"còn {HOLD_MIN_SESSIONS - held} phiên nữa mới tới "
-                               "cửa sổ bán. Luật đo được là giữ hết khung.")
-            elif held <= HOLD_MAX_SESSIONS:
-                out["phase"] = "trong cửa sổ bán"
-                out["note"] = (f"đang trong cửa sổ {HOLD_MIN_SESSIONS}-"
-                               f"{HOLD_MAX_SESSIONS} phiên, còn "
-                               f"{HOLD_MAX_SESSIONS - held} phiên tới hạn. Mặc định "
-                               f"giữ tiếp tới ~{HOLD_MAX_SESSIONS} phiên — cửa sổ mở "
-                               "không phải tín hiệu bán. Khi bán, đặt lệnh ở phiên ATO.")
-            else:
-                out["phase"] = "quá hạn"
-                out["note"] = (f"đã giữ {held} phiên, quá khung {HOLD_MAX_SESSIONS}. "
-                               "Giữ lâu hơn không thêm gì đo được — bán ở phiên ATO.")
-        except (ValueError, TypeError):
-            pass
-
-    if out["peak_basis"] != "since_entry":
-        out["note"] = ("chưa biết ngày mua nên KHÔNG có cửa sổ bán, và không xác "
-                       "định được đã có sóng lên sau khi mua hay chưa — nên cũng "
-                       "không báo \"nhả quá sâu\". Range giá vẫn dùng được: nó neo ở "
-                       "đỉnh ~30 phiên gần nhất, tức đỉnh của thị trường chứ không "
-                       "phải đỉnh kể từ lúc anh vào lệnh. Một ngày mua ƯỚC LƯỢNG là "
-                       "đủ — cửa sổ rộng 20 phiên nên lệch vài ngày gần như không "
-                       "đổi gì.")
-
-    if out["armed"] and last and out["give_back"] and last <= out["give_back"]:
-        out["note"] += (f"  Giá đã nhả quá {GIVE_BACK_ATR}×ATR từ đỉnh "
-                        f"({peak:,.2f}) — sóng lên nhiều khả năng đã kết thúc.")
+    if out["sessions_held"] is None:
+        out["note"] = ("chưa có ngày mua nên chưa có lịch xem lại. Một ngày ƯỚC LƯỢNG là đủ — "
+                       "lệch vài phiên gần như không đổi gì.")
     return out
 
 

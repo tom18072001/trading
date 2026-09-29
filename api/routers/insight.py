@@ -228,6 +228,9 @@ def insight_daily():
             "rule_sentence": buy_layer.rule_sentence(),
             "market_sentence": buy_layer.market_sentence(getattr(snapshot, "market", None)),
             "book_sentence": buy_layer.book_sentence(),
+            # 2026-09-29: how to read the priority, and the per-position sell rule.
+            "priority_sentence": buy_layer.priority_sentence(),
+            "sell_rule_sentence": buy_layer.sell_rule_sentence(),
         },
     }
 

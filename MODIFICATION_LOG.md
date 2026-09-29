@@ -14,6 +14,51 @@
 
 ---
 
+## 2026-09-29 (3) — luật cho cách Tom giao dịch: ưu tiên mua, bán theo từng vị thế, sổ
+- Author: Claude (Cowork) on behalf of Tom
+- Files:
+  - `services/buy_layer.py`: `momentum_history`, `top_runs`, `priority`, `prioritise`,
+    `equivalent_rank`, `rank_edge`, `RANK_EDGE`, `PRIORITY_EDGE`, `EXIT_STUDY`,
+    `priority_sentence`, `sell_rule_sentence`
+  - `services/picks_universe_service.py`: `TickerRow.momentum_hist`,
+    `PickEntry.top8_run/priority`; `_select_top` xếp A trước B
+  - `daily_watch/sell_range.py` (viết lại quanh `schedule` + `verdict`),
+    `daily_watch/positions.py` (`alerts` theo kết luận), `daily_watch/service.py` (hạng mã
+    đang giữ, kể cả ngoài rổ; kết luận; bản tin mục 1-3, 5), `daily_watch/holdings.py`
+    (lưu `momentum`), `daily_watch/book.py` (mới)
+  - `services/trading_state.py`: `record_buy`, `close_position(qty=…)`, `_realise`, `lots`
+  - `api/routers/state.py` (`POST /positions/{mã}/buy`, `qty` khi đóng),
+    `api/routers/insight.py`, `generate_report.py`, `main.py`
+  - `frontend/src/api/client.ts`, `components/KillSwitch.tsx`, `pages/DailyInsightPage.tsx`
+  - Tài liệu: `docs/reviews/WORKFLOW_STUDY_2026-09-29.md` + `docs/reviews/workflow_study_2026-09-29/`,
+    `CLAUDE.md` §28.1 và §19, `docs/reference/ALGORITHM.md` §8, `daily_watch/README.md`,
+    `docs/PATCHES.md`
+  - Test: `tests/test_book_workflow.py` (mới, 18), `tests/test_sell_range.py` (viết lại),
+    `tests/test_shortlist_rule.py`, `tests/test_buy_layer.py`
+- Reason: Tom, 29/09: *"luật chơi của tôi: bạn khuyến nghị mã nào nên mua hằng ngày (có các
+  priority) · tôi báo bạn mua con nào giá thế nào · khi bán tôi báo · bạn cập nhật những con
+  tôi đang hold và đề xuất dựa vào giá mua, có nên bán hay không"* và *"dựa vào yếu tố này có
+  giúp bạn cải thiện luật toán cho phù hợp với strategy của tôi không"*.
+- Summary:
+  - 11 biến thể, đăng ký trước, DEV rồi holdout.
+  - **Ưu tiên mua:** P3 là giả thuyết duy nhất qua ngưỡng. Mã đã ở top 8 > 10 phiên hơn mã
+    mới vào +1,6% / +2,0% mỗi pick ở 4/8 tuần; holdout cùng chiều. Đưa vào như thứ tự A/B
+    trong tập top 8. Hiệu ứng nhỏ; 2025 ngược chiều.
+  - **Bán:** giữ luật "xem lại mỗi 20 phiên, bán nếu ngoài top 16", nhưng chạy theo đồng hồ
+    của từng vị thế.
+    - Không biến thể nào qua ngưỡng: kiểm hạng mỗi ngày 30,6%/năm, bán cứng ở phiên 40
+      26,5%, chốt lời +20% 25,1%, cắt lỗ −10% 35,4% nhưng tệ hơn ở 3/6 năm; V0 là 33,0%.
+    - Cảnh báo "quá hạn" (bán cứng ở phiên 40) đang in hằng ngày là một luật mất 6,5
+      điểm/năm → đã bỏ.
+  - **Mọi mã đang giữ có kết luận:** mã ngoài rổ có hạng tương đương; mã chưa có ngày mua
+    xét theo hạng hôm nay; kỳ bán bị lỡ đọc lại từ kho.
+  - **Sổ:** mua thêm cùng mã trước đây ghi đè giá vốn; nay tính bình quân. Thêm bán một phần.
+- Follow-ups:
+  - Xin Tom ngày mua (ước lượng) của các mã đang giữ.
+  - Snapshot và holdings cache có `momentum_hist`/`momentum` từ lần build 17:00/17:30 đầu
+    tiên sau khi deploy.
+  - Cắt lỗ −10%: đo lại khi có thêm dữ liệu.
+
 ## 2026-09-29 (2) — đính chính một ô trong bảng §9 của study
 - Author: Claude (Cowork) on behalf of Tom
 - Files: `docs/reviews/STRATEGY_STUDY_2026-09-28.md` §9.

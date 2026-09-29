@@ -103,6 +103,11 @@ def refresh(symbols: list[str], sectors: dict[str, str] | None = None) -> dict[s
             "as_of": str(row.daily_prices[-1].get("time", end))[:10]
             if row.daily_prices else end,
             "partial": False,
+            # 2026-09-29: the same momentum score the basket is ranked on, so a
+            # holding outside the basket still gets a place in the order -- and
+            # with it a keep / sell verdict (buy_layer.equivalent_rank).
+            "momentum": row.momentum,
+            "mom_6m": row.mom_6m,
         }
 
     out = {"refreshed_at": datetime.now().isoformat(timespec="seconds"),
