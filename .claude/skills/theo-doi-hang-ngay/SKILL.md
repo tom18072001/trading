@@ -1,6 +1,6 @@
 ---
 name: theo-doi-hang-ngay
-description: Ba việc — báo cáo sổ, đề xuất mua, đề xuất bán. Chạy bản theo dõi hằng ngày cho sổ cổ phiếu của Tom và tóm tắt lại; khuyến nghị bán (cửa sổ 20-40 phiên + range giá trượt lên) cho các mã đang nắm, danh sách ứng viên mới, và ghi nhận khi Tom mua hoặc bán. Dùng khi Tom hỏi "hôm nay thế nào", "nên bán mã nào chưa", "quét cho tôi", "tôi vừa mua X", "tôi đã bán X", hoặc khi cần đọc lại kết quả của scheduled task daily_watch. Không dùng stop-loss — đã bỏ có chủ ý kèm phép đo.
+description: Ba việc — báo cáo sổ, đề xuất mua (có thứ tự ưu tiên), đề xuất bán. Chạy bản theo dõi hằng ngày cho sổ cổ phiếu của Tom và tóm tắt lại; kết luận GIỮ / BÁN cho từng mã đang nắm (xem lại mỗi 20 phiên từ ngày mua, bán nếu ngoài top 16), danh sách mua theo ưu tiên A/B, và ghi đúng khi Tom báo mua hoặc bán (mua thêm = giá vốn bình quân, bán một phần). Dùng khi Tom hỏi "hôm nay thế nào", "nên bán mã nào chưa", "quét cho tôi", "tôi vừa mua X giá Y", "tôi đã bán X", hoặc khi cần đọc lại kết quả của scheduled task daily_watch. Không dùng stop-loss hay chốt lời theo giá mua — đã đo, thua.
 ---
 
 # Theo dõi hằng ngày
@@ -10,8 +10,13 @@ description: Ba việc — báo cáo sổ, đề xuất mua, đề xuất bán. 
 | # | việc | nguồn |
 |---|---|---|
 | 1 | **Báo cáo** — sổ hôm nay ra sao | mục 2 bản tin |
-| 2 | **Đề xuất mua** — mã nào đáng xem | mục 3 bản tin (`shortlist`) |
-| 3 | **Đề xuất bán** — mã đang nắm, bán khi nào | `sell_range` từng vị thế |
+| 2 | **Đề xuất mua** — mã nào, mua mã nào trước | mục 3 bản tin (`shortlist`, cột ưu tiên A/B) |
+| 3 | **Đề xuất bán** — GIỮ hay BÁN từng mã đang nắm | mục 1-2 bản tin (`verdict` từng vị thế) |
+
+**Luật chơi của Tom (2026-09-29):** *"bạn khuyến nghị mã nào nên mua hằng ngày (có các
+priority) · tôi báo bạn mua con nào giá thế nào · khi tôi bán tôi báo · bạn cập nhật
+những con tôi đang hold và đề xuất có nên bán hay không"*. Mỗi lần Tom báo mua/bán:
+ghi ngay (mục 4-5), rồi trả lời bằng kết luận mới của cả sổ.
 
 Mọi thứ khác — giải thích thuật toán, bàn về chi phí, đo một ý tưởng mới — là
 việc của tài liệu và của bench, không phải của bản tin hằng ngày.
@@ -25,8 +30,10 @@ chạy lần nào cũng ra cùng một số. Đọc `daily_watch/README.md` trư
 |---|---|
 | `daily_watch/service.py` | dựng bản tin: sổ + cảnh báo + ứng viên |
 | `daily_watch/positions.py` | chấm sổ theo giá gần nhất, đường giá từ ngày vào lệnh |
-| `daily_watch/sell_range.py` | **bán lúc nào** — cửa sổ thời gian (luật) + range giá (tham chiếu) |
- Đừng viết lại phép tính nào ở đây: một phân tích được sinh lại mỗi lần
+| `daily_watch/sell_range.py` | **bán lúc nào** — lịch xem lại + kết luận GIỮ/BÁN (luật) + range giá (tham chiếu) |
+| `daily_watch/book.py` | **ghi đúng điều Tom báo** — mua (giá vốn bình quân), bán (cả / một phần), ngày mua |
+
+Đừng viết lại phép tính nào ở đây: một phân tích được sinh lại mỗi lần
 chạy là một phân tích khác nhau mỗi lần chạy, và hai kết quả không so được với
 nhau. Nếu công thức cần đổi thì sửa module, không sửa prompt.
 
@@ -53,10 +60,13 @@ Kho **tự chấm được**: mỗi bản lưu ghi cả khuyến nghị lẫn `m
 mã nó nhắc tới), nên N bản lưu tự cho một chuỗi giá.
 
 ```bash
-uv run python daily_watch/audit.py --hold 20
+uv run python daily_watch/audit.py --hold 20    # hoặc --hold 40
 ```
 
-Khi Tom hỏi *"khuyến nghị trước đây thế nào"*, chạy lệnh này — **đừng tự nhớ và
+Nó chấm cùng lúc luật đang chạy (động lượng, từ 29/09), luật cổng SMA200
+trước nó (`shortlist_previous_rule`, ghi vào kho mỗi ngày từ 29/09), luật có
+ngưỡng 2,5 (`shortlist_with_cutoff`, 25-28/09) và base NO GATE — phép đo ngoài
+mẫu cho cả hai lần đổi luật. Khi Tom hỏi *"khuyến nghị trước đây thế nào"*, chạy lệnh này — **đừng tự nhớ và
 đừng tự tính lại**. Nếu nó nói chưa đủ dữ liệu thì trả lời đúng như thế; một con
 số dựng từ 2 bản lưu là nhiễu, không phải câu trả lời (§26.8).
 
@@ -65,61 +75,78 @@ Kho **gitignore** vì nó chứa sổ của Tom và repo này public.
 ## 2. Tóm tắt cho Tom
 
 Đọc `report/watch_<ngày>.md` rồi tóm tắt **theo đúng thứ tự này**, vì nó là thứ
-tự khẩn cấp:
+tự khẩn cấp. Từ 29/09 bản tin không còn mục "Quá hạn", "Nhả quá sâu", "Trong cửa sổ
+bán" — nơi nào còn nhắc thứ tự cũ đó thì dùng thứ tự dưới đây:
 
-1. **Quá hạn** — đã giữ quá 40 phiên. Ngoài khung đó không factor nào sống sót
-   phép đo, nên đây là mục khẩn nhất.
-2. **Nhả quá sâu** — giá đã rơi hơn 3,5×ATR từ đỉnh. Đây là tin về *luận điểm*
-   ("sóng lên đã kết thúc"), **không phải lệnh bán cơ học**. Nó **chỉ** bật khi
-   lệnh đã từng lãi ≥ 1×ATR — một mã đang lỗ mà chưa từng lãi sẽ **không** có
-   cảnh báo này, và đó là đúng: không có sóng lên nào để kết thúc, và báo động
-   ở đó chính là stop-loss Tom đã bỏ. Nếu Tom hỏi vì sao một mã lỗ sâu mà không có
-   cảnh báo: trả lời bằng đúng câu này.
-3. **Trong cửa sổ bán** — đã qua 20 phiên, chưa tới 40. Nêu range tham chiếu.
-4. **Sổ** — một dòng: mấy vị thế, tổng P&L.
-5. **Các ngày tới** — mốc nào sắp tới (mở cửa sổ bán / hết khung) và ngày của nó.
-6. **Ứng viên** — tối đa 5 mã, kèm giá/điểm.
+1. **Việc cần làm hôm nay** (mục 1 bản tin) — mã có kết luận **BÁN** (kèm lý do:
+   tới kỳ xem lại mà ngoài top 16, hoặc chưa có ngày mua và ngoài top 16), và mã
+   **CHƯA XẾP ĐƯỢC** (thiếu giá / thiếu 6 tháng lịch sử).
+2. **Sổ** (mục 2) — mỗi mã một dòng: giá vốn, giá gần nhất, lãi/lỗ, hạng, **GIỮ/BÁN**,
+   kỳ xem lại tới. Một dòng tổng.
+3. **Mua gì** (mục 3) — danh sách theo **ưu tiên**: A (đã ở top 8 ≥ 11 phiên, xu hướng
+   bền) trước B (mới vào), trong mỗi nhóm theo hạng; mỗi mã kèm **vùng mua** và **kỳ
+   vọng 4 / 8 tuần**. Nói **mua thêm tối đa bao nhiêu mã** (8 trừ số mã đang GIỮ). Kỳ
+   vọng là phân phối đo được, không phải dự báo; nếu VNINDEX dưới trung bình 200 phiên
+   thì nhắc câu bối cảnh thị trường của bản tin.
+4. **Các ngày tới** — kỳ xem lại gần nhất của từng mã và ngày của nó.
 
-Nếu không có cảnh báo nào thì nói thẳng "không có gì cần làm hôm nay" ở câu đầu
+Nếu không có mã nào cần bán thì nói thẳng "không có gì cần bán hôm nay" ở câu đầu
 thay vì bắt Tom đọc hết bảng mới biết.
 
-### Không còn stop-loss (2026-09-16)
+### Luật bán (2026-09-29) — đồng hồ của từng vị thế
 
-Tom bỏ stop và thay bằng khuyến nghị bán. Đo trên 3.446 lệnh: **giữ hết khung
-thắng mọi hình học thoát bằng mức giá, và càng chặt càng tệ, đơn điệu** — kể cả
-băng neo ở đỉnh. Nên khi tóm tắt:
+Đo trong `docs/reviews/WORKFLOW_STUDY_2026-09-29.md`, 7 biến thể đăng ký trước:
 
-- **Luật là CỬA SỔ THỜI GIAN** (`sell_from` → `sell_by`, 20-40 phiên). Nói nó ra
-  như một luật.
-- **Range giá là THAM CHIẾU.** Không bao giờ viết "bán ở 52.40" như một lệnh.
-  Nói "range tham chiếu 48.00–52.40" và để Tom quyết.
-- Nếu Tom hỏi có nên đặt stop không: trả lời bằng bảng đo, đừng tự đặt lại.
+- **Mỗi mã có đồng hồ riêng từ ngày Tom mua**: xem lại ở phiên 20, 40, 60… Tới kỳ
+  mà mã **ngoài top 16** thì **bán ATO phiên kế**; còn trong top 16 thì giữ tới kỳ
+  sau, **không giới hạn** số phiên. Giữa hai kỳ thì giữ, kể cả khi hạng tụt.
+- **Giá mua KHÔNG quyết định bán.** Chốt lời +20% / +30% mất 8 / 5 điểm/năm; bán
+  cứng ở phiên 40 mất 6,5; cắt lỗ −10% không ổn định (tệ hơn ở 3/6 năm), −15% không
+  giúp. Lãi/lỗ so với giá mua được in ra để Tom biết, không phải để quyết.
+- Mã **chưa có ngày mua** xét theo hạng hôm nay. Xin Tom ngày mua — ước lượng là đủ.
+- Mã **ngoài rổ** có **hạng tương đương** (cùng điểm động lượng) — nói rõ chữ "tương
+  đương" khi nhắc.
+- **Range giá là THAM CHIẾU** để chọn giá bán, không phải luật. Không bao giờ viết
+  "bán ở 52.40" như một lệnh.
+- Cảnh báo "quá hạn", "trong cửa sổ bán", "nhả quá sâu" **đã bỏ** — chúng là luật của
+  thứ tự cũ (quá bán 1-3 ngày). Nếu thấy chúng trong một bản tin cũ, đừng dùng.
+- Nếu Tom hỏi có nên đặt stop hay chốt lời không: trả lời bằng bảng đo, đừng tự đặt.
 
 ### Ba câu phải giữ, không được bỏ khi tóm tắt
 
-- **Danh sách ứng viên là shortlist, không phải lệnh mua.** Chưa luật xếp hạng
-  nào thắng VNINDEX risk-adjusted (§26.9).
-- **Khung giữ 20-40 phiên.** Không phải T+3. Dưới 20 và trên 40 phiên thì không
-  factor nào sống sót phép đo.
-- **Danh sách rỗng là câu trả lời, không phải lỗi** — nó rỗng khi cả bảng đang
-  quá mua (§26.4).
+- **Luật mua từ 2026-09-28 là động lượng** (CLAUDE.md §28): lãi 6 tháng chia biến
+  động, top 8 chia đều. Số lịch sử 2019-07 → 2026-09 là 31%/năm (VNINDEX 8,9%) nhưng
+  **lạc quan** (rổ chọn năm 2026, chọn trong 394 biến thể), năm 2022 −31%; kỳ vọng
+  trung thực là **VNINDEX + khoảng 10 điểm %/năm, dao động lớn**. Không bao giờ hứa
+  20-30%/năm như chắc chắn.
+- **Xem lại ở phiên 20, 40, 60… tính từ ngày mua của từng mã**: mã còn trong **top 16**
+  động lượng thì giữ tiếp, rơi khỏi top 16 thì bán ATO phiên kế. Hạng là thứ quyết
+  định, không phải lãi/lỗ. Mua ATO phiên sau, trong vùng mua. Không có chế độ T+.
+- **Thứ tự ưu tiên A/B là thứ tự, không phải lời hứa**: A hơn B khoảng 1,6-2,0 điểm %
+  mỗi 4-8 tuần trong lịch sử, không năm nào cũng đúng. Tỷ lệ lãi của một mã lẻ ~55% —
+  cầm vài mã an toàn hơn dồn vào một mã.
+- **Danh sách không rỗng vào ngày thường** — nó xếp mọi mã đủ 6 tháng giá. Nếu rỗng
+  thì là lỗi dữ liệu (snapshot), không phải tín hiệu thị trường.
+- **Tín hiệu ngành, nhãn regime và stealth là "chưa kiểm chứng"** (không có edge
+  ngoài mẫu — `analysis/verification.py`). Bản tin không dựa vào chúng; nếu Tom
+  hỏi thì nói đúng như thế, đừng dùng chúng để tăng/giảm tỷ trọng.
 
 ## 3. Khi Tom hỏi "nên bán lúc nào"
 
-Trả lời bằng **ba con số theo đúng thứ tự này**, lấy từ `sell_range` của vị thế:
+Trả lời bằng **ba thứ theo đúng thứ tự này**, lấy từ bản tin (`verdict`, `next_check`,
+`sell_range` của vị thế) hoặc `python -m daily_watch.book show`:
 
-1. **Cửa sổ bán** `sell_from → sell_by`. Đây là luật. Nếu chưa tới, nói còn mấy
-   phiên nữa và nói thẳng *"luật đo được là giữ hết khung"*. **Thiếu ngày mua thì
-   không có cửa sổ** — nói ra, và nói rằng một ngày **ước lượng là đủ** (cửa sổ
-   rộng 20 phiên, lệch vài ngày gần như không đổi gì).
-2. **Range tham chiếu** `band_lo – band_hi` kèm `band_status` (trên / trong /
-   dưới vùng bán). Nói rõ đây là tham chiếu. **Range KHÔNG cần ngày mua** — nó
-   neo ở đỉnh swing gần đây, là tính chất của *mã* chứ không phải của lệnh; khi
-   thiếu ngày mua, `peak_basis` là `recent_window` và chỉ cần nói ra điều đó.
-3. **Mức nhả quá sâu** `give_back`. Chỉ nhắc khi giá đang gần hoặc đã dưới nó.
+1. **Kết luận** GIỮ / BÁN và **lý do** (hạng hôm nay, tới kỳ xem lại chưa). Đây là luật.
+2. **Kỳ xem lại tới** và còn mấy phiên. **Thiếu ngày mua thì không có lịch** — kết luận
+   xét theo hạng hôm nay; xin ngày mua, ước lượng là đủ.
+3. **Range tham chiếu** `band_lo – band_hi` kèm `band_status` — để chọn giá khi bán,
+   nói rõ là tham chiếu.
+
+Nếu Tom hỏi "đang lãi X% có nên chốt không" / "lỗ Y% có nên cắt không": giá mua không
+quyết định bán — dẫn bảng đo (chốt lời mất 5-8 điểm/năm; cắt lỗ không ổn định).
 
 Ba điều không được làm khi trả lời câu này:
-- **Không nói "bán ở X"** như một lệnh. Range là vùng, cửa sổ là luật.
+- **Không nói "bán ở X"** như một lệnh. Range là vùng, kỳ xem lại + hạng là luật.
 - **Không tự đặt lại stop**, kể cả khi lệnh đang lãi to và nghe có vẻ hợp lý.
   Nó bị bỏ có chủ ý, có bảng đo đứng sau — dẫn bảng đó ra.
 - **Không quên nói mình không phải nhà tư vấn có giấy phép.** Đây là output hệ
@@ -151,8 +178,8 @@ Mục 4 của bản tin (`projection` trong JSON) có sẵn lịch và biên đ�
 "để dễ tham chiếu", nên hãy dùng — nhưng giữ đúng ranh giới:
 
 **Được nói:**
-- **Lịch.** "Cửa sổ bán mở sau 4 phiên, ngày 22/09; hết khung 20/10." Đây là
-  phép đếm, chắc chắn đúng.
+- **Lịch.** "Kỳ xem lại tới của XYZ sau 4 phiên, ngày 22/10." Đây là phép đếm,
+  chắc chắn đúng.
 - **Biên độ.** "Trong 5 phiên tới XYZ thường dao động trong 46,5 – 53,5 (±7%)."
   Đây là ATR của chính mã đó giãn theo căn số phiên.
 - **Cái gì sẽ đổi khi giá đi.** "Range bán tự dịch lên nếu XYZ lập đỉnh mới."
@@ -171,19 +198,27 @@ dự báo hướng và nói tại sao — rồi đưa lịch + biên độ, là 
 
 ## 4. Khi Tom nói đã mua
 
+Cần **mã, giá, khối lượng**, và **ngày** nếu không phải hôm nay. Thiếu khối lượng thì
+hỏi lại — không đoán.
+
 ```bash
-curl -s -X POST localhost:8000/api/state/positions \
-  -H "Content-Type: application/json" \
-  -d '{"symbol":"VIC","entry_price":241.3,"qty":1000}'
+uv run python -m daily_watch.book buy VIC 45.2 1000               # mua hôm nay
+uv run python -m daily_watch.book buy VIC 45200 1000 --date 2026-09-25
 ```
 
-**Đừng điền `stop`.** Bỏ từ 2026-09-16 — xem trên. Cảnh báo chạy theo cửa sổ
-thời gian, và nó cần `opened_at` (tự đóng dấu) chứ không cần mức giá nào.
+- Giá theo **nghìn đồng** (45.2); số ≥ 1.000 được hiểu là đồng (45200 → 45.2). Dòng in
+  ra luôn nói nó đã hiểu giá thế nào — đọc lại cho Tom.
+- **Mua thêm một mã đang giữ thì CỘNG vào**: giá vốn bình quân theo khối lượng, ngày
+  mua giữ là ngày lần đầu (đồng hồ xem lại của vị thế).
+- **Đừng dùng** `POST /api/state/positions` hay `trading_state.add_position` cho việc
+  này: đó là nút đánh dấu idempotent của Daily Insight, nó **ghi đè** giá và khối
+  lượng cũ.
+- Lệnh tự in kết luận mới của cả sổ — trả lời Tom bằng đúng phần đó.
 
-Nếu backend không chạy, gọi thẳng module:
+Tom báo ngày mua cho một mã đã có trong sổ:
 
 ```bash
-uv run python -c "from services import trading_state; print(trading_state.add_position('VIC', entry_price=241.3))"
+uv run python -m daily_watch.book date VIC 2026-09-15
 ```
 
 ## 5. Khi Tom nói đã bán
@@ -191,32 +226,37 @@ uv run python -c "from services import trading_state; print(trading_state.add_po
 Vị thế **không tự đóng** — nó được theo dõi cho tới khi Tom nói đã bán.
 
 ```bash
-curl -s -X POST localhost:8000/api/state/positions/VIC/close \
-  -H "Content-Type: application/json" -d '{"exit_price":260.0}'
+uv run python -m daily_watch.book sell VIC 48.5          # bán hết
+uv run python -m daily_watch.book sell VIC 48.5 400      # bán 400 cp, phần còn lại giữ nguyên giá vốn và ngày mua
 ```
 
-`close` ≠ `DELETE`. Close ghi lại lệnh đã đóng kèm P&L thật; DELETE xoá sạch và
-chỉ dùng khi Tom bấm nhầm.
+Bán ≠ xoá. Bán ghi lại lệnh đã đóng kèm lãi/lỗ thật (theo giá vốn bình quân); xoá
+(`DELETE /api/state/positions/{mã}`) chỉ dùng khi Tom bấm nhầm. Hỏi cho rõ nếu không
+chắc Tom muốn cái nào — sai hướng này thì mất luôn lịch sử lãi/lỗ.
+
+Xem lại cả sổ bất cứ lúc nào: `uv run python -m daily_watch.book show`.
 
 > P&L realised trừ **0,40%/vòng** (phí + thuế bán), **không** trừ slippage — nên
 > nó lạc quan hơn con số 1,00%/vòng mà bench dùng (§26.6). Khi báo P&L đã đóng,
-> đừng trình bày nó như đã net đủ chi phí. Hỏi cho rõ nếu
-không chắc Tom muốn cái nào — sai hướng này thì mất luôn lịch sử lãi/lỗ.
+> đừng trình bày nó như đã net đủ chi phí.
 
 ## 6. Không làm gì trong số này
 
 - **Không tự đặt lệnh, không tự mua bán.** Skill chỉ ghi lại việc Tom đã làm.
-- **Không sửa điểm, ngưỡng hay công thức** để danh sách dài ra. `MIN_BUY_SCORE`
-  là phân vị đo được, không phải nút vặn.
+- **Không sửa công thức, ngưỡng hay bảng số** để danh sách đẹp hơn. Luật mua là
+  `picks_universe_service.long_shortlist` (động lượng, `services/buy_layer.py`) —
+  một luật cho bản tin, Daily Insight và email. Luật cũ (cổng SMA200 → blend) chỉ
+  còn là bóng `legacy_shortlist` để audit. Bảng vùng mua / kỳ vọng chỉ được thay
+  bằng cách chạy lại `docs/reviews/strategy_study_2026-09-28/layer.py`.
 - **Không gửi email.** Tom chưa muốn (2026-09-16); task chỉ ghi file.
 - **Không tự dựng lại stop.** Nó bị bỏ có chủ ý, có phép đo đứng sau.
 - **Không xoá hay sửa file trong `data/watch/`.** Nó là bằng chứng cho phần
   audit sau này; một bản lưu bị sửa là một bản lưu không dùng được.
-- **Không viết lại công thức range bán.** Nó ở `daily_watch/sell_range.py`; đổi ý
-  nghĩa thì sửa module rồi đo lại bằng `tplus_strategy_bench.py --trail`.
-- **Không trích cạnh trên của range như số đã kiểm chứng.** `band_hi` = +1×ATR
-  trên đỉnh là chọn cho dễ đọc, không đo được. Cạnh dưới và cửa sổ thời gian thì
-  có bằng chứng; cạnh trên thì không.
+- **Không viết lại luật bán hay công thức range.** Chúng ở `daily_watch/sell_range.py`;
+  đổi luật thì sửa module rồi đo lại bằng
+  `docs/reviews/workflow_study_2026-09-29/exits.py dev`.
+- **Không trích range như số đã kiểm chứng.** ±1×ATR quanh đỉnh là chọn cho dễ đọc;
+  thứ có bằng chứng là lịch xem lại và hạng.
 
 ## 7. Khi cần đo một thuật toán mới
 

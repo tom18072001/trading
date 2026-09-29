@@ -14,6 +14,19 @@
 
 ---
 
+## 2026-09-29 (4) — skill `theo-doi-hang-ngay` vào repo, theo luật mới
+- Author: Claude (Cowork) on behalf of Tom
+- Files: `.claude/skills/theo-doi-hang-ngay/SKILL.md`.
+- Reason: Tom, 29/09: *"cập nhật vào skill và schedule và code"*. Bản trên máy đã được sửa qua
+  nhiều phiên nhưng chưa commit, nên repo vẫn mang skill của luật cũ.
+- Summary:
+  - Skill theo luật 29/09: kết luận GIỮ/BÁN theo đồng hồ của từng vị thế; ưu tiên A/B;
+    ghi mua/bán bằng `python -m daily_watch.book`. Mua thêm tính giá vốn bình quân, không
+    dùng `add_position` vì nó ghi đè.
+  - Bỏ "quá hạn", "trong cửa sổ bán", "nhả quá sâu" khỏi phần tóm tắt.
+  - Các sửa chưa commit của những phiên trước (review 25/09, luật động lượng 28/09) đi cùng
+    commit này.
+
 ## 2026-09-29 (3) — luật cho cách Tom giao dịch: ưu tiên mua, bán theo từng vị thế, sổ
 - Author: Claude (Cowork) on behalf of Tom
 - Files:
